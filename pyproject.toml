@@ -1,0 +1,7 @@
+[build-system]
+requires = ["setuptools>=70.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+Home = "https://www.mobilint.com/"
+Repository  = "https://github.com/mobilint/mblt-vision-python"
