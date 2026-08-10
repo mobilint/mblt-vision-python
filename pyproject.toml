@@ -42,6 +42,9 @@ classifiers = [
 Home = "https://www.mobilint.com/"
 Repository = "https://github.com/mobilint/mblt-vision-python"
 
+[project.scripts]
+mblt-vision = "mblt_vision.cli:main"
+
 [project.optional-dependencies]
 onnxruntime = [
     "onnx",

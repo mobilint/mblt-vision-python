@@ -60,7 +60,20 @@ code should use the task subpackages (for example,
 
 Vision is now maintained in this package. `mblt-model-zoo` retains
 `mblt_model_zoo.vision` as a compatibility facade for existing applications; new
-projects should import from `mblt_vision` directly.
+projects should import from `mblt_vision` directly. Its `mblt-model-zoo predict`,
+`val`, and `compile` commands also delegate to this package.
+
+## Command line
+
+The standalone package provides the `mblt-vision` command with `predict`, `val`,
+and `compile` subcommands:
+
+```bash
+mblt-vision predict --source image.jpg --model resnet50
+```
+
+The corresponding `mblt-model-zoo` commands use the same standalone handlers for
+backward compatibility.
 
 ## Documentation and tests
 

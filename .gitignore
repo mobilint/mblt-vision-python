@@ -41,3 +41,7 @@ compile_commands.json
 *.swo
 .DS_Store
 Thumbs.db
+
+*.zip
+*.tar.gz
+*.egg
