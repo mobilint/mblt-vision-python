@@ -9,17 +9,17 @@ paths:
 ## Mission
 
 `mblt-vision-python` is the Python distribution and public compatibility layer for Mobilint
-Vision. It binds to the supported native API in `mblt-vision`; it is not a second implementation
-of the vision runtime. Its end-state is a drop-in replacement for the Vision API currently shipped
-by `mblt-model-zoo`.
+Vision. The immediate plan is a pure-Python implementation that can replace the Vision API
+currently shipped by `mblt-model-zoo`. C++ bindings are deferred until `mblt-vision` has a stable,
+supported native API.
 
-The ownership boundary is deliberate:
+The current ownership boundary is deliberate:
 
-- `mblt-vision` owns inference, model loading, preprocessing, postprocessing, and native resource
-  management.
-- This package owns Python ergonomics, Python object conversion, package metadata, wheels, API
-  documentation, and compatibility shims.
-- Do not put GStreamer integration, C++ runtime logic, or duplicated numerical kernels in Python.
+- This package owns the public Python API, model loading, preprocessing, postprocessing, runtime
+  integration, package metadata, wheels, documentation, and compatibility shims.
+- Keep implementation code in Python; do not block Python API progress on C++ or GStreamer work.
+- Design internal seams so a future optional `mblt-vision` backend can replace implementation
+  details without changing the documented Python API or result contracts.
 
 ## Before Editing
 
@@ -29,8 +29,9 @@ The ownership boundary is deliberate:
 - For a Model Zoo replacement item, inspect the matching behavior in
   `../mblt-model-zoo/mblt_model_zoo/vision`, including its tests and model YAML configuration.
   Treat it as the compatibility reference until the new package explicitly supersedes it.
-- Coordinate native API changes with `../mblt-vision`. Do not bind private, undocumented, or
-  build-tree-only native symbols.
+- Do not make `../mblt-vision`, a compiled extension, or GStreamer a dependency of normal package
+  development, installation, import, or unit tests. Revisit integration only after its native API
+  is documented and versioned.
 
 ## Python API Contract
 
@@ -46,32 +47,36 @@ The ownership boundary is deliberate:
   buffer for as long as native code can access it.
 - Never expose raw native pointers or require callers to manage native lifetime. Wrap resources in
   deterministic `close()`/context-manager behavior and safe finalization as appropriate.
-- Maintain task vocabulary compatibility: canonical `obb`, with
-  `oriented_bounding_boxes` accepted only as an input compatibility alias.
+- Use `obb` as the sole oriented-bounding-box task name.
 
-## Binding and Native Dependency Rules
+## Python-First Architecture
 
-- The binding must use only the documented, versioned `mblt-vision` interface. Add a native
-  capability/version check when a Python feature needs a newer library.
-- Keep ownership and the GIL explicit. Release the GIL only around blocking native work that does
-  not access Python objects; reacquire it before callbacks, exceptions, or Python buffer access.
-- Do not catch broad native errors and return empty or plausible-looking results. Fail loudly with
-  an exception that identifies the invalid input, unsupported feature, or native-library problem.
-- Keep native library discovery relocatable and diagnosable. Avoid hard-coded developer paths,
-  `LD_LIBRARY_PATH` requirements for normal wheels, or importing an optional native backend at
-  module import time if that prevents useful error reporting.
+- Keep the public layer independent from a particular backend. Define small internal interfaces
+  for model execution and artifact resolution, but do not add speculative abstractions before a
+  second backend exists.
+- Put preprocessing, postprocessing, model configuration, and compatibility behavior in tested
+  Python modules. Reuse Model Zoo semantics deliberately; do not copy code wholesale without
+  understanding its public contract and license context.
+- Use established Python runtime dependencies only when they materially support the package goals.
+  Keep optional frameworks lazy-imported and raise a specific installation error when a requested
+  backend is unavailable.
+- Do not catch broad runtime errors and return empty or plausible-looking results. Fail loudly with
+  an exception that identifies the invalid input, unsupported feature, or unavailable dependency.
+- If/when a native backend is introduced, it must be optional, use a documented and versioned
+  `mblt-vision` interface, and preserve the Python public API, exceptions, result values, layouts,
+  and lifecycle behavior. Add native capability/version checks at that time.
 
 ## PyPI and Wheel Packaging
 
 - `pyproject.toml` is the source of truth for Python metadata, supported Python versions,
   dependencies, and build backend. Keep package versioning synchronized with the exposed API and
   native compatibility requirements.
-- Distribute wheels that include or correctly depend on the matching native library according to
-  the chosen packaging strategy. Do not publish an sdist/wheel whose import or basic diagnostics
-  are broken without a locally installed development tree.
+- Publish pure-Python wheels and sdists that install and import without a local C++ build, a native
+  library, or GStreamer. Do not publish artifacts whose import or basic diagnostics require a
+  developer environment.
 - Build and test each intended platform/architecture wheel in a clean environment. Verify wheel
-  contents, package metadata, install-from-wheel, import, and a minimal inference-free native
-  smoke test. Do not upload from a developer environment as the only validation.
+  contents, package metadata, install-from-wheel, import, and a minimal API smoke test. Do not
+  upload from a developer environment as the only validation.
 - Keep optional dependencies genuinely optional and avoid importing them from package top level.
   Do not add model weights, caches, test assets, or compiled build artifacts to source control.
 
@@ -83,9 +88,11 @@ The ownership boundary is deliberate:
 - Use deterministic differential tests against Model Zoo for shared behavior. Cover edge cases,
   not only successful end-to-end examples: invalid layouts/dtypes, empty detections, threshold
   boundaries, image geometry, model aliases, task aliases, and resource cleanup.
-- Numerical semantics belong to the native layer, but binding tests must verify that Python
-  conversion does not change values, layout, coordinates, ordering, dtype, or ownership.
-- Avoid making hardware, downloaded models, or GStreamer a requirement for ordinary unit tests.
+- Verify that Python preprocessing and postprocessing preserve expected values, layouts,
+  coordinates, ordering, dtype, and ownership. If a future backend is used, require the same
+  parity from its conversion boundary.
+- Avoid making hardware, downloaded models, compiled extensions, or GStreamer a requirement for
+  ordinary unit tests.
   Mark and document integration prerequisites; run the narrowest relevant suite first.
 
 ## Code Quality and Documentation
