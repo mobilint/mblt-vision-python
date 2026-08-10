@@ -120,8 +120,7 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
                 explicit MXQ-only override.
             model_type: YAML config variant to load.
             infer_mode: Execution mode forwarded to ``MBLT_Engine``.
-            product: Retained for backward compatibility but ignored by the
-                YAML-backed registry in `2.0.0`.
+            product: Legacy product/board value forwarded as ``target_device``.
             dev_no: Accelerator device number.
             target_cores: Optional core selection for single-core mode.
             target_clusters: Optional cluster selection for multi/global modes.
@@ -132,7 +131,6 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             model_path: Optional explicit local model path for MXQ or ONNX.
         """
 
-        del product
         if uses_shifted_compat_model_path_layout(
             model_path, mxq_path, onnx_path, framework
         ):
@@ -155,6 +153,7 @@ def _build_init(yaml_name: str) -> Callable[..., None]:
             target_clusters=list(target_clusters)
             if target_clusters is not None
             else None,
+            target_device=product,
             framework=framework,
         )
 

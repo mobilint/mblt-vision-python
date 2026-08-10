@@ -8,7 +8,6 @@ from typing import Any, cast
 import numpy as np
 import pytest
 import torch
-from huggingface_hub.errors import EntryNotFoundError
 from mblt_vision.utils.postprocess import build_postprocess
 from mblt_vision.utils.postprocess.base import YOLODetectionPostBase
 from mblt_vision.utils.postprocess.common import (
@@ -907,18 +906,16 @@ def test_crop_mask_matches_ultralytics_fractional_boundaries(mask_count: int) ->
     assert torch.equal(cropped, expected)
 
 
-def test_file_config_cleansing_downloads_aries_before_core_mode(
+def test_file_config_cleansing_downloads_from_exact_target_device_folder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Download only the MXQ artifact and try the legacy aries layout first."""
+    """Download only the MXQ artifact from the selected board folder."""
 
     calls: list[str] = []
 
     def _fake_download(**kwargs: Any) -> str:
         subfolder = kwargs["subfolder"]
         calls.append(subfolder)
-        if subfolder == "aries":
-            raise EntryNotFoundError("missing")
         return "/tmp/global8.mxq"
 
     monkeypatch.setattr(wrapper, "hf_hub_download", _fake_download)
@@ -931,11 +928,12 @@ def test_file_config_cleansing_downloads_aries_before_core_mode(
         "filename": "model.mxq",
         "revision": "main",
         "core_mode": "global8",
+        "target_device": "aries-rb",
     }
 
     engine.file_config_cleansing()
 
-    assert calls == ["aries", "aries/global8"]
+    assert calls == ["aries-rb"]
     assert engine.file_cfg["mxq_path"] == "/tmp/global8.mxq"
     assert engine.file_cfg["onnx_filename"] == "model.onnx"
     assert "onnx_path" not in engine.file_cfg

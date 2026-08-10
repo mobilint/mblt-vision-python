@@ -493,11 +493,17 @@ def add_val_parser(
     )
     parser.add_argument(
         "--core-mode",
-        default="global8",
+        default=None,
         choices=["single", "multi", "global4", "global8"],
-        help="NPU core execution mode.",
+        help="NPU core execution mode. Defaults to global8 on Aries and single on Regulus.",
     )
     parser.add_argument("--dev-no", type=int, default=0, help="NPU device number.")
+    parser.add_argument(
+        "--target-device",
+        default="aries-rb",
+        choices=["aries-rb", "regulus-ra", "regulus-rb"],
+        help="NPU board target. Determines the backend implementation.",
+    )
     parser.add_argument(
         "--target-cores",
         type=parse_target_cores,

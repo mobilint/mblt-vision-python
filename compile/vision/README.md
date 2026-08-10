@@ -27,6 +27,7 @@ from mblt_vision.compile.vision import compile_vision_model
 
 output_path = compile_vision_model(
     "alexnet",
+    target_device="aries-rb",
     data_path="~/.mblt_vision/datasets/imagenet",
     save_path="./alexnet.mxq",
 )
@@ -38,6 +39,7 @@ print(output_path)
 ```bash
 mblt-vision-python compile \
   --model-cls alexnet \
+  --target-device aries-rb \
   --data-path ~/.mblt_vision/datasets/imagenet \
   --save-path ./alexnet.mxq
 ```
@@ -46,8 +48,8 @@ Start from an existing sampled image subset or a ready calibration tensor direct
 stages have already been completed:
 
 ```bash
-mblt-vision-python compile --model-cls alexnet --subset-path ./sampled-images
-mblt-vision-python compile --model-cls alexnet --calib-data-path ./preprocessed-npy
+mblt-vision-python compile --model-cls alexnet --target-device aries-rb --subset-path ./sampled-images
+mblt-vision-python compile --model-cls alexnet --target-device aries-rb --calib-data-path ./preprocessed-npy
 ```
 
 Use `--model-type` for a non-default YAML variant and `--model-path` or `--onnx-path` to prefer a
@@ -55,6 +57,9 @@ local ONNX file. If that path is omitted or does not exist, the configured Huggi
 supplies the ONNX artifact. Downloaded ONNX files and compiled outputs use
 `~/.mblt_vision`; without `--save-path`, the compiler writes
 `~/.mblt_vision/<onnx-stem>.mxq`.
+
+`target_device` / `--target-device` is required: choose `aries-rb`, `regulus-ra`, or `regulus-rb`
+to compile an artifact for that board.
 
 The ONNX preprocessing engine uses ONNX Runtime's CPU provider by default, so compilation does not
 probe TensorRT, CUDA, or other accelerators. Callers that construct `MBLT_Engine` directly can opt

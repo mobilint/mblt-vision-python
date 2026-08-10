@@ -19,7 +19,7 @@ from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
 from qbruntime import Cluster, CoreId
 
-from mblt_npu import MobilintNPUBackend
+from mblt_npu import MobilintNPUBackend, normalize_target_device
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
 from ._model_paths import (
@@ -320,6 +320,7 @@ class MBLT_Engine:
         framework: str | None = None,
         onnx_providers: Sequence[str] | None = None,
         model_path: str = "",
+        target_device: str = "aries-rb",
     ) -> None:
         """Initializes the MBLT_Engine.
 
@@ -333,6 +334,7 @@ class MBLT_Engine:
                     core_mode: single, multi, global4, global8
                     target_cores: single mode
                     target_clusters: multi, global modes
+                    target_device: NPU board identifier; defaults to ``aries-rb``.
                 pre_cfg: Preprocessing configuration.
                 post_cfg: Postprocessing configuration.
             model_cls(not dict): model name or yaml path
@@ -398,10 +400,16 @@ class MBLT_Engine:
             dev_no = 0
         if core_mode is None:
             core_mode = "single"
+        target_device = normalize_target_device(target_device)
+        is_regulus = target_device in {"regulus-ra", "regulus-rb"}
         if target_cores is None:
-            target_cores = ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
+            target_cores = (
+                []
+                if is_regulus
+                else ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
+            )
         if target_clusters is None:
-            target_clusters = [0, 1]
+            target_clusters = [] if is_regulus else [0, 1]
 
         self.file_cfg = copy.deepcopy(model_config_part["file_cfg"])
         file_cfg_model_path = self.file_cfg.pop("model_path", "")
@@ -426,6 +434,7 @@ class MBLT_Engine:
             self.file_cfg["target_clusters"] = target_clusters
         if _dev_no_passed or "dev_no" not in self.file_cfg:
             self.file_cfg["dev_no"] = dev_no
+        self.file_cfg["target_device"] = target_device
 
         self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])
         self.post_cfg = copy.deepcopy(model_config_part["post_cfg"])
@@ -591,13 +600,12 @@ class MBLT_Engine:
             return
 
         if filename and framework == "mxq":
-            core_mode = self.file_cfg.get("core_mode")
-            subfolders = ["aries", f"aries/{core_mode}"] if core_mode else ["aries"]
+            target_device = self.file_cfg.get("target_device", "aries-rb")
             self.file_cfg["mxq_path"] = self._download_hub_artifact(
                 repo_id=repo_id,
                 filename=filename,
                 revision=revision,
-                subfolders=subfolders,
+                subfolders=[target_device],
             )
 
         if onnx_filename and framework == "onnx" and not self.file_cfg.get("onnx_path"):

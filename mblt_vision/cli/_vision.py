@@ -99,11 +99,17 @@ def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--core-mode",
-        default="global8",
+        default=None,
         choices=["single", "multi", "global4", "global8"],
-        help="NPU core execution mode.",
+        help="NPU core execution mode. Defaults to global8 on Aries and single on Regulus.",
     )
     parser.add_argument("--dev-no", type=int, default=0, help="NPU device number.")
+    parser.add_argument(
+        "--target-device",
+        default="aries-rb",
+        choices=["aries-rb", "regulus-ra", "regulus-rb"],
+        help="NPU board target. Determines the backend implementation.",
+    )
     parser.add_argument(
         "--target-cores",
         type=parse_target_cores,
@@ -251,7 +257,11 @@ def create_vision_engine(args: argparse.Namespace) -> Any:
         mxq_path=args.mxq_path,
         onnx_path=args.onnx_path,
         dev_no=args.dev_no,
-        core_mode=normalize_core_mode(args.core_mode),
+        target_device=args.target_device,
+        core_mode=normalize_core_mode(
+            args.core_mode
+            or ("single" if args.target_device.startswith("regulus-") else "global8")
+        ),
         target_cores=args.target_cores,
         target_clusters=args.target_clusters,
         postprocess_kwargs=postprocess_kwargs,

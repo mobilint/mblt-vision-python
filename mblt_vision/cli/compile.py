@@ -21,6 +21,7 @@ def _run_compile(args: argparse.Namespace) -> int:
 
         output_path = compile_vision_model(
             model_cls=args.model_cls,
+            target_device=args.target_device,
             model_type=args.model_type,
             model_path=args.model_path,
             data_path=args.data_path,
@@ -59,6 +60,12 @@ def add_compile_parser(
         "--model-cls",
         required=True,
         help="Vision model name, for example `alexnet` or `yolo11m`.",
+    )
+    parser.add_argument(
+        "--target-device",
+        required=True,
+        choices=["aries-rb", "regulus-ra", "regulus-rb"],
+        help="Required NPU board target for the compiled MXQ artifact.",
     )
     parser.add_argument(
         "--model-type",

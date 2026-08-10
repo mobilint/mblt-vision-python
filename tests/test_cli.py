@@ -17,8 +17,33 @@ def test_standalone_cli_registers_vision_commands() -> None:
         ["predict", "--source", "image.jpg", "--model", "resnet50"]
     )
     val_args = parser.parse_args(["val", "--model", "resnet50"])
-    compile_args = parser.parse_args(["compile", "--model-cls", "resnet50"])
+    compile_args = parser.parse_args(
+        ["compile", "--model-cls", "resnet50", "--target-device", "aries-rb"]
+    )
 
     assert predict_args._handler is _cmd_predict
     assert val_args._handler is _cmd_val
     assert compile_args._handler is _run_compile
+    assert compile_args.target_device == "aries-rb"
+    assert predict_args.target_device == "aries-rb"
+    assert val_args.target_device == "aries-rb"
+
+
+def test_vision_cli_uses_single_core_mode_by_default_on_regulus() -> None:
+    """Keep the CLI's implicit core mode compatible with a Regulus target."""
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "predict",
+            "--source",
+            "image.jpg",
+            "--model",
+            "resnet50",
+            "--target-device",
+            "regulus-ra",
+        ]
+    )
+
+    assert args.target_device == "regulus-ra"
+    assert args.core_mode is None

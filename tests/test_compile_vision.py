@@ -568,6 +568,7 @@ def _run_fake_compile(
     model_path: Path | None,
     entry_level: str = "data",
     dataset: str | None = None,
+    target_device: str = "aries-rb",
     fail: bool = False,
     calls: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Path]:
@@ -686,6 +687,7 @@ def _run_fake_compile(
 
     compile_module.compile_vision_model(
         "fake-model",
+        target_device=target_device,
         model_type="VARIANT",
         model_path=model_path,
         data_path=original_data_path,
@@ -729,6 +731,22 @@ def test_compile_uses_local_onnx_and_exact_options(
     assert calls["array"].dtype == np.float32
     assert calls["disposed"] is True
     assert not calls["temporary_root"].exists()
+
+
+def test_compile_forwards_required_target_device(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Forward the selected board to qbcompiler rather than hard-coding Aries."""
+
+    calls, _ = _run_fake_compile(
+        monkeypatch,
+        tmp_path,
+        task="image_classification",
+        model_path=None,
+        target_device="regulus-rb",
+    )
+
+    assert calls["compile_kwargs"]["target_device"] == "regulus-rb"
 
 
 def test_compile_uses_obb_task_from_model_config(
@@ -833,7 +851,10 @@ def test_compile_rejects_multiple_data_levels() -> None:
 
     with pytest.raises(ValueError, match="Provide only one calibration pipeline input"):
         compile_module.compile_vision_model(
-            "alexnet", data_path="original", subset_path="subset"
+            "alexnet",
+            target_device="aries-rb",
+            data_path="original",
+            subset_path="subset",
         )
 
 

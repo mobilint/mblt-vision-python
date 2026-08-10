@@ -20,12 +20,14 @@ from mblt_vision.utils.datasets.readiness import dataset_ready
 
 from mblt_vision._tasks import normalize_vision_task
 from mblt_vision.datasets import get_dataset_config_for_task
+from mblt_npu import normalize_target_device
 from mblt_vision.wrapper import MOBILINT_CACHE_DIR, MBLT_Engine, resolve_model_config
 
 DEFAULT_PERCENTILE = 0.9999
 DEFAULT_TOPK_RATIO = 0.01
 DEFAULT_SEED = 0
 DEFAULT_MODEL_DIR = Path(MOBILINT_CACHE_DIR)
+SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 DEFAULT_SUBSET_SIZES = {
     "image_classification": 1,
     "depth_estimation": 100,
@@ -629,12 +631,15 @@ def _validate_ratio(name: str, value: Any) -> float:
     return resolved
 
 
-def _fetch_quantization_config(repo_id: str, revision: str) -> dict[str, Any] | None:
-    """Fetch optional hosted Aries quantization metadata.
+def _fetch_quantization_config(
+    repo_id: str, revision: str, target_device: str = "aries-rb"
+) -> dict[str, Any] | None:
+    """Fetch optional hosted board quantization metadata.
 
     Args:
         repo_id: Hugging Face model repository ID.
         revision: Repository revision.
+        target_device: Board folder containing the metadata.
 
     Returns:
         Hosted ``config`` mapping, or ``None`` when the optional file is unavailable.
@@ -647,7 +652,7 @@ def _fetch_quantization_config(repo_id: str, revision: str) -> dict[str, Any] | 
         metadata_path = hf_hub_download(
             repo_id=repo_id,
             filename="best_result.json",
-            subfolder="aries",
+            subfolder=normalize_target_device(target_device),
             revision=revision,
         )
     except (HfHubHTTPError, OSError) as exc:
@@ -701,7 +706,13 @@ def resolve_quantization_values(
         repo_id = file_cfg.get("repo_id")
         revision = file_cfg.get("revision", "main")
         if isinstance(repo_id, str) and repo_id:
-            hosted_config = _fetch_quantization_config(repo_id, str(revision))
+            target_device = file_cfg.get("target_device")
+            if isinstance(target_device, str):
+                hosted_config = _fetch_quantization_config(
+                    repo_id, str(revision), normalize_target_device(target_device)
+                )
+            else:
+                hosted_config = _fetch_quantization_config(repo_id, str(revision))
         else:
             warnings.warn(
                 "Model configuration has no repository ID; using fallback quantization values.",
@@ -800,6 +811,7 @@ def _resolve_compile_onnx_path(
 def compile_vision_model(
     model_cls: str,
     *,
+    target_device: str,
     model_type: str = "DEFAULT",
     model_path: str | Path | None = None,
     onnx_path: str | Path | None = None,
@@ -812,10 +824,11 @@ def compile_vision_model(
     percentile: float | None = None,
     topk_ratio: float | None = None,
 ) -> Path:
-    """Compile a configured vision ONNX model into an Aries MXQ artifact.
+    """Compile a configured vision ONNX model into a board-specific MXQ artifact.
 
     Args:
         model_cls: Vision model name or YAML path.
+        target_device: Required target board: ``aries-rb``, ``regulus-ra``, or ``regulus-rb``.
         model_type: Model variant from the YAML configuration.
         model_path: Preferred local ONNX path compatibility option.
         onnx_path: Local ONNX path alias.
@@ -840,6 +853,12 @@ def compile_vision_model(
     """
 
     _validate_data_level_paths(data_path, subset_path, calib_data_path)
+    target_device = normalize_target_device(target_device)
+    if target_device not in SUPPORTED_TARGET_DEVICES:
+        raise ValueError(
+            f"Unsupported target_device {target_device!r}; expected one of "
+            f"{sorted(SUPPORTED_TARGET_DEVICES)}."
+        )
     mxq_compile, calibration_config_class = _load_qbcompiler()
     model_config = resolve_model_config(model_cls, model_type)
     file_cfg = model_config.get("file_cfg")
@@ -848,6 +867,7 @@ def compile_vision_model(
         raise ValueError(
             "Resolved vision model configuration requires `file_cfg` and `post_cfg` objects."
         )
+    file_cfg["target_device"] = target_device
 
     task = _normalize_task(str(post_cfg.get("task", "")))
     dataset = post_cfg.get("dataset")
@@ -883,7 +903,7 @@ def compile_vision_model(
             image_channels=3,
             backend="onnx",
             device="gpu",
-            target_device="aries-rb",
+            target_device=target_device,
             inference_scheme="all",
             calibration_config=calibration_config,
         )
@@ -941,7 +961,7 @@ def compile_vision_model(
                 image_channels=3,
                 backend="onnx",
                 device="gpu",
-                target_device="aries-rb",
+                target_device=target_device,
                 inference_scheme="all",
                 calibration_config=calibration_config,
             )
