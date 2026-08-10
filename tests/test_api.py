@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
 import mblt_vision
@@ -25,15 +23,6 @@ def test_public_discovery_exposes_all_supported_tasks() -> None:
         "face_detection",
     ]
     assert list_models("obb")["obb"]
-
-
-def test_public_exports_use_only_the_canonical_obb_name() -> None:
-    """Keep the standalone namespace free of the legacy OBB spelling."""
-
-    assert "oriented_bounding_boxes" not in mblt_vision.__all__
-    assert not hasattr(mblt_vision, "oriented_bounding_boxes")
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("mblt_vision.oriented_bounding_boxes")
 
 
 def test_model_exports_are_discoverable_from_task_and_top_level_namespaces() -> None:

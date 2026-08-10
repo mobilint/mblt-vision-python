@@ -646,7 +646,7 @@ class Results:
         save_path: str | Path | None = None,
         **kwargs,
     ) -> np.ndarray:
-        """Plots oriented bounding boxes on an image.
+        """Plot OBB detections on an image.
 
         Args:
             source_path: Path or image object.

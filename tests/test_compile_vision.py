@@ -93,19 +93,12 @@ def test_non_imagenet_selection_is_deterministic(
     assert len(first) == 3
 
 
-def test_legacy_obb_alias_selects_calibration_images(tmp_path: Path) -> None:
-    """Normalize the legacy OBB task name in exported sampling helpers."""
+def test_obb_selects_calibration_images(tmp_path: Path) -> None:
+    """Select OBB calibration images through exported sampling helpers."""
 
     images = _write_images(tmp_path / "images", ["P0001.png", "P0002.png"])
 
-    assert select_calibration_images(
-        "oriented_bounding_boxes",
-        tmp_path,
-        subset_size=2,
-    ) == select_calibration_images("obb", tmp_path, subset_size=2)
-    assert set(
-        select_calibration_images("oriented_bounding_boxes", tmp_path, subset_size=2)
-    ) == set(images)
+    assert set(select_calibration_images("obb", tmp_path, subset_size=2)) == set(images)
 
 
 @pytest.mark.parametrize(
@@ -348,10 +341,7 @@ def test_obb_dataset_readiness_accepts_flat_images(
     monkeypatch.setattr(readiness_module, "DOTAV1_VALIDATION_SAMPLE_COUNT", 1)
 
     assert (
-        compile_module.ensure_calibration_dataset(
-            "oriented_bounding_boxes", dataset="dotav1"
-        )
-        == data_path
+        compile_module.ensure_calibration_dataset("obb", dataset="dotav1") == data_path
     )
 
 
@@ -741,16 +731,16 @@ def test_compile_uses_local_onnx_and_exact_options(
     assert not calls["temporary_root"].exists()
 
 
-def test_compile_normalizes_legacy_obb_task_from_model_config(
+def test_compile_uses_obb_task_from_model_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Compile legacy custom model metadata through the canonical OBB task."""
+    """Compile custom model metadata using the canonical OBB task."""
 
     calls, _ = _run_fake_compile(
         monkeypatch,
         tmp_path,
-        task="oriented_bounding_boxes",
+        task="obb",
         model_path=None,
         dataset="dotav1",
         entry_level="calibration",

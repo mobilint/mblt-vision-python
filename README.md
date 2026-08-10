@@ -3,7 +3,7 @@
 Run pre-trained Mobilint Vision models from Python. `mblt-vision-python` provides
 model configuration, artifact loading, preprocessing, inference integration, and
 typed postprocessing results for image classification, depth estimation, face and
-object detection, oriented bounding boxes (OBB), instance and semantic segmentation,
+object detection, OBB, instance and semantic segmentation,
 and pose estimation.
 
 Version `0.0.1` is the initial standalone release.

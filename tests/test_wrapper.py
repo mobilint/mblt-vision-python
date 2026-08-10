@@ -485,11 +485,11 @@ def test_legacy_wrapper_preserves_shifted_positional_mxq_tail(
     assert captured_kwargs["framework"] == "mxq"
 
 
-def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
+def test_engine_init_accepts_obb_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Construct the canonical OBB postprocessor from the compatibility task spelling."""
+    """Construct the OBB postprocessor from its canonical task name."""
 
     mxq_path = tmp_path / "model.mxq"
     mxq_path.write_bytes(b"mxq")
@@ -517,7 +517,7 @@ def test_engine_init_accepts_oriented_bounding_boxes_task_alias(
             "file_cfg": {},
             "pre_cfg": {"LetterBox": {"img_size": [640, 640]}},
             "post_cfg": {
-                "task": "oriented_bounding_boxes",
+                "task": "obb",
                 "dataset": "dotav1",
                 "nl": 3,
                 "reg_max": 16,

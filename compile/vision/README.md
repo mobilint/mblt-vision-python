@@ -83,7 +83,7 @@ Compilation maps model tasks to the packaged dataset registry:
 - Semantic segmentation uses the dataset declared by the model's `post_cfg.dataset`: ADE20K or
   Cityscapes.
 - Face detection uses WiderFace.
-- Oriented bounding boxes use DOTAv1.
+- OBB uses DOTAv1.
 
 `--data-path` is an organized dataset root. An existing ready layout is reused; otherwise the
 registry-backed organizer downloads and prepares the dataset. When no path is supplied, the

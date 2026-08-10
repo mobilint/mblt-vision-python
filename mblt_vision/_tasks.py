@@ -15,15 +15,13 @@ VISION_TASKS: tuple[str, ...] = (
     "face_detection",
 )
 
-_INPUT_TASK_ALIASES = {"oriented_bounding_boxes": "obb"}
-
 
 def normalize_vision_task(task: str, *, supported: Iterable[str] | None = None) -> str:
     """Normalize a Vision task name and validate it against supported tasks."""
 
     if not isinstance(task, str):
         raise TypeError(f"Vision task must be a string, got {type(task).__name__}.")
-    normalized = _INPUT_TASK_ALIASES.get(task.lower(), task.lower())
+    normalized = task.lower()
     supported_tasks = tuple(VISION_TASKS if supported is None else supported)
     if normalized not in supported_tasks:
         raise ValueError(

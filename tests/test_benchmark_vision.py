@@ -113,14 +113,14 @@ def test_benchmark_dispatches_semantic_taxonomy(
     assert metrics == {"miou": 0.6, "pixel_accuracy": 0.9}
 
 
-def test_benchmark_accepts_oriented_bounding_boxes_model_alias(
+def test_benchmark_accepts_obb_model_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Dispatch an alias-configured OBB model through DOTAv1 evaluation."""
+    """Dispatch an OBB model through DOTAv1 evaluation."""
 
     class FakeModel:
-        post_cfg = {"task": "oriented_bounding_boxes", "dataset": "dotav1"}
+        post_cfg = {"task": "obb", "dataset": "dotav1"}
 
     import mblt_vision.utils.evaluation as evaluation_module
 

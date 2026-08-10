@@ -1,4 +1,4 @@
-"""Evaluation script for DOTAv1 oriented bounding boxes."""
+"""Evaluation script for DOTAv1 OBB."""
 
 from __future__ import annotations
 

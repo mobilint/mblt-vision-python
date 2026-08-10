@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ..labels import get_coco_inv, get_dotav1_label
+from ..datasets import get_coco_inv, get_dotav1_label
 from ..letterbox import RatioPad, resolve_ratio_pad
 
 

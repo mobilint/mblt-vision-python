@@ -163,10 +163,10 @@ def test_results_reject_empty_structured_outputs(
         Results({}, {"task": task}, output)
 
 
-def test_results_normalize_task_alias_and_semantic_taxonomy_case() -> None:
-    """Normalize OBB aliases and semantic palette taxonomy casing."""
+def test_results_normalize_obb_task_and_semantic_taxonomy_case() -> None:
+    """Normalize the OBB task and semantic palette taxonomy casing."""
 
-    obb = Results({}, {"task": "oriented_bounding_boxes"}, [torch.zeros((0, 7))])
+    obb = Results({}, {"task": "obb"}, [torch.zeros((0, 7))])
     semantic = Results(
         {},
         {"task": "semantic_segmentation", "dataset": "CityScapes"},

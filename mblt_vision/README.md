@@ -352,7 +352,7 @@ This section lists the publicly pre-trained models supported by the vision frame
 | --- | --- | --- | --- | --- | --- | --- | --- |
 
 <details>
-<summary>Oriented Bounding Boxes (DOTA v1.0)</summary>
+<summary>OBB (DOTA v1.0)</summary>
 
 - $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ is the primary metric
   for single-model single-scale validation on the
