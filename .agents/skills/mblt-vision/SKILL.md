@@ -1,0 +1,62 @@
+---
+name: mblt-vision
+description: >-
+  Work on the standalone Mobilint Vision Python API, model registry, preprocessing,
+  postprocessing, results, runtime integration, and package compatibility contracts.
+---
+
+# Mobilint Vision Python
+
+## Start Here
+
+1. Read AGENTS.md.
+2. Run git status --short before changing files.
+3. Read pyproject.toml, the affected package exports, matching model YAML, and relevant tests.
+4. For a compatibility migration, compare against
+   ../mblt-model-zoo/mblt_model_zoo/vision deliberately; do not make it a runtime dependency.
+
+## Public API and Model Registry
+
+- Use mblt_vision.MBLT_Engine and task subpackages as the public surface.
+- Keep mblt_vision as the sole intended import namespace. Use obb as the sole
+  oriented-bounding-box task name.
+- Update a task package, top-level lazy exports, and list_models() discovery together.
+- Preserve constructor arguments including model_path, mxq_path, onnx_path,
+  model_type, and core-selection options unless intentionally changing the API.
+- Keep .mxq/.onnx suffix routing and explicit-framework conflict errors intact.
+- Every model YAML must define stable file_cfg, pre_cfg, and post_cfg mappings.
+  Use file_cfg.filename for MXQ and derive the same-stem ONNX artifact unless
+  onnx_filename is required.
+- Every post_cfg declares dataset; resolve output taxonomy from the dataset/task pair.
+
+## Processing and Results
+
+- Reuse the shared letterbox geometry for both preprocessing and inverse coordinate restoration.
+- Detection requires pre_cfg.LetterBox. Keep semantic metadata (img0_shape and
+  ratio_pad) through postprocessing so logits restore to the original geometry before
+  argmax.
+- Preserve decoded-output layout provenance through NMS. For ambiguous tensors without
+  provenance, prioritize channels-first raw-output normalization.
+- Normalize dense depth and semantic outputs before inverse letterboxing. Validate baked semantic
+  maps are finite, integral, and in-range before converting them to integer class IDs.
+- Keep result shapes, ordering, coordinates, dtype, and empty-result behavior compatible with
+  the Model Zoo reference.
+
+## Runtime and Packaging
+
+- Route NPU runtime access through mblt-npu-python; do not copy backend classes into Vision.
+- Keep ONNX Runtime optional and lazy-imported. Raise a specific installation error when it is
+  requested but unavailable.
+- Include model and dataset YAML files as package data. Build a wheel and inspect it after
+  changing metadata or assets.
+- Do not require native bindings, GStreamer, hardware, downloaded models, or caches for normal
+  imports and unit tests.
+
+## Validate Proportionately
+
+- Begin with the smallest relevant test file or -k selection.
+- Add deterministic differential tests for Model Zoo compatibility, including invalid inputs,
+  empty detections, threshold boundaries, task discovery, and image geometry.
+- Run pre-commit run --files <touched files> when available. For docs, run
+  git diff --check.
+- Report unavailable hardware, downloads, or optional dependencies rather than weakening tests.

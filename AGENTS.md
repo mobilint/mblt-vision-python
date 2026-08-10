@@ -16,7 +16,8 @@ supported native API.
 The current ownership boundary is deliberate:
 
 - This package owns the public Python API, model loading, preprocessing, postprocessing, runtime
-  integration, package metadata, wheels, documentation, and compatibility shims.
+  integration, dataset organization, benchmark evaluation, model compilation, package metadata,
+  wheels, documentation, and compatibility shims.
 - Keep implementation code in Python; do not block Python API progress on C++ or GStreamer work.
 - Design internal seams so a future optional `mblt-vision` backend can replace implementation
   details without changing the documented Python API or result contracts.
@@ -48,6 +49,30 @@ The current ownership boundary is deliberate:
 - Never expose raw native pointers or require callers to manage native lifetime. Wrap resources in
   deterministic `close()`/context-manager behavior and safe finalization as appropriate.
 - Use `obb` as the sole oriented-bounding-box task name.
+
+## Vision Models and Processing Contracts
+
+- Use mblt_vision.MBLT_Engine for loading. Prefer model_path; retain mxq_path and
+  onnx_path as compatibility aliases.
+- Update task-package exports and lazy top-level exports together. Confirm that
+  list_models() discovers every public model class.
+- Keep each model YAML's file_cfg, pre_cfg, and post_cfg shape stable.
+  file_cfg.filename is the canonical MXQ Hub artifact; derive the same-stem ONNX filename
+  unless the Hub artifact requires an explicit onnx_filename.
+- Require post_cfg.dataset in every model YAML and resolve output class counts using the
+  dataset/task pair. Do not assume one output taxonomy for every model in a task.
+- Preserve automatic .mxq/.onnx framework detection and the fail-fast error when a local
+  suffix conflicts with an explicitly selected framework.
+- Preserve anchorless decoded-output layout provenance through NMS. When a tensor is ambiguous
+  and provenance is unavailable, normalize it as raw channels-first before candidates-first.
+- Use the shared letterbox helpers for forward geometry and inverse output restoration. Detection
+  postprocessors require pre_cfg.LetterBox; metadata-aware semantic preprocessing returns the
+  original image shape and ratio_pad so logits can be restored before argmax.
+- Normalize dense outputs before inverse letterboxing: upsample quarter-resolution depth maps by
+  four, preserve baked-resize depth maps, convert Cityscapes NHWC logits to NCHW, and reject
+  non-finite, fractional, or out-of-range baked semantic IDs before casting.
+- Keep hardware-specific runtime access behind mblt-npu-python. Optional ONNX Runtime imports
+  must remain lazy and report the appropriate package extra when unavailable.
 
 ## Python-First Architecture
 
@@ -94,6 +119,8 @@ The current ownership boundary is deliberate:
 - Avoid making hardware, downloaded models, compiled extensions, or GStreamer a requirement for
   ordinary unit tests.
   Mark and document integration prerequisites; run the narrowest relevant suite first.
+- Use a deterministic default seed of 0 for any public API that samples or otherwise uses
+  randomness.
 
 ## Code Quality and Documentation
 
@@ -102,6 +129,13 @@ The current ownership boundary is deliberate:
 - Keep imports ordered as standard library, third-party, then local. Catch specific exceptions.
 - Update the README and API examples whenever installation, native-library discovery, supported
   platforms, imports, or migration compatibility changes.
+- Keep the root README focused on installation and navigation. Maintain the complete Vision API,
+  model-family, runtime, and taxonomy reference in mblt_vision/README.md.
+- Write documentation with ATX headings, one blank line between blocks, hyphen lists,
+  language-tagged code fences, and concise paragraphs. Keep examples executable against the
+  public mblt_vision namespace and do not document Model Zoo CLI commands as standalone features.
+- When a durable public fact changes, update this guide, the matching agent skill, CLAUDE.md, and
+  the relevant README in the same change.
 - For documentation-only changes, run `git diff --check` and verify headings and links. Report
   skipped platform, hardware, or native-runtime checks clearly.
 

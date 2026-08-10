@@ -1,9 +1,32 @@
-# mblt-vision-python
+# Mobilint Vision Python
 
-**Vision models** for Mobilint NPUs.
+Run pre-trained Mobilint Vision models from Python. `mblt-vision-python` provides
+model configuration, artifact loading, preprocessing, inference integration, and
+typed postprocessing results for image classification, depth estimation, face and
+object detection, oriented bounding boxes (OBB), instance and semantic segmentation,
+and pose estimation.
 
-Image classification, object detection, instance segmentation and pose estimation on
-Mobilint NPUs. Each model is a class that carries its own pre- and post-processing:
+Version `0.0.1` is the initial standalone release.
+
+## Installation
+
+```bash
+pip install mblt-vision-python
+```
+
+MXQ inference requires a supported Mobilint NPU environment. Model artifacts are
+downloaded from the Mobilint Hugging Face organization when no local `model_path`
+is supplied. For ONNX execution, install one of the optional extras:
+
+```bash
+pip install "mblt-vision-python[onnxruntime]"
+# Or, on supported systems:
+pip install "mblt-vision-python[onnxruntime-gpu]"
+```
+
+## Quick start
+
+Each model includes its matching preprocess and postprocess behavior:
 
 ```python
 from mblt_vision import ResNet50
@@ -13,15 +36,46 @@ x = model.preprocess("image.jpg")
 result = model.postprocess(model(x))
 ```
 
-Split out of `mblt-model-zoo`, which still re-exports it as `mblt_model_zoo.vision`
-so existing code keeps working.
+For configurable model selection and local MXQ or ONNX artifacts, use
+`MBLT_Engine`:
 
-## Installation
+```python
+from mblt_vision import MBLT_Engine
 
-```bash
-pip install mblt-vision-python
+model = MBLT_Engine(model_cls="resnet50", model_type="DEFAULT")
+try:
+    result = model.postprocess(model(model.preprocess("image.jpg")))
+finally:
+    model.dispose()
 ```
+
+Discover supported tasks and models with `list_tasks()` and `list_models()`. New
+code should use the task subpackages (for example,
+`mblt_vision.object_detection`) or `MBLT_Engine`. Top-level model imports such as
+`from mblt_vision import ResNet50` remain supported for convenience.
+
+`obb` is the canonical oriented-bounding-box task name.
+
+## Model Zoo migration
+
+Vision is now maintained in this package. `mblt-model-zoo` retains
+`mblt_model_zoo.vision` as a compatibility facade for existing applications; new
+projects should import from `mblt_vision` directly.
+
+## Documentation and tests
+
+See [the Vision API guide](mblt_vision/README.md) for supported model families,
+model details, artifact selection, and output taxonomy behavior. See the
+[compilation guide](compile/vision/README.md) for calibration-data preparation
+and MXQ compilation. The [test guide](tests/TEST.md) explains offline, Hugging
+Face, and NPU test runs.
+
+## Support and issues
+
+For installation, model, or runtime support, visit the
+[Mobilint forum](https://discuss.mobilint.com/). Report reproducible package issues in the
+[mblt-vision-python issue tracker](https://github.com/mobilint/mblt-vision-python/issues).
 
 ## License
 
-BSD-3-Clause.
+Distributed under the [BSD 3-Clause License](LICENSE).

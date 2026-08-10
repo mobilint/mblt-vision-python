@@ -13,16 +13,30 @@ pip install pytest
 
 ## Run All Tests
 
-Execute the entire Vision test matrix (this may take a while because it loads every supported model):
+Execute the complete standalone Vision test matrix:
 
 ```bash
-pytest tests/vision
+pytest tests
 ```
 
-## Run a Single Test File
+## Run Offline Unit Tests
 
-Target a specific test file to focus on one model family:
+Exclude Hugging Face downloads and NPU hardware:
 
 ```bash
-pytest tests/vision/test_resnet50.py
+pytest tests -m "not requires_network and not requires_npu"
+```
+
+## Run Optional Integration Tests
+
+After authenticating with Hugging Face Hub, exercise representative ONNX models:
+
+```bash
+pytest tests/test_onnx_classification.py -m requires_network
+```
+
+To run MXQ inference, add a configured NPU and the shared runtime options:
+
+```bash
+pytest tests/test_mxq_inference.py -m requires_npu --mxq-path /path/to/model.mxq
 ```

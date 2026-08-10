@@ -15,7 +15,10 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "pillow>=11.1.0",
     "faster-coco-eval",
+    "gdown>=5.2.0",
     "huggingface-hub",
+    "matplotlib",
+    "requests>=2.32.0",
     "scipy",
     "tqdm",
     "PyYAML",
@@ -48,6 +51,10 @@ onnxruntime-gpu = [
     "onnx; sys_platform != 'darwin'",
     "onnxruntime-gpu; sys_platform != 'darwin'",
 ]
+qbcompiler = [
+    "qbcompiler>=1.2.0",
+    "onnxruntime",
+]
 
 [tool.setuptools]
 packages = { find = { where = ["."], include = ["mblt_vision", "mblt_vision.*"] } }
@@ -59,6 +66,12 @@ version = { attr = "mblt_vision.__version__" }
 "mblt_vision" = [
     "models/*.yaml",
     "datasets/*.yaml",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "requires_network: test downloads model artifacts from Hugging Face Hub.",
+    "requires_npu: test requires a configured Mobilint NPU runtime and device.",
 ]
 
 [dependency-groups]
