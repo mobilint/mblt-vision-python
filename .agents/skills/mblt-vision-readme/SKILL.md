@@ -13,6 +13,8 @@ description: >-
   mblt_vision/README.md.
 - Keep the detailed Vision API reference in mblt_vision/README.md. It owns Python construction,
   framework selection, model discovery, model-family tables, output taxonomy, and migration notes.
+- Keep development-tool instructions in `benchmark/README.md` and `compile/README.md`; their
+  command scripts live directly in those directories.
 - Document Model Zoo compatibility as migration context only. Do not present Model Zoo CLI,
   validation, dataset organization, or compilation commands as features of this package.
 
@@ -35,5 +37,5 @@ description: >-
 - Prefer generated discovery examples such as list_tasks() and list_models() over manually
   maintained exhaustive name lists.
 - When changing models, package metadata, dependencies, public APIs, or runtime behavior, update
-  the relevant README and this guidance if the workflow changes.
+  the relevant README, `AGENTS.md`, and the canonical `mblt-vision` skill if the workflow changes.
 - For documentation-only updates, run git diff --check and verify relative links and headings.

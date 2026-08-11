@@ -91,6 +91,18 @@ The current ownership boundary is deliberate:
   `mblt-vision` interface, and preserve the Python public API, exceptions, result values, layouts,
   and lifecycle behavior. Add native capability/version checks at that time.
 
+## Benchmark and Compilation Tooling
+
+- Keep executable benchmark organizers, the unified benchmark runner, and result comparison scripts
+  directly under `benchmark/`. Put reusable benchmark reporting helpers in `mblt_vision.benchmark`.
+- Keep executable compilation helpers and their guide directly under `compile/`. Do not recreate a
+  Vision-only subdirectory under either tooling root.
+- Benchmark and compilation commands are development tools; do not package them as public CLI
+  entry points without an explicit product decision. The supported end-user command is
+  `mblt-vision`.
+- Compile and artifact resolution must use normalized board identifiers (`aries-rb`, `regulus-ra`,
+  or `regulus-rb`) and must not fall back to a different board folder.
+
 ## PyPI and Wheel Packaging
 
 - `pyproject.toml` is the source of truth for Python metadata, supported Python versions,
@@ -135,7 +147,9 @@ The current ownership boundary is deliberate:
   language-tagged code fences, and concise paragraphs. Keep examples executable against the
   public mblt_vision namespace and do not document Model Zoo CLI commands as standalone features.
 - When a durable public fact changes, update this guide, the matching agent skill, CLAUDE.md, and
-  the relevant README in the same change.
+  the relevant README in the same change. Treat a significant package change—public API,
+  dependency/runtime, artifact layout, CLI, or tooling structure—as a required guide-and-skill
+  synchronization point.
 - For documentation-only changes, run `git diff --check` and verify headings and links. Report
   skipped platform, hardware, or native-runtime checks clearly.
 

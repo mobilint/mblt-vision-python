@@ -45,12 +45,24 @@ description: >-
 ## Runtime and Packaging
 
 - Route NPU runtime access through mblt-npu-python; do not copy backend classes into Vision.
-- Keep ONNX Runtime optional and lazy-imported. Raise a specific installation error when it is
-  requested but unavailable.
+- Use the shared `ONNXBackend` for ONNX inference. Keep ONNX Runtime optional and lazy-imported;
+  raise a specific installation error when it is requested but unavailable.
+- Normalize legacy `aries` and `regulus` target values through mblt-npu-python. MXQ artifacts and
+  compilation metadata must resolve only from the selected board folder, never a core-mode path or
+  a fallback board folder.
 - Include model and dataset YAML files as package data. Build a wheel and inspect it after
   changing metadata or assets.
 - Do not require native bindings, GStreamer, hardware, downloaded models, or caches for normal
   imports and unit tests.
+
+## Tooling Layout and Documentation
+
+- Keep all executable benchmark scripts directly in `benchmark/`; reusable reporting helpers belong
+  in `mblt_vision.benchmark`.
+- Keep all executable compile scripts and the compile guide directly in `compile/`.
+- For every significant package change (public API, CLI, runtime/dependency, artifact layout, or
+  tooling structure), update `AGENTS.md`, this canonical skill, the Claude skill entry point when
+  its workflow changes, and the relevant README in the same change.
 
 ## Validate Proportionately
 
