@@ -84,7 +84,7 @@ class SemanticMetricAccumulator:
         )
         invalid_prediction = valid_target & ~valid_prediction
         if invalid_prediction.any():
-            invalid_values = np.unique(prediction[invalid_prediction])
+            invalid_values = np.asarray(np.unique(prediction[invalid_prediction]))
             raise ValueError(
                 f"Semantic predictions at valid target pixels must be finite class IDs in [0, {self.nc - 1}], "
                 f"got {invalid_values.tolist()}."

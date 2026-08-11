@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import NamedTuple, Sequence
 
 # ruff: noqa: E402
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from benchmark.common.summary_utils import read_csv_rows
+from mblt_vision.benchmark.summary_utils import read_csv_rows
 
 
 class BenchmarkScore(NamedTuple):
@@ -143,7 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"Inputs contain incompatible benchmark metrics: {', '.join(sorted(metric_names))}."
         )
     metric_name = next(iter(metric_names))
-    from benchmark.common.chart_utils import (
+    from mblt_vision.benchmark.chart_utils import (
         default_charts_dir,
         plot_grouped_scalar_barh,
         source_labels,

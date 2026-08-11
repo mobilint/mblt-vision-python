@@ -1,7 +1,7 @@
 # Vision Model Compilation
 
 The installable vision compiler uses each model's packaged YAML configuration and
-`MBLT_Engine.preprocess` implementation to compile its ONNX artifact for ARIES.
+`MBLT_Engine.preprocess` implementation to compile its ONNX artifact for a selected board.
 
 ## Installation
 
@@ -15,7 +15,7 @@ pip install -e ".[qbcompiler]"
 available from the public Python Package Index. Obtain access to the compiler package before using
 this extra.
 
-qbcompiler is loaded only when `compile_vision_model()` or `mblt-vision-python compile` begins an
+qbcompiler is loaded only when `compile_vision_model()` or `mblt-vision compile` begins an
 actual compilation request. Importing the base package, vision APIs, this compilation module, or
 the main CLI does not import qbcompiler. If qbcompiler is unavailable, only the compilation request
 fails with an installation message; non-compile APIs and CLI commands remain usable.
@@ -37,7 +37,7 @@ print(output_path)
 ## CLI
 
 ```bash
-mblt-vision-python compile \
+mblt-vision compile \
   --model-cls alexnet \
   --target-device aries-rb \
   --data-path ~/.mblt_vision/datasets/imagenet \
@@ -48,8 +48,8 @@ Start from an existing sampled image subset or a ready calibration tensor direct
 stages have already been completed:
 
 ```bash
-mblt-vision-python compile --model-cls alexnet --target-device aries-rb --subset-path ./sampled-images
-mblt-vision-python compile --model-cls alexnet --target-device aries-rb --calib-data-path ./preprocessed-npy
+mblt-vision compile --model-cls alexnet --target-device aries-rb --subset-path ./sampled-images
+mblt-vision compile --model-cls alexnet --target-device aries-rb --calib-data-path ./preprocessed-npy
 ```
 
 Use `--model-type` for a non-default YAML variant and `--model-path` or `--onnx-path` to prefer a
@@ -105,7 +105,7 @@ NumPy arrays live only in temporary directories and are removed after compilatio
 compilation fails.
 
 The compiler uses explicit `--percentile` and `--topk-ratio` values first. Missing values are read
-independently from `aries/best_result.json`; if optional hosted values are unavailable, defaults of
+independently from `<target-device>/best_result.json`; if optional hosted values are unavailable, defaults of
 `0.9999` and `0.01` are used with a warning.
 
 ## Compatibility Scripts
@@ -113,12 +113,12 @@ independently from `aries/best_result.json`; if optional hosted values are unava
 The standalone scripts remain available:
 
 ```bash
-python compile/vision/vision_model_compile.py --model-cls alexnet
-python compile/vision/make_imagenet_subset.py --output-dir ./imagenet-calibration
-python compile/vision/make_coco_subset.py --output-dir ./coco-calibration
-python compile/vision/make_dotav1_subset.py --output-dir ./dotav1-calibration
-python compile/vision/make_widerface_subset.py --output-dir ./widerface-calibration
-python compile/vision/make_nyu_depth_subset.py --output-dir ./nyu-depth-calibration
-python compile/vision/make_ade20k_subset.py --output-dir ./ade20k-calibration
-python compile/vision/make_cityscapes_subset.py --output-dir ./cityscapes-calibration
+python compile/vision_model_compile.py --model-cls alexnet --target-device aries-rb
+python compile/make_imagenet_subset.py --output-dir ./imagenet-calibration
+python compile/make_coco_subset.py --output-dir ./coco-calibration
+python compile/make_dotav1_subset.py --output-dir ./dotav1-calibration
+python compile/make_widerface_subset.py --output-dir ./widerface-calibration
+python compile/make_nyu_depth_subset.py --output-dir ./nyu-depth-calibration
+python compile/make_ade20k_subset.py --output-dir ./ade20k-calibration
+python compile/make_cityscapes_subset.py --output-dir ./cityscapes-calibration
 ```

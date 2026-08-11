@@ -187,11 +187,18 @@ def add_vision_parser(
     command: str,
     help_text: str,
     handler: Any,
-    aliases: list[str] | None = None,
+    description: str | None = None,
+    epilog: str | None = None,
 ) -> argparse.ArgumentParser:
     """Creates a vision command parser with common arguments."""
 
-    parser = subparsers.add_parser(command, aliases=aliases or [], help=help_text)
+    parser = subparsers.add_parser(
+        command,
+        help=help_text,
+        description=description,
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.set_defaults(_handler=handler)
     add_common_vision_args(parser)
     return parser

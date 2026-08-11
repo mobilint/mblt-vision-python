@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mblt_vision.cli import build_parser
 from mblt_vision.cli.compile import _run_compile
 from mblt_vision.cli.predict import _cmd_predict
@@ -47,3 +49,25 @@ def test_vision_cli_uses_single_core_mode_by_default_on_regulus() -> None:
 
     assert args.target_device == "regulus-ra"
     assert args.core_mode is None
+
+
+@pytest.mark.parametrize("removed_alias", ["classify", "detect", "pose", "segment"])
+def test_predict_command_has_no_task_aliases(removed_alias: str) -> None:
+    """Keep prediction discoverable through one task-agnostic command."""
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args([removed_alias])
+
+
+def test_predict_help_explains_supported_workflows(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Describe tasks, output behavior, framework choice, and examples in CLI help."""
+
+    with pytest.raises(SystemExit, match="0"):
+        build_parser().parse_args(["predict", "--help"])
+    help_text = capsys.readouterr().out
+
+    assert "Supported tasks:" in help_text
+    assert "--framework onnx" in help_text
+    assert "--target-device regulus-ra" in help_text

@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 # ruff: noqa: E402
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from benchmark.common.argparse_utils import parse_positive_int
-from benchmark.common.io_utils import safe_filename, write_csv, write_json
-from benchmark.common.summary_utils import (
+from mblt_vision.benchmark.argparse_utils import parse_positive_int
+from mblt_vision.benchmark.io_utils import safe_filename, write_csv, write_json
+from mblt_vision.benchmark.summary_utils import (
     collect_host_pc_info,
     markdown_table,
     write_summary_markdown,
@@ -139,7 +139,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--results-dir",
         type=Path,
-        default=Path("benchmark/vision/results"),
+        default=Path("benchmark/results"),
         help="Output directory.",
     )
     parser.add_argument(
@@ -378,7 +378,7 @@ def _write_outputs(
     successful = [row for row in rows if row["status"] == "ok"]
     plot_paths: list[Path] = []
     if successful and not args.no_plot:
-        from benchmark.common.chart_utils import plot_simple_barh
+        from mblt_vision.benchmark.chart_utils import plot_simple_barh
 
         chart_path = results_dir / "accuracy.png"
         plot_simple_barh(

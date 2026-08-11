@@ -24,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model variant from the YAML configuration.",
     )
     parser.add_argument(
+        "--target-device",
+        default="aries-rb",
+        choices=["aries-rb", "regulus-ra", "regulus-rb"],
+        help="Board target for the compiled MXQ artifact.",
+    )
+    parser.add_argument(
         "--model-path",
         "--onnx-path",
         dest="model_path",
@@ -66,6 +72,7 @@ def main() -> None:
     output_path = compile_vision_model(
         model_cls=args.model_cls,
         model_type=args.model_type,
+        target_device=args.target_device,
         model_path=args.model_path,
         data_path=args.data_path,
         subset_path=args.subset_path,

@@ -72,6 +72,20 @@ and `compile` subcommands:
 mblt-vision predict --source image.jpg --model resnet50
 ```
 
+`predict` is the single inference command for classification, depth estimation,
+object and face detection, instance and semantic segmentation, OBB, and pose
+estimation. The selected model determines its task and processing pipeline.
+By default it downloads the model artifact and saves a plotted result under
+`runs/vision/predict/`. Use `--output` to choose the result-image path,
+`--topk` for classification labels, and `--conf-thres`/`--iou-thres` for
+detection-style tasks. `--framework onnx` selects ONNX Runtime inference;
+`--target-device` and `--core-mode` select the MXQ board/runtime mode.
+
+```bash
+mblt-vision predict --source image.jpg --model yolo11m --conf-thres 0.4 --output result.jpg
+mblt-vision predict --source image.jpg --model yolo11m-pose --target-device regulus-ra --core-mode single
+```
+
 The corresponding `mblt-model-zoo` commands use the same standalone handlers for
 backward compatibility.
 
@@ -79,7 +93,7 @@ backward compatibility.
 
 See [the Vision API guide](mblt_vision/README.md) for supported model families,
 model details, artifact selection, and output taxonomy behavior. See the
-[compilation guide](compile/vision/README.md) for calibration-data preparation
+[compilation guide](compile/README.md) for calibration-data preparation
 and MXQ compilation. The [test guide](tests/TEST.md) explains offline, Hugging
 Face, and NPU test runs.
 

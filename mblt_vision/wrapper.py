@@ -19,7 +19,7 @@ from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
 from qbruntime import Cluster, CoreId
 
-from mblt_npu import MobilintNPUBackend, normalize_target_device
+from mblt_npu import MobilintNPUBackend, ONNXBackend, normalize_target_device
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
 from ._model_paths import (
@@ -445,6 +445,7 @@ class MBLT_Engine:
 
         self.model: Any
         self._mxq_model: MobilintNPUBackend | None = None
+        self._onnx_model: ONNXBackend | None = None
         self._onnx_session: Any = None
 
         if self.framework == "onnx":
@@ -458,19 +459,23 @@ class MBLT_Engine:
                 raise FileNotFoundError(f"ONNX file not found at: {resolved_onnx_path}")
 
             providers = _resolve_onnx_providers(ort, onnx_providers)
-            self._onnx_session = ort.InferenceSession(
-                resolved_onnx_path, providers=providers
+            onnx_model = ONNXBackend(
+                resolved_onnx_path, providers=providers, ort_module=ort
             )
+            onnx_model.create()
+            self._onnx_model = onnx_model
+            self._onnx_session = onnx_model.session
             self.model = self._onnx_session
             self.input_name = self._onnx_session.get_inputs()[0].name
             self.output_names = [o.name for o in self._onnx_session.get_outputs()]
         else:
-            self._mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())
-            self.model = self._mxq_model
-            self._mxq_model.create()
-            self._mxq_model.launch()
+            mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())
+            self._mxq_model = mxq_model
+            self.model = mxq_model
+            mxq_model.create()
+            mxq_model.launch()
 
-            if self._mxq_model.get_dtype() == "DataType.Uint8":
+            if mxq_model.get_dtype() == "DataType.Uint8":
                 self.pre_cfg.pop("Normalize", None)
 
         self.preprocessor = build_preprocess(self.pre_cfg)
@@ -906,6 +911,8 @@ class MBLT_Engine:
         """Disposes the underlying model."""
         if self.framework == "mxq":
             self._require_mxq_model().dispose()
+        elif self._onnx_model is not None:
+            self._onnx_model.dispose()
 
     def model_name_aliasing(self, model_name: str) -> str:
         """Finds the YAML config filename that matches the given model name.

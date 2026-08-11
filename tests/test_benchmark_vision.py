@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from benchmark.vision import benchmark_vision_models, compare_benchmark_results
+from benchmark import benchmark_vision_models, compare_benchmark_results
 from mblt_vision.utils.evaluation import (
     DOTAResult,
     ImageNetResult,
@@ -288,7 +288,7 @@ def test_comparison_uses_result_directory_names(
             "model,core_mode,task,status,score_name,score\nmodel-a,global8,object_detection,ok,map50_95,0.5\n",
             encoding="utf-8",
         )
-    import benchmark.common.chart_utils as chart_utils
+    import mblt_vision.benchmark.chart_utils as chart_utils
 
     captured: dict[str, object] = {}
 
