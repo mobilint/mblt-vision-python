@@ -311,6 +311,7 @@ class YOLODFLFreeDetectionPost(YOLODetectionPostBase):
         # sort as box, scores
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
+        self.validate_split_head_counts(detection=y_det, classification=y_cls)
         return torch.cat(
             [
                 torch.cat((yi_det, yi_cls), dim=1).flatten(2)
@@ -537,10 +538,9 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreeDetectionPost):
         proto = y_ext.pop(0).permute(0, 2, 3, 1)
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
-        if not len(y_cls) == len(y_det) == len(y_ext):
-            raise ValueError(
-                "Classification, detection, and extra output counts must match."
-            )
+        self.validate_split_head_counts(
+            detection=y_det, classification=y_cls, extra=y_ext
+        )
         y = torch.cat(
             [
                 torch.cat((yi_det, yi_cls, yi_ext), dim=1).flatten(2)
@@ -634,6 +634,9 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
         y_kpt = sorted(
             y_kpt, key=lambda x: x.numel(), reverse=True
         )  # (b, 51, 6400), (b, 51, 1600), (b, 51, 400)
+        self.validate_split_head_counts(
+            detection=y_det, classification=y_cls, keypoint=y_kpt
+        )
         y_tmp = [
             torch.cat((yi_det, yi_cls), dim=1).flatten(2)
             for (yi_det, yi_cls) in zip(
@@ -855,8 +858,9 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
         y_det = sorted(y_det, key=lambda x: x.numel(), reverse=True)
         y_cls = sorted(y_cls, key=lambda x: x.numel(), reverse=True)
         y_angle = sorted(y_angle, key=lambda x: x.numel(), reverse=True)
-        if not (len(y_det) == len(y_cls) == len(y_angle)):
-            raise ValueError("OBB output arguments are not in a proper form.")
+        self.validate_split_head_counts(
+            detection=y_det, classification=y_cls, angle=y_angle
+        )
         return torch.cat(
             [
                 torch.cat((yi_det, yi_cls, yi_angle), dim=1).flatten(2)

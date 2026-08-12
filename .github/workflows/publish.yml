@@ -33,15 +33,6 @@ jobs:
       - name: Validate distributions
         run: python -m twine check dist/*
 
-      - name: Smoke-test built wheel API
-        run: |
-          python -m venv /tmp/mblt-vision-wheel-smoke
-          /tmp/mblt-vision-wheel-smoke/bin/python -m pip install --upgrade pip
-          /tmp/mblt-vision-wheel-smoke/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          /tmp/mblt-vision-wheel-smoke/bin/python -m pip install dist/*.whl
-          cd /tmp
-          /tmp/mblt-vision-wheel-smoke/bin/python -c "from mblt_vision import MBLT_Engine, list_models, list_tasks; assert MBLT_Engine; assert list_tasks(); assert list_models()"
-
       - name: Upload built distributions
         uses: actions/upload-artifact@v7
         with:

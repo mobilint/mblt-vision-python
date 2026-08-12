@@ -177,6 +177,52 @@ def test_detection_postprocessor_rejects_missing_head_count() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("post_cfg", "channels"),
+    [
+        ({"task": "object_detection", "nl": 3, "reg_max": 16}, [64] * 3 + [80] * 2),
+        (
+            {"task": "instance_segmentation", "nl": 3, "reg_max": 16, "n_extra": 32},
+            [32] * 4 + [64] * 3 + [80] * 2,
+        ),
+        (
+            {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+            [64] * 3 + [1] * 2 + [51] * 3,
+        ),
+        (
+            {"task": "obb", "nl": 3, "reg_max": 16, "n_extra": 1},
+            [64] * 3 + [15] * 2 + [1] * 3,
+        ),
+        ({"task": "object_detection", "nl": 3, "dflfree": True}, [4] * 3 + [80] * 2),
+        (
+            {"task": "instance_segmentation", "nl": 3, "dflfree": True, "n_extra": 32},
+            [32] * 4 + [4] * 3 + [80] * 2,
+        ),
+        (
+            {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+            [4] * 3 + [1] * 2 + [51] * 3,
+        ),
+        (
+            {"task": "obb", "nl": 3, "dflfree": True, "n_extra": 1},
+            [4] * 3 + [15] * 2 + [1] * 3,
+        ),
+    ],
+)
+def test_split_head_postprocessors_reject_incomplete_head_groups(
+    post_cfg: dict[str, Any], channels: list[int]
+) -> None:
+    """Reject malformed raw output sets before zip can discard a detection scale."""
+
+    postprocessor = build_postprocess({"LetterBox": {"img_size": [64, 64]}}, post_cfg)
+    raw_outputs = [torch.zeros((1, 2, 2, channel)) for channel in channels]
+
+    with pytest.raises(
+        ValueError,
+        match=r"Incomplete split-head outputs: expected 3 heads per group.*classification=2",
+    ):
+        postprocessor.rearrange(raw_outputs)  # type: ignore[attr-defined]
+
+
 def test_segmentation_postprocessor_rejects_mismatched_prototype_batch() -> None:
     """Do not silently drop detections when prototypes have fewer images."""
 

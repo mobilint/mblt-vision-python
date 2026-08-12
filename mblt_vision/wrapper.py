@@ -436,7 +436,10 @@ class MBLT_Engine:
         model_config_part = resolve_model_config(model_cls, model_type)
 
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
+        file_cfg_onnx_path = str(model_config_part["file_cfg"].get("onnx_path", ""))
         framework_model_path = model_path or file_cfg_model_path
+        if not framework_model_path and not mxq_path:
+            framework_model_path = onnx_path or file_cfg_onnx_path
         self.framework = _resolve_framework(framework, framework_model_path)
         mxq_path, onnx_path = _split_model_paths(
             framework=self.framework,

@@ -596,6 +596,20 @@ class YOLODetectionPostBase(PostBase):
         """
         return self.nms(x)
 
+    def validate_split_head_counts(self, **head_groups: Sequence[object]) -> None:
+        """Require every raw split-output group to provide every detection head."""
+
+        expected_count = self.nl
+        counts = {name: len(heads) for name, heads in head_groups.items()}
+        if any(count != expected_count for count in counts.values()):
+            found_counts = ", ".join(
+                f"{name}={count}" for name, count in counts.items()
+            )
+            raise ValueError(
+                "Incomplete split-head outputs: "
+                f"expected {expected_count} heads per group, got {found_counts}."
+            )
+
     def masking(
         self, x: list[torch.Tensor], proto_outs: torch.Tensor | list[torch.Tensor]
     ) -> list[list[torch.Tensor]]:

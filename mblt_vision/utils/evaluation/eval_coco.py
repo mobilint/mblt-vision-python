@@ -180,7 +180,6 @@ def eval_coco_metrics(
         dataset = CustomCOCODataset(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "person_keypoints_val2017.json"),
-            min_keypoints=0,
         )
 
     dataloader = get_coco_loader(dataset, batch_size, model.preprocess_with_metadata)

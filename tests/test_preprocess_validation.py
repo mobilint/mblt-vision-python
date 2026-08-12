@@ -28,9 +28,12 @@ def test_image_size_operations_reject_nonpositive_sizes(operation: object) -> No
     if operation_type is Resize:
         with pytest.raises(ValueError, match="positive"):
             Resize(argument, "bilinear")
+    elif operation_type is CenterCrop:
+        with pytest.raises(ValueError, match="positive"):
+            CenterCrop(argument)
     else:
         with pytest.raises(ValueError, match="positive"):
-            operation_type(argument)
+            LetterBox(argument)
 
 
 @pytest.mark.parametrize("size", [[1], [1, 2, 3], [1.5, 2], "2"])

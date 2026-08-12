@@ -775,7 +775,7 @@ def test_engine_init_auto_detects_mxq_framework_from_model_path(
 
 
 @pytest.mark.parametrize(
-    "model_path_style", ["keyword", "positional", "positional-runtime"]
+    "model_path_style", ["keyword", "positional", "positional-runtime", "onnx-path"]
 )
 def test_engine_init_accepts_local_onnx_model_path(
     monkeypatch: pytest.MonkeyPatch,
@@ -850,6 +850,8 @@ def test_engine_init_accepts_local_onnx_model_path(
             "onnx",
             ["CPUExecutionProvider"],
         )
+    elif model_path_style == "onnx-path":
+        engine = MBLT_Engine(model_cls=model_config, onnx_path=str(onnx_path))
     else:
         engine = MBLT_Engine(model_cls=model_config, model_path=str(onnx_path))
 
@@ -864,6 +866,22 @@ def test_engine_init_accepts_local_onnx_model_path(
         assert engine.file_cfg["target_clusters"] == [1]
         assert engine.postprocess_kwargs == {"confidence": 0.25}
         assert fake_ort.session.providers == ["CPUExecutionProvider"]
+
+
+def test_engine_init_rejects_framework_conflicting_with_onnx_path_alias(
+    tmp_path: Path,
+) -> None:
+    """Do not silently route an explicit ONNX alias through MXQ inference."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+
+    with pytest.raises(ValueError, match=r"Framework `mxq` conflicts with model path"):
+        MBLT_Engine(
+            {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
+            onnx_path=str(onnx_path),
+            framework="mxq",
+        )
 
 
 def test_engine_init_rejects_conflicting_framework_and_model_path(
