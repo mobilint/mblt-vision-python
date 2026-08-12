@@ -99,6 +99,8 @@ The current ownership boundary is deliberate:
   Vision-only subdirectory under either tooling root.
 - Use `~/.mblt_model_zoo` as the shared artifact and dataset cache root. Organizer defaults,
   dataset registry YAMLs, compilation defaults, and documented commands must agree on that root.
+- Keep package imports free of cache-directory creation, write probes, downloads, and temporary
+  directory allocation. Resolve a writable cache lazily only when an artifact or compilation output needs it.
 - Benchmark and compilation commands are development tools; do not package them as public CLI
   entry points without an explicit product decision. The supported end-user command is
   `mblt-vision`.

@@ -6,6 +6,7 @@ import warnings
 from typing import Any
 
 import pytest
+import torch
 from mblt_vision.utils.postprocess import build_postprocess
 from mblt_vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
 from mblt_vision.utils.postprocess.cls_post import ClsPost
@@ -111,6 +112,59 @@ def test_builder_keeps_non_detection_routing_warning_free(
         warnings.simplefilter("error", DeprecationWarning)
         postprocessor = build_postprocess(pre_cfg, post_cfg)
     assert type(postprocessor) is expected_type
+
+
+@pytest.mark.parametrize(
+    ("postprocessor_type", "input_shape", "n_extra", "output_width"),
+    [
+        (YOLONMSFreeDetectionPost, (5, 1), 0, 6),
+        (YOLODFLFreeDetectionPost, (5, 1), 0, 5),
+        (YOLODFLFreePosePost, (56, 1), 51, 56),
+        (YOLODFLFreeOBBPost, (6, 1), 1, 6),
+    ],
+)
+def test_empty_anchorless_outputs_preserve_input_device_and_dtype(
+    postprocessor_type: type[YOLODetectionPostBase],
+    input_shape: tuple[int, int],
+    n_extra: int,
+    output_width: int,
+) -> None:
+    """Create empty decoded rows from the selected input tensor."""
+
+    postprocessor = postprocessor_type.__new__(postprocessor_type)
+    postprocessor.nc = 1
+    postprocessor.n_extra = n_extra
+    postprocessor.inv_conf_thres = 1.0
+    input_tensor = torch.zeros(input_shape, dtype=torch.float64)
+
+    output = postprocessor.process_box_cls(input_tensor)
+
+    assert output.shape == (0, output_width)
+    assert output.device == input_tensor.device
+    assert output.dtype == input_tensor.dtype
+
+
+def test_empty_anchor_outputs_preserve_input_device_and_dtype() -> None:
+    """Keep converted and decoded empty anchor rows on the input device."""
+
+    postprocessor = YOLOAnchorDetectionPost.__new__(YOLOAnchorDetectionPost)
+    postprocessor.nc = 1
+    postprocessor.n_extra = 0
+    postprocessor.no = 6
+    postprocessor.inv_conf_thres = 1.0
+    postprocessor.conf_thres = 1.0
+    decoded_input = torch.zeros((1, 6), dtype=torch.float64)
+    converted_input = torch.zeros((1, 1, 6), dtype=torch.float64)
+
+    decoded_output = postprocessor.process_box_cls(decoded_input)
+    converted_output = postprocessor.filter_conversion(converted_input)[0]
+
+    for output, input_tensor in (
+        (decoded_output, decoded_input),
+        (converted_output, converted_input),
+    ):
+        assert output.device == input_tensor.device
+        assert output.dtype == input_tensor.dtype
 
 
 def test_detection_postprocessor_rejects_missing_head_count() -> None:

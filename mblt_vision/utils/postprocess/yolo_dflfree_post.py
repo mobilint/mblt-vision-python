@@ -348,9 +348,7 @@ class YOLODFLFreeDetectionPost(YOLODetectionPostBase):
             )
         box_cls = box_cls[:, ic]  # (84, *)
         if box_cls.numel() == 0:
-            return torch.zeros(
-                (0, 4 + self.nc + self.n_extra), dtype=torch.float32
-            )  # (0, 84)
+            return box_cls.new_zeros((0, 4 + self.nc + self.n_extra))
         anchors = self.anchors_as_tensor()
         stride = self.stride_as_tensor()
         box, scores, extra = torch.split(
@@ -665,9 +663,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
         )
         box_cls = box_cls[:, ic]  # (116, *)
         if box_cls.numel() == 0:
-            return torch.zeros(
-                (0, 4 + self.nc + self.n_extra), dtype=torch.float32
-            )  # (0, 56)
+            return box_cls.new_zeros((0, 4 + self.nc + self.n_extra))
         anchors = self.anchors_as_tensor()
         stride = self.stride_as_tensor()
         box, scores, keypoints = torch.split(
@@ -892,9 +888,7 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
         )
         box_cls = box_cls[:, ic]
         if box_cls.numel() == 0:
-            return torch.zeros(
-                (0, 4 + self.nc + self.n_extra), dtype=torch.float32, device=self.device
-            )
+            return box_cls.new_zeros((0, 4 + self.nc + self.n_extra))
         anchors = self.anchors_as_tensor()
         stride = self.stride_as_tensor()
         box, scores, angle = torch.split(
@@ -936,9 +930,7 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
             if torch.any(keep):
                 outputs.append(xi[keep])
             else:
-                outputs.append(
-                    torch.zeros((0, expected_dim), dtype=xi.dtype, device=xi.device)
-                )
+                outputs.append(xi.new_zeros((0, expected_dim)))
         return outputs
 
     def nms(
@@ -963,9 +955,7 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
         output = []
         for xi in detections:
             if xi.numel() == 0:
-                output.append(
-                    torch.zeros((0, 7), dtype=torch.float32, device=self.device)
-                )
+                output.append(xi.new_zeros((0, 7)))
                 continue
             if xi.shape[1] == 4 + self.nc + self.n_extra:
                 xi = yolo_multilabel_candidates(
@@ -976,9 +966,7 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
             else:
                 raise ValueError(f"Unsupported OBB detection shape {tuple(xi.shape)}.")
             if xi.numel() == 0:
-                output.append(
-                    torch.zeros((0, 7), dtype=torch.float32, device=self.device)
-                )
+                output.append(xi.new_zeros((0, 7)))
                 continue
             xi = xi[torch.argsort(xi[:, 4], descending=True)[:max_nms]]
             c = xi[:, 5:6] * max_wh

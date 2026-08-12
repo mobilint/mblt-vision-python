@@ -55,6 +55,7 @@ NYU_DEPTH_URL = (
 ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
+IMAGENET_SYNSET_PATTERN = re.compile(r"n\d{8}")
 
 
 def _replace_staged_directories(
@@ -332,8 +333,25 @@ def _get_object_name(obj: ET.Element, xml_file: str) -> str:
     object_name = name_element.text.strip()
     if not object_name:
         raise ValueError(f"XML file {xml_file} has an object with an empty name")
+    if IMAGENET_SYNSET_PATTERN.fullmatch(object_name) is None:
+        raise ValueError(
+            f"XML file {xml_file} has invalid ImageNet synset name {object_name!r}; "
+            "expected n########."
+        )
 
     return object_name
+
+
+def _imagenet_class_output_dir(staged_output_dir: str, object_name: str) -> Path:
+    """Return a containment-checked class directory below the staging root."""
+
+    staged_root = Path(staged_output_dir).resolve()
+    class_dir = (staged_root / object_name).resolve()
+    if class_dir.parent != staged_root:
+        raise ValueError(
+            f"ImageNet class directory escapes staging root: {object_name!r}."
+        )
+    return class_dir
 
 
 def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
@@ -399,12 +417,11 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
             if not os.path.isfile(image_path):
                 raise FileNotFoundError(f"Image file not found: {image_path}")
 
-            os.makedirs(os.path.join(staged_output_dir, object_name), exist_ok=True)
+            class_dir = _imagenet_class_output_dir(staged_output_dir, object_name)
+            os.makedirs(class_dir, exist_ok=True)
             shutil.copy(
                 image_path,
-                os.path.join(
-                    staged_output_dir, object_name, os.path.basename(image_path)
-                ),
+                class_dir / os.path.basename(image_path),
             )
         pbar.close()
 

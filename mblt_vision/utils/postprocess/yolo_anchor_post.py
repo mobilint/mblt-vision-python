@@ -150,9 +150,7 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         ic = x[:, 4] > self.inv_conf_thres  # candidates
         box_cls = x[ic]  # (n, 85)
         if box_cls.numel() == 0:
-            return torch.zeros(
-                (0, 5 + self.nc + self.n_extra), dtype=torch.float32, device=x.device
-            )
+            return box_cls.new_zeros((0, 5 + self.nc + self.n_extra))
 
         grid = self.grid[ic, :]  # (n, 2)
         anchor_grid = self.anchor_grid[ic, :]  # (n, 2)
@@ -189,7 +187,7 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
             ic = x[:, 4] > self.conf_thres  # candidates
             x = x[ic]  # (n, 85)
             if len(x) == 0:
-                return torch.zeros((0, self.no), dtype=torch.float32)
+                return x.new_zeros((0, self.no))
             return x
 
         return [process_conversion(xi) for xi in x_list]
@@ -200,16 +198,12 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         """Apply anchor-based NMS to a single decoded image tensor."""
         mi = 5 + self.nc  # mask index
         if xi.numel() == 0:
-            return torch.zeros(
-                (0, 6 + self.n_extra), dtype=torch.float32, device=self.device
-            )
+            return xi.new_zeros((0, 6 + self.n_extra))
 
         scores = xi[:, 5:mi] * xi[:, 4:5]
         match_index = (scores > self.conf_thres).nonzero(as_tuple=False)
         if match_index.numel() == 0:
-            return torch.zeros(
-                (0, 6 + self.n_extra), dtype=torch.float32, device=xi.device
-            )
+            return xi.new_zeros((0, 6 + self.n_extra))
 
         i = match_index[:, 0]
         j = match_index[:, 1]

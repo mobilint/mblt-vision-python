@@ -16,12 +16,20 @@ import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import HfHubHTTPError
-from mblt_vision.utils.datasets.readiness import dataset_ready
+from mblt_vision.utils.datasets.readiness import (
+    _path_has_symlink_component,
+    dataset_ready,
+)
 
 from mblt_vision._tasks import normalize_vision_task
 from mblt_vision.datasets import get_dataset_config_for_task
 from mblt_npu import normalize_target_device
-from mblt_vision.wrapper import MOBILINT_CACHE_DIR, MBLT_Engine, resolve_model_config
+from mblt_vision.wrapper import (
+    MOBILINT_CACHE_DIR,
+    MBLT_Engine,
+    get_mobilint_cache_dir,
+    resolve_model_config,
+)
 
 DEFAULT_PERCENTILE = 0.9999
 DEFAULT_TOPK_RATIO = 0.01
@@ -41,6 +49,14 @@ DEFAULT_SUBSET_SIZES = {
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 
+def _default_model_dir() -> Path:
+    """Return the writable default compilation output directory lazily."""
+
+    if DEFAULT_MODEL_DIR != Path(MOBILINT_CACHE_DIR):
+        return DEFAULT_MODEL_DIR
+    return Path(get_mobilint_cache_dir())
+
+
 def _normalize_task(task: str) -> str:
     """Validate and normalize a supported task name.
 
@@ -55,6 +71,18 @@ def _normalize_task(task: str) -> str:
     """
 
     return normalize_vision_task(task, supported=DEFAULT_SUBSET_SIZES)
+
+
+def _validate_calibration_output_dir(output_dir: str | Path) -> Path:
+    """Return an output path only when it and its ancestors are not symlinks."""
+
+    destination = Path(output_dir).expanduser()
+    if _path_has_symlink_component(destination):
+        raise ValueError(
+            "Calibration output_dir must not be or contain a symlink: "
+            f"{destination}."
+        )
+    return destination
 
 
 def _dataset_ready(task: str, data_path: Path, dataset: str | None = None) -> bool:
@@ -365,7 +393,7 @@ def copy_calibration_subset(
     """
 
     root = Path(data_path).expanduser().resolve()
-    destination = Path(output_dir).expanduser()
+    destination = _validate_calibration_output_dir(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
     for image_path in images:
@@ -401,7 +429,7 @@ def make_calibration_subset(
     """
 
     source_root = Path(data_path).expanduser().resolve()
-    destination = Path(output_dir).expanduser().resolve()
+    destination = _validate_calibration_output_dir(output_dir).resolve()
     if source_root.is_relative_to(destination) or destination.is_relative_to(
         source_root
     ):
@@ -478,7 +506,7 @@ def prepare_calibration_arrays(
         Saved NumPy paths.
     """
 
-    destination = Path(output_dir)
+    destination = _validate_calibration_output_dir(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     saved: list[Path] = []
     for index, image_path in enumerate(images):
@@ -808,7 +836,7 @@ def _resolve_compile_onnx_path(
                 repo_id=repo_id,
                 filename=filename,
                 revision=revision,
-                local_dir=MOBILINT_CACHE_DIR,
+                local_dir=get_mobilint_cache_dir(),
             )
         )
         if downloaded_path.is_file():
@@ -890,7 +918,7 @@ def compile_vision_model(
         output_path = (
             Path(save_path).expanduser()
             if save_path is not None
-            else DEFAULT_MODEL_DIR / f"{resolved_onnx.stem}.mxq"
+            else _default_model_dir() / f"{resolved_onnx.stem}.mxq"
         ).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         resolved_percentile, resolved_topk = resolve_quantization_values(
@@ -943,7 +971,7 @@ def compile_vision_model(
         output_path = (
             Path(save_path).expanduser()
             if save_path is not None
-            else DEFAULT_MODEL_DIR / f"{resolved_onnx.stem}.mxq"
+            else _default_model_dir() / f"{resolved_onnx.stem}.mxq"
         )
         output_path = output_path.resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)

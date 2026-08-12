@@ -233,6 +233,27 @@ def test_construct_imagenet_replaces_stale_output(
     assert readiness_calls == [("image_classification", "imagenet")]
 
 
+@pytest.mark.parametrize("class_name", ["../../escaped", "/tmp/escaped"])
+def test_construct_imagenet_rejects_unsafe_xml_class_name(
+    tmp_path: Path, class_name: str
+) -> None:
+    """Reject XML class names that could escape the ImageNet staging root."""
+
+    image_dir, xml_dir = _create_imagenet_source(tmp_path)
+    xml_path = next((xml_dir / "val").glob("*.xml"))
+    xml_path.write_text(
+        f"<annotation><object><name>{class_name}</name></object></annotation>",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "imagenet"
+
+    with pytest.raises(ValueError, match="invalid ImageNet synset name"):
+        organizer.construct_imagenet(str(image_dir), str(xml_dir), str(output_dir))
+
+    assert not (tmp_path / "escaped").exists()
+    assert not output_dir.exists()
+
+
 def test_construct_coco_replaces_stale_output(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

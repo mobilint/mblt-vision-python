@@ -260,6 +260,33 @@ def test_subset_keeps_existing_output_when_selection_fails(tmp_path: Path) -> No
     assert existing.read_bytes() == b"existing.jpg"
 
 
+@pytest.mark.parametrize("symlinked_parent", [False, True])
+def test_subset_rejects_symlinked_output_path_before_replacement(
+    tmp_path: Path, symlinked_parent: bool
+) -> None:
+    """Do not resolve a caller-controlled subset output through a symlink."""
+
+    data_path = tmp_path / "dataset"
+    _write_images(data_path / "val2017", ["one.jpg"])
+    external_output = tmp_path / "external-parent" / "subset"
+    existing = _write_images(external_output, ["keep.jpg"])[0]
+    if symlinked_parent:
+        output_path = tmp_path / "linked-parent" / "subset"
+        (tmp_path / "linked-parent").symlink_to(
+            external_output.parent, target_is_directory=True
+        )
+    else:
+        output_path = tmp_path / "subset"
+        output_path.symlink_to(external_output, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="output_dir must not be or contain a symlink"):
+        compile_module.make_calibration_subset(
+            "object_detection", data_path, output_path, subset_size=1
+        )
+
+    assert existing.read_bytes() == b"keep.jpg"
+
+
 def test_imagenet_readiness_rejects_partial_class_tree(tmp_path: Path) -> None:
     """Organize ImageNet again when the existing class layout is incomplete."""
 

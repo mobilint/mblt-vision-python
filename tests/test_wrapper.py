@@ -124,6 +124,24 @@ def test_default_cache_dir_uses_private_temporary_fallback(
     assert cache_dir.stat().st_mode & 0o777 == 0o700
 
 
+def test_cache_directory_is_resolved_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not create or probe the artifact cache until an operation needs it."""
+
+    calls: list[str] = []
+
+    def resolve_cache_dir() -> str:
+        calls.append("resolved")
+        return "/tmp/mblt-model-zoo-cache"
+
+    monkeypatch.setattr(wrapper, "_resolved_cache_dir", None)
+    monkeypatch.setattr(wrapper, "_default_cache_dir", resolve_cache_dir)
+
+    assert calls == []
+    assert wrapper.get_mobilint_cache_dir() == "/tmp/mblt-model-zoo-cache"
+    assert wrapper.get_mobilint_cache_dir() == "/tmp/mblt-model-zoo-cache"
+    assert calls == ["resolved"]
+
+
 def test_onnx_runtime_defaults_to_cpu_provider() -> None:
     """Avoid accelerator provider probing unless callers explicitly opt in."""
 

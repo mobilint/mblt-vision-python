@@ -118,7 +118,7 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         ic = torch.amax(box_cls[-self.nc :, :], dim=0) > self.inv_conf_thres
         box_cls = box_cls[:, ic]  # (144, *)
         if box_cls.numel() == 0:
-            return torch.zeros((0, 6), dtype=torch.float32)  # (0, 6)
+            return box_cls.new_zeros((0, 6))
         anchors = self.anchors_as_tensor()
         stride = self.stride_as_tensor()
         box, scores = torch.split(

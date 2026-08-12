@@ -55,7 +55,14 @@ def normalize_core_mode(core_mode: str) -> CoreMode:
     return core_mode
 
 
-__all__ = ["CoreMode", "normalize_core_mode", "resolve_model_config", "MBLT_Engine"]
+__all__ = [
+    "CoreMode",
+    "MOBILINT_CACHE_DIR",
+    "get_mobilint_cache_dir",
+    "normalize_core_mode",
+    "resolve_model_config",
+    "MBLT_Engine",
+]
 
 
 def _derive_onnx_filename(file_cfg: dict[str, Any]) -> str | None:
@@ -105,7 +112,19 @@ def _default_cache_dir() -> str:
         return tempfile.mkdtemp(prefix="mblt_model_zoo-", dir=tempfile.gettempdir())
 
 
-MOBILINT_CACHE_DIR = _default_cache_dir()
+MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
+"""Preferred artifact cache root, without creating it during import."""
+
+_resolved_cache_dir: str | None = None
+
+
+def get_mobilint_cache_dir() -> str:
+    """Return a writable artifact cache directory, creating it only when needed."""
+
+    global _resolved_cache_dir
+    if _resolved_cache_dir is None:
+        _resolved_cache_dir = _default_cache_dir()
+    return _resolved_cache_dir
 
 
 def _load_onnxruntime() -> Any:
@@ -562,7 +581,7 @@ class MBLT_Engine:
                 "repo_id": repo_id,
                 "filename": filename,
                 "revision": revision,
-                "local_dir": MOBILINT_CACHE_DIR,
+                "local_dir": get_mobilint_cache_dir(),
             }
             if subfolder:
                 kwargs["subfolder"] = subfolder
