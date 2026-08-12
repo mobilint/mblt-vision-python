@@ -975,11 +975,121 @@ def process_mask_upsample(
     Returns:
         torch.Tensor: Upsampled and thresholded binary masks.
     """
+    target_shape = (int(shape[0]), int(shape[1]))
     c, mh, mw = protos.shape  # CHW
+
+    # Evaluate only the prototype pixels that contribute to each retained ROI.
+    # The ROI interpolation preserves the original global bilinear sampling
+    # coordinates, so it produces the same binary mask as the full-mask path.
+    if _use_roi_prototype_masks(masks_in, bboxes, c, mh, mw, target_shape):
+        return _process_mask_upsample_roi(protos, masks_in, bboxes, target_shape)
+
     masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)  # n, CHW
-    masks = scale_masks(masks, (shape[0], shape[1]))  # CHW
+    masks = scale_masks(masks, target_shape)  # CHW
     masks = crop_mask(masks, bboxes)  # CHW
     return masks.gt_(0.0)
+
+
+def _use_roi_prototype_masks(
+    masks_in: torch.Tensor,
+    bboxes: torch.Tensor,
+    channels: int,
+    proto_h: int,
+    proto_w: int,
+    shape: tuple[int, int],
+) -> bool:
+    """Return whether exact low-resolution ROI masking is expected to be cheaper."""
+    count = masks_in.shape[0]
+    if bboxes.numel() == 0:
+        return False
+    height, width = shape
+    clipped = bboxes[:, :4].clone()
+    clipped[:, 0::2].clamp_(0, width)
+    clipped[:, 1::2].clamp_(0, height)
+    roi_pixels = (
+        (clipped[:, 2] - clipped[:, 0]).clamp_min_(0).ceil()
+        * (clipped[:, 3] - clipped[:, 1]).clamp_min_(0).ceil()
+    ).sum()
+    # This is a conservative upper-bound for ROI work: the actual dot product
+    # runs at prototype resolution, while interpolation touches only ROI pixels.
+    full_work = count * (channels * proto_h * proto_w + height * width)
+    roi_work = channels * height * width + channels * roi_pixels
+    return bool(roi_work < full_work)
+
+
+def _process_mask_upsample_roi(
+    protos: torch.Tensor,
+    masks_in: torch.Tensor,
+    bboxes: torch.Tensor,
+    shape: tuple[int, int],
+) -> torch.Tensor:
+    """Create exact cropped masks from low-resolution prototype ROIs.
+
+    The interpolation grid uses global ``align_corners=False`` coordinates.
+    Therefore every target pixel samples the same prototype neighborhood as
+    ``scale_masks(coefficients @ protos)`` without evaluating pixels outside
+    its bounding box.
+    """
+    protos = protos.float()
+    channels, proto_h, proto_w = protos.shape
+    height, width = shape
+    top, left, bottom, right = _mask_scale_crop_bounds((proto_h, proto_w), shape)
+    crop_h, crop_w = bottom - top, right - left
+    masks = torch.zeros(
+        (masks_in.shape[0], height, width), dtype=torch.float32, device=protos.device
+    )
+    boxes = bboxes.to(protos.device)
+    for index, box in enumerate(boxes):
+        x1 = max(0, min(width, math.ceil(float(box[0]))))
+        y1 = max(0, min(height, math.ceil(float(box[1]))))
+        x2 = max(0, min(width, math.ceil(float(box[2]))))
+        y2 = max(0, min(height, math.ceil(float(box[3]))))
+        if x1 >= x2 or y1 >= y2:
+            continue
+        proto_x1 = max(0, math.floor((x1 + 0.5) * crop_w / width - 0.5))
+        proto_y1 = max(0, math.floor((y1 + 0.5) * crop_h / height - 0.5))
+        proto_x2 = min(crop_w, math.floor((x2 - 0.5) * crop_w / width - 0.5) + 2)
+        proto_y2 = min(crop_h, math.floor((y2 - 0.5) * crop_h / height - 0.5) + 2)
+        proto_x1, proto_x2 = left + proto_x1, left + proto_x2
+        proto_y1, proto_y2 = top + proto_y1, top + proto_y2
+        prototype_roi = protos[:, proto_y1:proto_y2, proto_x1:proto_x2]
+        lowres_mask = (masks_in[index] @ prototype_roi.reshape(channels, -1)).reshape(
+            1, 1, proto_y2 - proto_y1, proto_x2 - proto_x1
+        )
+        ys = torch.arange(y1, y2, device=protos.device, dtype=torch.float32)
+        xs = torch.arange(x1, x2, device=protos.device, dtype=torch.float32)
+        global_y, global_x = torch.meshgrid(ys, xs, indexing="ij")
+        local_y = (global_y + 0.5) * crop_h / height - 0.5 - (proto_y1 - top)
+        local_x = (global_x + 0.5) * crop_w / width - 0.5 - (proto_x1 - left)
+        grid = torch.stack(
+            (
+                (local_x + 0.5) * 2 / (proto_x2 - proto_x1) - 1,
+                (local_y + 0.5) * 2 / (proto_y2 - proto_y1) - 1,
+            ),
+            dim=-1,
+        ).unsqueeze(0)
+        masks[index, y1:y2, x1:x2] = F.grid_sample(
+            lowres_mask,
+            grid,
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=False,
+        )[0, 0]
+    return masks.gt_(0.0)
+
+
+def _mask_scale_crop_bounds(
+    mask_shape: tuple[int, int], target_shape: tuple[int, int]
+) -> tuple[int, int, int, int]:
+    """Return the crop applied by :func:`scale_masks` before interpolation."""
+    mask_h, mask_w = mask_shape
+    target_h, target_w = target_shape
+    gain = min(mask_h / target_h, mask_w / target_w)
+    pad_w = (mask_w - round(target_w * gain)) / 2
+    pad_h = (mask_h - round(target_h * gain)) / 2
+    top, left = round(pad_h - 0.1), round(pad_w - 0.1)
+    bottom, right = mask_h - round(pad_h + 0.1), mask_w - round(pad_w + 0.1)
+    return top, left, bottom, right
 
 
 def crop_mask(masks: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:

@@ -16,6 +16,7 @@ from mblt_vision.utils.postprocess.common import (
     nmsout2eval,
     normalize_image_shapes,
     normalize_ratio_pads,
+    process_mask_upsample,
     scale_coords,
     scale_masks,
 )
@@ -359,7 +360,9 @@ def test_engine_init_preserves_shifted_positional_mxq_runtime_arguments(
         lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs),
     )
 
-    engine = MBLT_Engine(
+    # This intentionally exercises the legacy shifted positional layout, which
+    # does not match the current typed ``MBLT_Engine`` constructor signature.
+    engine = cast(Any, MBLT_Engine)(
         {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
         "DEFAULT",
         str(mxq_path),
@@ -642,7 +645,9 @@ def test_engine_init_accepts_local_onnx_model_path(
     if model_path_style == "positional":
         engine = MBLT_Engine(model_config, "DEFAULT", str(onnx_path))
     elif model_path_style == "positional-runtime":
-        engine = MBLT_Engine(
+        # Keep this legacy positional-runtime invocation untyped: its argument
+        # order is normalized at runtime by ``MBLT_Engine``.
+        engine = cast(Any, MBLT_Engine)(
             model_config,
             "DEFAULT",
             str(onnx_path),
@@ -2388,6 +2393,30 @@ def test_scale_masks_matches_ultralytics_rounding() -> None:
     assert float(scaled[:, 0, :].max()) == pytest.approx(0.0)
     assert float(scaled[:, 1, :].max()) > 0.0
     assert float(scaled[:, -1, :].max()) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("shape", [(640, 640), (481, 640)])
+def test_roi_prototype_masking_preserves_full_mask_result(
+    shape: tuple[int, int],
+) -> None:
+    """ROI masking must retain the conventional path's binary mask exactly."""
+
+    generator = torch.Generator().manual_seed(42)
+    proto = torch.randn((32, 160, 160), generator=generator)
+    coefficients = torch.randn((40, 32), generator=generator)
+    # Small, fractional boxes activate the ROI path and exercise crop bounds.
+    starts = torch.rand((40, 2), generator=generator)
+    starts[:, 0] *= shape[1] - 80
+    starts[:, 1] *= shape[0] - 80
+    boxes = torch.cat((starts + 0.25, starts + 48.75), dim=1)
+
+    channels, mask_h, mask_w = proto.shape
+    full = (coefficients @ proto.float().view(channels, -1)).view(-1, mask_h, mask_w)
+    expected = crop_mask(scale_masks(full, shape), boxes).gt_(0.0)
+
+    actual = process_mask_upsample(proto, coefficients, boxes, shape)
+
+    assert torch.equal(actual, expected)
 
 
 def test_preprocess_with_metadata_returns_letterbox_ratio_pad() -> None:
