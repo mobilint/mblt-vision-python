@@ -175,7 +175,9 @@ def _evaluate_semantic_loader(
     """
 
     accumulator = SemanticMetricAccumulator(nc=nc)
-    for inputs, targets, _, _, _ in tqdm(loader, desc=description):
+    for inputs, targets, _shapes, _ratio_pads, _ in tqdm(loader, desc=description):
+        # TODO: Restore logits to original geometry using shapes and ratio_pads when
+        # Ultralytics adopts native-geometry semantic validation metrics.
         result = model.postprocess(model(inputs))
         semantic_mask = result.semantic_mask
         if semantic_mask is None:
