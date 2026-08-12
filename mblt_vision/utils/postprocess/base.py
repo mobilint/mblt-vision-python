@@ -608,6 +608,11 @@ class YOLODetectionPostBase(PostBase):
         Returns:
             list: Detection results with masks.
         """
+        if len(x) != len(proto_outs):
+            raise ValueError(
+                "Detection and prototype batch sizes must match for instance "
+                f"segmentation, got {len(x)} detections and {len(proto_outs)} prototypes."
+            )
         masks = []
         for pred, proto in zip(x, proto_outs):
             if proto.ndim != 3:

@@ -175,3 +175,20 @@ def test_detection_postprocessor_rejects_missing_head_count() -> None:
             {"LetterBox": {"img_size": [640, 640]}},
             {"task": "object_detection", "dataset": "coco"},
         )
+
+
+def test_segmentation_postprocessor_rejects_mismatched_prototype_batch() -> None:
+    """Do not silently drop detections when prototypes have fewer images."""
+
+    postprocessor = YOLODFLFreeSegPost(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "instance_segmentation", "nl": 3, "n_extra": 32},
+    )
+    detections = [torch.empty((0, 38)), torch.empty((0, 38))]
+    prototypes = torch.empty((1, 32, 160, 160))
+
+    with pytest.raises(
+        ValueError,
+        match="Detection and prototype batch sizes must match.*2 detections and 1 prototypes",
+    ):
+        postprocessor.masking(detections, prototypes)

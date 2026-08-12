@@ -104,9 +104,8 @@ def _default_cache_dir() -> str:
     preferred = Path(os.path.expanduser("~/.mblt_model_zoo"))
     try:
         preferred.mkdir(parents=True, exist_ok=True)
-        test_file = preferred / ".write_test"
-        test_file.touch(exist_ok=True)
-        test_file.unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile(prefix=".write_test-", dir=preferred):
+            pass
         return str(preferred)
     except OSError:
         return tempfile.mkdtemp(prefix="mblt_model_zoo-", dir=tempfile.gettempdir())

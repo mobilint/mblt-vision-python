@@ -124,6 +124,21 @@ def test_default_cache_dir_uses_private_temporary_fallback(
     assert cache_dir.stat().st_mode & 0o777 == 0o700
 
 
+def test_default_cache_dir_preserves_existing_probe_named_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Never remove a caller-owned file while checking cache writability."""
+
+    preferred = tmp_path / "mblt_model_zoo"
+    preferred.mkdir()
+    marker = preferred / ".write_test"
+    marker.write_bytes(b"caller-owned")
+    monkeypatch.setattr(wrapper.os.path, "expanduser", lambda _: str(preferred))
+
+    assert wrapper._default_cache_dir() == str(preferred)
+    assert marker.read_bytes() == b"caller-owned"
+
+
 def test_cache_directory_is_resolved_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
     """Do not create or probe the artifact cache until an operation needs it."""
 
