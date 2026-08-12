@@ -2,6 +2,13 @@
 
 import argparse
 import os
+import sys
+from pathlib import Path
+
+# ruff: noqa: E402
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from mblt_vision.utils.datasets import organize_ade20k
 from mblt_vision.utils.datasets.organizer import ADE20K_URL
@@ -15,7 +22,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output-dir",
-        default=os.path.expanduser("~/.mblt_vision/datasets/ADEChallengeData2016"),
+        default=os.path.expanduser("~/.mblt_model_zoo/datasets/ADEChallengeData2016"),
         help="Path to the organized validation dataset",
     )
     args = parser.parse_args()

@@ -80,6 +80,93 @@ def test_instance_segmentation_plot_supports_nonzero_coco_labels(
     assert save_path.is_file()
 
 
+def test_object_detection_plot_preserves_raw_output_coordinates() -> None:
+    """Inverse scaling for plotting must not mutate stored postprocess boxes."""
+
+    box_cls = torch.tensor([[40.0, 60.0, 160.0, 180.0, 0.9, 0.0]], dtype=torch.float32)
+    result = Results(
+        {"LetterBox": {"img_size": (200, 200)}},
+        {"task": "object_detection"},
+        [box_cls],
+    )
+    expected = box_cls.clone()
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    first = result.plot(image)
+    second = result.plot(image)
+
+    torch.testing.assert_close(box_cls, expected)
+    torch.testing.assert_close(result._box_cls_tensor(), expected)
+    assert np.array_equal(first, second)
+
+
+def test_plot_converts_rgb_array_source_to_bgr() -> None:
+    """Return OpenCV-order output when callers provide an RGB NumPy image."""
+
+    result = Results(
+        {"LetterBox": {"img_size": (1, 1)}},
+        {"task": "object_detection"},
+        [torch.zeros((0, 6), dtype=torch.float32)],
+    )
+    rgb = np.array([[[255, 0, 0]]], dtype=np.uint8)
+
+    plotted = result.plot(rgb)
+
+    assert np.array_equal(plotted, np.array([[[0, 0, 255]]], dtype=np.uint8))
+    assert np.array_equal(rgb, np.array([[[255, 0, 0]]], dtype=np.uint8))
+
+
+def test_pose_plot_hides_low_visibility_keypoints_and_limbs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Draw pose elements only when every required keypoint is visible."""
+
+    circles: list[tuple[int, int]] = []
+    limbs: list[tuple[tuple[int, int], tuple[int, int]]] = []
+
+    def capture_circle(
+        image: np.ndarray, center: tuple[int, int], *args: object, **kwargs: object
+    ) -> np.ndarray:
+        del args, kwargs
+        circles.append(center)
+        return image
+
+    def capture_line(
+        image: np.ndarray,
+        point1: tuple[int, int],
+        point2: tuple[int, int],
+        *args: object,
+        **kwargs: object,
+    ) -> np.ndarray:
+        del args, kwargs
+        limbs.append((point1, point2))
+        return image
+
+    monkeypatch.setattr(cv2, "circle", capture_circle)
+    monkeypatch.setattr(cv2, "line", capture_line)
+    keypoints = torch.zeros((17, 3), dtype=torch.float32)
+    keypoints[0] = torch.tensor([20.0, 20.0, 0.9])
+    keypoints[1] = torch.tensor([40.0, 20.0, 0.9])
+    box_cls = torch.cat(
+        [
+            torch.tensor([[10.0, 10.0, 50.0, 50.0, 0.9, 0.0]]),
+            keypoints.reshape(1, -1),
+        ],
+        dim=1,
+    )
+    result = Results(
+        {"LetterBox": {"img_size": (100, 100)}},
+        {"task": "pose_estimation", "n_extra": 51},
+        [box_cls],
+        conf_thres=0.5,
+    )
+
+    result.plot(np.zeros((100, 100, 3), dtype=np.uint8))
+
+    assert circles == [(20, 20), (40, 20)]
+    assert limbs == [((20, 20), (40, 20))]
+
+
 def test_obb_plot_uses_dotav1_palette(monkeypatch: pytest.MonkeyPatch) -> None:
     """Plot DOTAv1 boxes without consulting the COCO palette."""
 

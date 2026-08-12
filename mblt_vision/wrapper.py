@@ -391,6 +391,11 @@ class MBLT_Engine:
 
         _mxq_path_passed = bool(mxq_path)
         _onnx_path_passed = bool(onnx_path)
+        if _mxq_path_passed and not os.path.isfile(mxq_path):
+            raise FileNotFoundError(
+                "Explicit MXQ model path does not exist: "
+                f"{mxq_path}. Remove model_path/mxq_path to download the configured artifact."
+            )
         _dev_no_passed = dev_no is not None
         _core_mode_passed = core_mode is not None
         _target_cores_passed = target_cores is not None
@@ -448,41 +453,53 @@ class MBLT_Engine:
         self._onnx_model: ONNXBackend | None = None
         self._onnx_session: Any = None
 
-        if self.framework == "onnx":
-            ort = _load_onnxruntime()
-            resolved_onnx_path = self.file_cfg.get("onnx_path")
-            if not resolved_onnx_path:
-                raise RuntimeError(
-                    f"ONNX path not resolved for model {model_cls}. Make sure the model repository has an ONNX file."
+        try:
+            if self.framework == "onnx":
+                ort = _load_onnxruntime()
+                resolved_onnx_path = self.file_cfg.get("onnx_path")
+                if not resolved_onnx_path:
+                    raise RuntimeError(
+                        f"ONNX path not resolved for model {model_cls}. Make sure the model repository has an ONNX file."
+                    )
+                if not os.path.isfile(resolved_onnx_path):
+                    raise FileNotFoundError(
+                        f"ONNX file not found at: {resolved_onnx_path}"
+                    )
+
+                providers = _resolve_onnx_providers(ort, onnx_providers)
+                onnx_model = ONNXBackend(
+                    resolved_onnx_path, providers=providers, ort_module=ort
                 )
-            if not os.path.isfile(resolved_onnx_path):
-                raise FileNotFoundError(f"ONNX file not found at: {resolved_onnx_path}")
+                self._onnx_model = onnx_model
+                onnx_model.create()
+                self._onnx_session = onnx_model.session
+                self.model = self._onnx_session
+                self.input_name = self._onnx_session.get_inputs()[0].name
+                self.output_names = [o.name for o in self._onnx_session.get_outputs()]
+            else:
+                mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())
+                self._mxq_model = mxq_model
+                self.model = mxq_model
+                mxq_model.create()
+                mxq_model.launch()
 
-            providers = _resolve_onnx_providers(ort, onnx_providers)
-            onnx_model = ONNXBackend(
-                resolved_onnx_path, providers=providers, ort_module=ort
+                if mxq_model.get_dtype() == "DataType.Uint8":
+                    self.pre_cfg.pop("Normalize", None)
+
+            self.preprocessor = build_preprocess(self.pre_cfg)
+            self.postprocessor = build_postprocess(
+                self.pre_cfg, self.post_cfg, **self.postprocess_kwargs
             )
-            onnx_model.create()
-            self._onnx_model = onnx_model
-            self._onnx_session = onnx_model.session
-            self.model = self._onnx_session
-            self.input_name = self._onnx_session.get_inputs()[0].name
-            self.output_names = [o.name for o in self._onnx_session.get_outputs()]
-        else:
-            mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())
-            self._mxq_model = mxq_model
-            self.model = mxq_model
-            mxq_model.create()
-            mxq_model.launch()
-
-            if mxq_model.get_dtype() == "DataType.Uint8":
-                self.pre_cfg.pop("Normalize", None)
-
-        self.preprocessor = build_preprocess(self.pre_cfg)
-        self.postprocessor = build_postprocess(
-            self.pre_cfg, self.post_cfg, **self.postprocess_kwargs
-        )
-        self.device = torch.device("cpu")
+            self.device = torch.device("cpu")
+        except Exception:
+            for backend in (self._mxq_model, self._onnx_model):
+                if backend is None:
+                    continue
+                try:
+                    backend.dispose()
+                except Exception:
+                    pass
+            raise
 
     def _mxq_backend_kwargs(self) -> dict[str, Any]:
         """Builds the MXQ backend kwargs from the resolved file config."""

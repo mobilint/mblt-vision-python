@@ -222,6 +222,124 @@ def test_model_path_defaults_to_local_onnx_for_onnx_framework(tmp_path: Path) ->
     assert "mxq_path" not in engine.file_cfg or not engine.file_cfg["mxq_path"]
 
 
+@pytest.mark.parametrize("path_argument", ["model_path", "mxq_path"])
+def test_engine_init_rejects_nonexistent_explicit_mxq_path(
+    tmp_path: Path, path_argument: str
+) -> None:
+    """Do not replace an explicit missing MXQ path with a Hub artifact."""
+
+    missing_path = tmp_path / "missing.mxq"
+    model_config = {
+        "file_cfg": {
+            "repo_id": "mobilint/example",
+            "filename": "model.mxq",
+            "revision": "main",
+        },
+        "pre_cfg": {},
+        "post_cfg": {},
+    }
+
+    with pytest.raises(
+        FileNotFoundError, match=r"Explicit MXQ model path.*missing\.mxq"
+    ):
+        MBLT_Engine(model_config, **{path_argument: str(missing_path)})
+
+
+def test_engine_init_disposes_mxq_backend_after_postprocess_setup_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Dispose an acquired NPU backend when later engine setup fails."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+    disposed = False
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            nonlocal disposed
+            disposed = True
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(
+        wrapper,
+        "build_postprocess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("invalid postprocess")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="invalid postprocess"):
+        MBLT_Engine(
+            {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
+            model_path=str(mxq_path),
+        )
+
+    assert disposed
+
+
+def test_engine_init_disposes_onnx_backend_after_preprocess_setup_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Dispose an acquired ONNX backend when later engine setup fails."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+    disposed = False
+
+    class _Session:
+        def get_inputs(self) -> list[Any]:
+            return [type("Input", (), {"name": "input"})()]
+
+        def get_outputs(self) -> list[Any]:
+            return [type("Output", (), {"name": "output"})()]
+
+    class _FakeONNXBackend:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+            self.session: _Session | None = None
+
+        def create(self) -> None:
+            self.session = _Session()
+
+        def dispose(self) -> None:
+            nonlocal disposed
+            disposed = True
+            self.session = None
+
+    monkeypatch.setattr(wrapper, "ONNXBackend", _FakeONNXBackend)
+    monkeypatch.setattr(wrapper, "_load_onnxruntime", lambda: object())
+    monkeypatch.setattr(
+        wrapper,
+        "build_preprocess",
+        lambda config: (_ for _ in ()).throw(ValueError("invalid preprocess")),
+    )
+
+    with pytest.raises(ValueError, match="invalid preprocess"):
+        MBLT_Engine(
+            {
+                "file_cfg": {"onnx_path": str(onnx_path)},
+                "pre_cfg": {},
+                "post_cfg": {},
+            },
+            framework="onnx",
+        )
+
+    assert disposed
+
+
 def test_engine_init_accepts_local_mxq_model_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

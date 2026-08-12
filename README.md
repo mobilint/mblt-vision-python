@@ -6,7 +6,7 @@ typed postprocessing results for image classification, depth estimation, face an
 object detection, OBB, instance and semantic segmentation,
 and pose estimation.
 
-Version `0.0.1` is the initial standalone release.
+Version `0.0.0` is the initial standalone release.
 
 ## Installation
 

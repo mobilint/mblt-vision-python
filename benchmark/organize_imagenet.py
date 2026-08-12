@@ -7,6 +7,13 @@ dataset and organizes them into a structure suitable for the model zoo.
 
 import argparse
 import os
+import sys
+from pathlib import Path
+
+# ruff: noqa: E402
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from mblt_vision.utils.datasets import organize_imagenet
 
@@ -33,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=os.path.expanduser("~/.mblt_vision/datasets/imagenet"),
+        default=os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
         help="Path to the directory to save the organized dataset",
     )
     args = parser.parse_args()

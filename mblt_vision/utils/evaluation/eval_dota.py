@@ -72,7 +72,8 @@ def _load_ground_truths(
         dataset: Dataset containing image IDs and image paths.
 
     Returns:
-        Mapping from image ID to tensors for classes, polygons, and ``xywhr`` boxes.
+        Mapping from image ID to tensors for positive and ignored classes, polygons,
+        and ``xywhr`` boxes.
     """
     label_dir = Path(data_path) / "labels" / "val"
     original_label_dir = Path(data_path) / "labels" / "val_original"
@@ -84,12 +85,22 @@ def _load_ground_truths(
         original_label_path = original_label_dir / f"{image_id}.txt"
         classes = []
         polygons = []
+        ignore_classes = []
+        ignore_polygons = []
 
         if label_path.is_file():
-            for line in label_path.read_text(encoding="utf-8").splitlines():
+            for line_number, line in enumerate(
+                label_path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
                 parts = line.split()
-                if len(parts) < 9:
+                if not parts:
                     continue
+                if len(parts) < 9:
+                    raise ValueError(
+                        "Malformed normalized DOTAv1 annotation at "
+                        f"{label_path}:{line_number}: expected at least 9 fields, "
+                        f"got {len(parts)}."
+                    )
                 cls = _label_to_index(parts[0])
                 if cls >= get_dotav1_class_num():
                     raise ValueError(
@@ -101,16 +112,16 @@ def _load_ground_truths(
                 if coords.numel() and float(coords.max()) <= 1.5:
                     coords[:, 0] *= width
                     coords[:, 1] *= height
-                classes.append(cls)
-                polygons.append(coords)
+                if len(parts) >= 10 and parts[9] in {"1", "2"}:
+                    ignore_classes.append(cls)
+                    ignore_polygons.append(coords)
+                else:
+                    classes.append(cls)
+                    polygons.append(coords)
         elif original_label_path.is_file():
             for line in original_label_path.read_text(encoding="utf-8").splitlines():
                 parts = line.split()
                 if len(parts) < 9:
-                    continue
-                # Official DOTAv1 labels use ``1`` for difficult objects. Keep ``2``
-                # ignored for compatibility with previously supported label exports.
-                if len(parts) >= 10 and parts[9] in {"1", "2"}:
                     continue
                 cls = _label_to_index(parts[8])
                 if cls >= get_dotav1_class_num():
@@ -120,8 +131,12 @@ def _load_ground_truths(
                 coords = torch.tensor(
                     [float(value) for value in parts[:8]], dtype=torch.float32
                 ).reshape(4, 2)
-                classes.append(cls)
-                polygons.append(coords)
+                if len(parts) >= 10 and parts[9] in {"1", "2"}:
+                    ignore_classes.append(cls)
+                    ignore_polygons.append(coords)
+                else:
+                    classes.append(cls)
+                    polygons.append(coords)
 
         polygon_tensor = (
             torch.stack(polygons).to(torch.float32)
@@ -134,10 +149,24 @@ def _load_ground_truths(
         else:
             boxes = torch.zeros((0, 5), dtype=torch.float32)
 
+        ignore_polygon_tensor = (
+            torch.stack(ignore_polygons).to(torch.float32)
+            if ignore_polygons
+            else torch.zeros((0, 4, 2), dtype=torch.float32)
+        )
+        if ignore_polygon_tensor.numel():
+            ignored_xywhr = xyxyxyxy2xywhr(ignore_polygon_tensor)
+            ignore_boxes = cast(torch.Tensor, ignored_xywhr).to(torch.float32)
+        else:
+            ignore_boxes = torch.zeros((0, 5), dtype=torch.float32)
+
         ground_truths[image_id] = {
             "cls": torch.tensor(classes, dtype=torch.int64),
             "polygons": polygon_tensor,
             "bboxes": boxes,
+            "ignore_cls": torch.tensor(ignore_classes, dtype=torch.int64),
+            "ignore_polygons": ignore_polygon_tensor,
+            "ignore_bboxes": ignore_boxes,
         }
     return ground_truths
 
@@ -204,6 +233,7 @@ def _compute_ap(
 
 def _ap_per_class(
     tp: np.ndarray,
+    ignore: np.ndarray,
     conf: np.ndarray,
     pred_cls: np.ndarray,
     target_cls: np.ndarray,
@@ -216,6 +246,7 @@ def _ap_per_class(
 
     order = np.argsort(-conf)
     tp = tp[order]
+    ignore = ignore[order]
     conf = conf[order]
     pred_cls = pred_cls[order]
 
@@ -224,18 +255,20 @@ def _ap_per_class(
     for class_index, class_id in enumerate(unique_classes):
         pred_mask = pred_cls == class_id
         num_labels = target_count[class_index]
-        num_predictions = pred_mask.sum()
-        if num_predictions == 0 or num_labels == 0:
+        if not pred_mask.any() or num_labels == 0:
             continue
 
-        false_positive = (1 - tp[pred_mask]).cumsum(0)
-        true_positive = tp[pred_mask].cumsum(0)
-        recall = true_positive / (num_labels + eps)
-        precision = true_positive / (true_positive + false_positive + eps)
+        class_tp = tp[pred_mask]
+        class_ignore = ignore[pred_mask]
         for iou_index in range(tp.shape[1]):
-            ap[class_index, iou_index], _, _ = _compute_ap(
-                recall[:, iou_index], precision[:, iou_index]
-            )
+            keep = ~class_ignore[:, iou_index]
+            if not keep.any():
+                continue
+            true_positive = class_tp[keep, iou_index].cumsum(0)
+            false_positive = (1 - class_tp[keep, iou_index]).cumsum(0)
+            recall = true_positive / (num_labels + eps)
+            precision = true_positive / (true_positive + false_positive + eps)
+            ap[class_index, iou_index], _, _ = _compute_ap(recall, precision)
     return ap
 
 
@@ -267,7 +300,7 @@ def _match_predictions(
 
 def _empty_stats() -> dict[str, list[np.ndarray]]:
     """Create an empty DOTAv1 metric statistics accumulator."""
-    return {"tp": [], "conf": [], "pred_cls": [], "target_cls": []}
+    return {"tp": [], "ignore": [], "conf": [], "pred_cls": [], "target_cls": []}
 
 
 def _append_stats(
@@ -319,21 +352,29 @@ def _ground_truth_to_input_space(
     ratio_pad: RatioPad | None,
 ) -> dict[str, torch.Tensor]:
     """Transform original-image DOTAv1 polygons to letterboxed ``xywhr`` boxes."""
-    classes = ground_truth["cls"]
-    polygons = ground_truth.get("polygons")
-    if polygons is None:
-        return {"cls": classes, "bboxes": ground_truth["bboxes"]}
-    if polygons.numel() == 0:
-        return {"cls": classes, "bboxes": torch.zeros((0, 5), dtype=torch.float32)}
-
     gain, pad = _ratio_pad_for_shape(input_shape, org_shape, ratio_pad)
-    transformed = polygons.clone().to(torch.float32)
-    transformed[..., 0] = transformed[..., 0] * gain + pad[0]
-    transformed[..., 1] = transformed[..., 1] * gain + pad[1]
-    transformed_boxes = xyxyxyxy2xywhr(transformed)
+
+    def transform(polygons: torch.Tensor | None, boxes: torch.Tensor) -> torch.Tensor:
+        if polygons is None:
+            return boxes
+        if polygons.numel() == 0:
+            return torch.zeros((0, 5), dtype=torch.float32)
+        transformed = polygons.clone().to(torch.float32)
+        transformed[..., 0] = transformed[..., 0] * gain + pad[0]
+        transformed[..., 1] = transformed[..., 1] * gain + pad[1]
+        return cast(torch.Tensor, xyxyxyxy2xywhr(transformed)).to(torch.float32)
+
+    transformed_boxes = transform(ground_truth.get("polygons"), ground_truth["bboxes"])
+    ignore_classes = ground_truth.get("ignore_cls", torch.zeros(0, dtype=torch.int64))
+    ignore_boxes = transform(
+        ground_truth.get("ignore_polygons"),
+        ground_truth.get("ignore_bboxes", torch.zeros((0, 5), dtype=torch.float32)),
+    )
     return {
-        "cls": classes,
-        "bboxes": cast(torch.Tensor, transformed_boxes).to(torch.float32),
+        "cls": ground_truth["cls"],
+        "bboxes": transformed_boxes,
+        "ignore_cls": ignore_classes,
+        "ignore_bboxes": ignore_boxes,
     }
 
 
@@ -351,8 +392,19 @@ def _process_image_stats(
     else:
         iou = batch_probiou(target["bboxes"], predictions["bboxes"])
         true_positive = _match_predictions(predictions["cls"], target["cls"], iou, iouv)
+    ignore = np.zeros_like(true_positive)
+    ignore_classes = target.get("ignore_cls", torch.zeros(0, dtype=torch.int64))
+    ignore_boxes = target.get("ignore_bboxes", torch.zeros((0, 5), dtype=torch.float32))
+    if ignore_classes.numel() and predictions["cls"].numel():
+        ignored_iou = batch_probiou(ignore_boxes, predictions["bboxes"])
+        same_class = ignore_classes[:, None] == predictions["cls"]
+        ignored_matches = (
+            (ignored_iou[:, :, None] >= iouv[None, None, :]) & same_class[:, :, None]
+        ).any(dim=0)
+        ignore = ignored_matches.cpu().numpy() & ~true_positive
     return {
         "tp": true_positive,
+        "ignore": ignore,
         "conf": predictions["conf"].cpu().numpy(),
         "pred_cls": predictions["cls"].cpu().numpy(),
         "target_cls": target_cls,
@@ -374,6 +426,11 @@ def _evaluate_stats(stats: dict[str, list[np.ndarray]], niou: int = 10) -> DOTAR
         if stats["tp"]
         else np.zeros((0, niou), dtype=bool)
     )
+    ignore = (
+        np.concatenate(stats["ignore"], 0)
+        if stats["ignore"]
+        else np.zeros((0, niou), dtype=bool)
+    )
     conf = (
         np.concatenate(stats["conf"], 0)
         if stats["conf"]
@@ -384,7 +441,7 @@ def _evaluate_stats(stats: dict[str, list[np.ndarray]], niou: int = 10) -> DOTAR
         if stats["pred_cls"]
         else np.zeros(0, dtype=np.float64)
     )
-    ap = _ap_per_class(tp, conf, pred_cls, target_cls)
+    ap = _ap_per_class(tp, ignore, conf, pred_cls, target_cls)
     if ap.size == 0:
         return DOTAResult(map5095=0.0, map50=0.0)
     return DOTAResult(map5095=float(ap.mean()), map50=float(ap[:, 0].mean()))

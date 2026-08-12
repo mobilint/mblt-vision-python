@@ -36,11 +36,13 @@ Use the unified runner for every Vision task. It chooses the evaluator from
 python benchmark/benchmark_vision_models.py \
   --models ResNet50 \
   --task image_classification \
-  --data-path ~/.mblt_vision/datasets/imagenet
+  --target-device aries-rb \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet
 ```
 
 Use `--framework onnx` for ONNX Runtime, `--core-mode all` to compare supported
-MXQ core modes, and `--fail-fast` to stop on the first failed target. Compare
+MXQ core modes, `--target-device regulus-ra` or `regulus-rb` for the corresponding
+Regulus board artifact, and `--fail-fast` to stop on the first failed target. Compare
 completed runs with:
 
 ```bash

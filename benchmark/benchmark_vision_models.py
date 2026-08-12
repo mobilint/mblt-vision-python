@@ -28,10 +28,12 @@ from mblt_vision.benchmark.summary_utils import (
 )
 from mblt_vision._model_paths import resolve_framework
 from mblt_vision._tasks import VISION_TASKS, normalize_vision_task
+from mblt_npu import normalize_target_device
 
 CoreMode = Literal["single", "multi", "global4", "global8"]
 CORE_MODES: tuple[CoreMode, ...] = ("single", "multi", "global4", "global8")
 TASK_CHOICES = VISION_TASKS
+SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 
 
 def parse_unit_interval(value: str) -> float:
@@ -67,6 +69,21 @@ def _parse_task(value: str) -> str:
         return normalize_vision_task(value)
     except (TypeError, ValueError) as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _parse_target_device(value: str) -> str:
+    """Normalize and validate a benchmark target board."""
+
+    try:
+        target_device = normalize_target_device(value)
+    except TypeError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    if target_device not in SUPPORTED_TARGET_DEVICES:
+        raise argparse.ArgumentTypeError(
+            f"unsupported target device {value!r}; expected one of "
+            f"{sorted(SUPPORTED_TARGET_DEVICES)}."
+        )
+    return target_device
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -107,6 +124,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--framework", choices=["mxq", "onnx"], help="Explicit inference framework."
+    )
+    parser.add_argument(
+        "--target-device",
+        type=_parse_target_device,
+        default="aries-rb",
+        help="NPU board: aries-rb, regulus-ra, or regulus-rb (legacy aries/regulus accepted).",
     )
     parser.add_argument(
         "--core-mode",
@@ -316,6 +339,7 @@ def _run_target(
         "core_mode": core_mode,
         "task": args.task,
         "batch_size": args.batch_size,
+        "target_device": args.target_device,
         "status": "error",
     }
     model = None
@@ -329,6 +353,7 @@ def _run_target(
             "onnx_path": args.onnx_path,
             "framework": args.framework,
             "dev_no": args.dev_no,
+            "target_device": args.target_device,
         }
         if core_mode != "onnx":
             engine_kwargs["core_mode"] = core_mode

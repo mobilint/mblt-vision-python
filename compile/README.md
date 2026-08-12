@@ -28,7 +28,7 @@ from mblt_vision.compile.vision import compile_vision_model
 output_path = compile_vision_model(
     "alexnet",
     target_device="aries-rb",
-    data_path="~/.mblt_vision/datasets/imagenet",
+    data_path="~/.mblt_model_zoo/datasets/imagenet",
     save_path="./alexnet.mxq",
 )
 print(output_path)
@@ -40,7 +40,7 @@ print(output_path)
 mblt-vision compile \
   --model-cls alexnet \
   --target-device aries-rb \
-  --data-path ~/.mblt_vision/datasets/imagenet \
+  --data-path ~/.mblt_model_zoo/datasets/imagenet \
   --save-path ./alexnet.mxq
 ```
 
@@ -55,8 +55,8 @@ mblt-vision compile --model-cls alexnet --target-device aries-rb --calib-data-pa
 Use `--model-type` for a non-default YAML variant and `--model-path` or `--onnx-path` to prefer a
 local ONNX file. If that path is omitted or does not exist, the configured Hugging Face repository
 supplies the ONNX artifact. Downloaded ONNX files and compiled outputs use
-`~/.mblt_vision`; without `--save-path`, the compiler writes
-`~/.mblt_vision/<onnx-stem>.mxq`.
+`~/.mblt_model_zoo`; without `--save-path`, the compiler writes
+`~/.mblt_model_zoo/<onnx-stem>.mxq`.
 
 `target_device` / `--target-device` is required: choose `aries-rb`, `regulus-ra`, or `regulus-rb`
 to compile an artifact for that board.
@@ -92,7 +92,7 @@ Compilation maps model tasks to the packaged dataset registry:
 
 `--data-path` is an organized dataset root. An existing ready layout is reused; otherwise the
 registry-backed organizer downloads and prepares the dataset. When no path is supplied, the
-registry default under `~/.mblt_vision/datasets` is used.
+registry default under `~/.mblt_model_zoo/datasets` is used.
 
 NYU Depth and ADE20K use their registry download URLs. Cityscapes requires the manually downloaded
 official `leftImg8bit_trainvaltest.zip` and `gtFine_trainvaltest.zip` archives; place both inside the

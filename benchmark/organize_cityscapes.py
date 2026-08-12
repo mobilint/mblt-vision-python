@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+# ruff: noqa: E402
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from mblt_vision.utils.datasets import organize_cityscapes
 
@@ -25,7 +32,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir",
-        default="~/.mblt_vision/datasets/cityscapes",
+        default="~/.mblt_model_zoo/datasets/cityscapes",
         help="Destination for the flat images/ and annotations/ directories",
     )
     args = parser.parse_args()

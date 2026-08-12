@@ -60,6 +60,8 @@ description: >-
 - Keep all executable benchmark scripts directly in `benchmark/`; reusable reporting helpers belong
   in `mblt_vision.benchmark`.
 - Keep all executable compile scripts and the compile guide directly in `compile/`.
+- Use `~/.mblt_model_zoo` as the shared artifact and dataset cache root. Keep organizer defaults,
+  dataset registry YAMLs, compilation defaults, and documented commands aligned to it.
 - For every significant package change (public API, CLI, runtime/dependency, artifact layout, or
   tooling structure), update `AGENTS.md`, this canonical skill, the Claude skill entry point when
   its workflow changes, and the relevant README in the same change.

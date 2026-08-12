@@ -198,6 +198,64 @@ def test_benchmark_continues_after_evaluator_type_error(
     assert rows[0]["error"] == "TypeError: Unsupported model output"
 
 
+def test_benchmark_forwards_normalized_target_device(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Construct each benchmark engine with the requested board identifier."""
+
+    engine_kwargs: list[dict[str, object]] = []
+
+    class FakeEngine:
+        """Minimal benchmark engine that records its construction options."""
+
+        def __init__(self, **kwargs: object) -> None:
+            engine_kwargs.append(kwargs)
+
+        def dispose(self) -> None:
+            """Release the fake benchmark engine."""
+
+    import mblt_vision as vision
+
+    monkeypatch.setattr(vision, "MBLT_Engine", FakeEngine)
+    monkeypatch.setattr(
+        benchmark_vision_models,
+        "_evaluate",
+        lambda *args: (0.9, "top1_accuracy", {"top1_accuracy": 0.9}),
+    )
+
+    assert (
+        benchmark_vision_models.main(
+            [
+                "--models",
+                "model-a",
+                "--task",
+                "image_classification",
+                "--target-device",
+                "regulus",
+                "--data-path",
+                str(tmp_path / "dataset"),
+                "--results-dir",
+                str(tmp_path / "results"),
+                "--no-plot",
+            ]
+        )
+        == 0
+    )
+    assert engine_kwargs == [
+        {
+            "model_cls": "model-a",
+            "model_type": "DEFAULT",
+            "model_path": "",
+            "mxq_path": "",
+            "onnx_path": "",
+            "framework": None,
+            "dev_no": 0,
+            "target_device": "regulus-ra",
+            "core_mode": "global8",
+        }
+    ]
+
+
 def test_comparison_rejects_matching_metrics_from_different_tasks(
     tmp_path: Path,
 ) -> None:

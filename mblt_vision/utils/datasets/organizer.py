@@ -433,7 +433,7 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
 def organize_imagenet(
     image_dir: str,
     xml_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_vision/datasets/imagenet"),
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
 ) -> None:
     """Organizes the ImageNet dataset, unpacking archives if necessary.
 
@@ -441,7 +441,7 @@ def organize_imagenet(
         image_dir (str): Path or URL to the image directory or archive (.tar).
         xml_dir (str): Path or URL to the XML directory or archive (.tgz).
         output_dir (str, optional): Directory to store the organized dataset.
-            Defaults to ~/.mblt_vision/datasets/imagenet.
+            Defaults to ~/.mblt_model_zoo/datasets/imagenet.
     """
     with TemporaryDirectory() as temp_dir:
         local_image_dir, local_xml_dir = _resolve_sources(
@@ -508,7 +508,7 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None
 def organize_coco(
     image_dir: str,
     annotation_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_vision/datasets/coco"),
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
 ) -> None:
     """Organizes the COCO dataset, unpacking archives if necessary.
 
@@ -516,7 +516,7 @@ def organize_coco(
         image_dir (str): Path or URL to the image zip file or directory.
         annotation_dir (str): Path or URL to the annotation zip file or directory.
         output_dir (str, optional): Directory to store the organized dataset.
-            Defaults to ~/.mblt_vision/datasets/coco.
+            Defaults to ~/.mblt_model_zoo/datasets/coco.
     """
     with TemporaryDirectory() as temp_dir:
         local_image_dir, local_annotation_dir = _resolve_sources(
@@ -577,7 +577,7 @@ def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) ->
 def organize_widerface(
     image_dir: str,
     annotation_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_vision/datasets/widerface"),
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/widerface"),
 ) -> None:
     """Organizes the WiderFace dataset, unpacking archives if necessary.
 
@@ -585,7 +585,7 @@ def organize_widerface(
         image_dir (str): Path or URL to the image zip file or directory.
         annotation_dir (str): Path or URL to the annotation zip file or directory.
         output_dir (str, optional): Directory to store the organized dataset.
-            Defaults to ~/.mblt_vision/datasets/widerface.
+            Defaults to ~/.mblt_model_zoo/datasets/widerface.
     """
     with TemporaryDirectory() as temp_dir:
         local_image_dir, local_annotation_dir = _resolve_sources(
@@ -808,7 +808,7 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
 
 def organize_nyu_depth(
     dataset_path: str = NYU_DEPTH_URL,
-    output_dir: str = os.path.expanduser("~/.mblt_vision/datasets/nyu-depth"),
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/nyu-depth"),
 ) -> None:
     """Organizes NYU Depth, downloading and unpacking an archive when necessary.
 
@@ -949,7 +949,7 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
 def organize_ade20k(
     dataset_path: str = ADE20K_URL,
     output_dir: str = os.path.expanduser(
-        "~/.mblt_vision/datasets/ADEChallengeData2016"
+        "~/.mblt_model_zoo/datasets/ADEChallengeData2016"
     ),
 ) -> None:
     """Organizes ADE20K validation data, downloading and unpacking when necessary."""
@@ -1054,7 +1054,7 @@ def _collect_cityscapes_validation_files(
 def organize_cityscapes(
     image_dir: str,
     annotation_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_vision/datasets/cityscapes"),
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/cityscapes"),
 ) -> None:
     """Install official Cityscapes validation archives as lossless flat PNG pairs.
 
@@ -1339,10 +1339,6 @@ def _write_dotav1_yolo_labels(
                 or fields[0].startswith("gsd:")
             ):
                 continue
-            # Official DOTAv1 labels use ``1`` for difficult objects. Keep ``2``
-            # ignored for compatibility with previously supported label exports.
-            if fields[9] in {"1", "2"}:
-                continue
             class_name = fields[8]
             if class_name not in DOTAV1_CLASS_TO_IDX:
                 raise ValueError(
@@ -1356,6 +1352,9 @@ def _write_dotav1_yolo_labels(
             converted_lines.append(
                 f"{DOTAV1_CLASS_TO_IDX[class_name]} "
                 + " ".join(f"{coordinate:.8g}" for coordinate in normalized)
+                # The trailing flag is normalized-label metadata, not a YOLO OBB
+                # coordinate. It preserves official difficult regions for evaluation.
+                + f" {int(fields[9] in {'1', '2'})}"
             )
     with open(output_path, "w", encoding="utf-8") as output_file:
         output_file.write("\n".join(converted_lines))
@@ -1539,7 +1538,7 @@ def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
 
 def organize_dotav1(
     dataset_path: str,
-    output_dir: str = os.path.expanduser("~/.mblt_vision/datasets/dotav1"),
+    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/dotav1"),
 ) -> None:
     """Organizes a validation-only DOTAv1 dataset.
 

@@ -99,6 +99,7 @@ class Results:
                 raise ValueError(
                     f"Image arrays must have HWC shape with three channels, got {source_img.shape}."
                 )
+            source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
         elif isinstance(source_path, (str, Path)):
             image_path = Path(source_path)
             if not image_path.is_file():
@@ -510,7 +511,7 @@ class Results:
         self.scores = box_cls[:, 4]
         self.boxes = scale_boxes(
             img1_shape,
-            box_cls[:, :4],
+            box_cls[:, :4].clone(),
             img0_shape,
         )
         boxes = self.boxes
@@ -602,7 +603,7 @@ class Results:
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         self.kpts = scale_coords(
             self.pre_cfg["LetterBox"]["img_size"],
-            box_cls[:, 6:].reshape(-1, 17, 3),
+            box_cls[:, 6:].reshape(-1, 17, 3).clone(),
             img0_shape,
         )
         kpts = self.kpts
@@ -611,8 +612,8 @@ class Results:
         for kpt in kpts:
             for i, (x, y, v) in enumerate(kpt):
                 color_k = get_coco_keypoint_palette(i)
-                # if v < self.conf_thres:
-                #    continue
+                if float(v) < self.conf_thres:
+                    continue
                 cv2.circle(
                     img,
                     (int(x), int(y)),
@@ -622,12 +623,12 @@ class Results:
                     lineType=cv2.LINE_AA,
                 )
             for j, sk in enumerate(get_coco_pose_skeleton()):
+                conf1 = float(kpt[sk[0] - 1, 2])
+                conf2 = float(kpt[sk[1] - 1, 2])
+                if conf1 < self.conf_thres or conf2 < self.conf_thres:
+                    continue
                 pos1 = (int(kpt[sk[0] - 1, 0]), int(kpt[sk[0] - 1, 1]))
                 pos2 = (int(kpt[sk[1] - 1, 0]), int(kpt[sk[1] - 1, 1]))
-                # conf1 = kpt[sk[0] - 1, 2]
-                # conf2 = kpt[sk[1] - 1, 2]
-                # if conf1 < self.conf_thres or conf2 < self.conf_thres:
-                #    continue
                 cv2.line(
                     img,
                     pos1,

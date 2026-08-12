@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import inspect
 import tarfile
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from zipfile import ZipFile
 
 import pytest
 import requests
+from PIL import Image
 
 import mblt_vision.utils.datasets.organizer as organizer
 from mblt_vision.utils.datasets import readiness as readiness_module
@@ -29,6 +31,53 @@ class _DummyTqdm:
 
     def update(self, value: int) -> None:
         self.updated += value
+
+
+def test_dotav1_normalized_labels_preserve_difficult_metadata(tmp_path: Path) -> None:
+    """Keep official difficult regions in the normalized label export."""
+
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (100, 50)).save(image_path)
+    source_path = tmp_path / "source.txt"
+    source_path.write_text(
+        "imagesource:GoogleEarth\n"
+        "0 0 20 0 20 20 0 20 plane 0\n"
+        "30 0 50 0 50 20 30 20 plane 1\n",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "normalized.txt"
+
+    organizer._write_dotav1_yolo_labels(
+        str(image_path), str(source_path), str(output_path)
+    )
+
+    assert output_path.read_text(encoding="utf-8").splitlines() == [
+        "0 0 0 0.2 0 0.2 0.4 0 0.4 0",
+        "0 0.3 0 0.5 0 0.5 0.4 0.3 0.4 1",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("organize_dataset", "dataset_name"),
+    [
+        (organizer.organize_imagenet, "imagenet"),
+        (organizer.organize_coco, "coco"),
+        (organizer.organize_widerface, "widerface"),
+        (organizer.organize_nyu_depth, "nyu-depth"),
+        (organizer.organize_ade20k, "ADEChallengeData2016"),
+        (organizer.organize_cityscapes, "cityscapes"),
+        (organizer.organize_dotav1, "dotav1"),
+    ],
+)
+def test_organizer_defaults_match_registry_cache_root(
+    organize_dataset: object, dataset_name: str
+) -> None:
+    """Write datasets where the packaged registry resolves them by default."""
+
+    output_dir = inspect.signature(organize_dataset).parameters["output_dir"].default
+    assert output_dir == str(
+        Path.home() / ".mblt_model_zoo" / "datasets" / dataset_name
+    )
 
 
 class _FakeResponse:

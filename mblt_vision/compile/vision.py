@@ -549,6 +549,10 @@ def validate_calibration_dataset(calib_data_path: str | Path) -> Path:
             raise ValueError(
                 f"Calibration tensor {array_path} must use float32; got {array.dtype}."
             )
+        if not np.isfinite(array).all():
+            raise ValueError(
+                f"Calibration tensor {array_path} must contain only finite values."
+            )
         if not array.flags.c_contiguous:
             raise ValueError(f"Calibration tensor {array_path} must be C-contiguous.")
     return root
@@ -786,6 +790,11 @@ def _resolve_compile_onnx_path(
     if model_path is not None:
         local_path = Path(model_path).expanduser()
         if local_path.is_file():
+            if local_path.suffix.lower() != ".onnx":
+                raise ValueError(
+                    "Compilation requires an ONNX model; "
+                    f"local model path must end with `.onnx`, got {local_path}."
+                )
             return local_path.resolve()
     configured_path = Path(str(file_cfg.get("onnx_path", ""))).expanduser()
     if configured_path.is_file():

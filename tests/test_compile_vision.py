@@ -15,6 +15,7 @@ from mblt_vision.compile.vision import (
     prepare_calibration_arrays,
     resolve_quantization_values,
     select_calibration_images,
+    validate_calibration_dataset,
 )
 from mblt_vision.utils import datasets as dataset_utils
 from mblt_vision.utils.datasets import readiness as readiness_module
@@ -457,6 +458,20 @@ def test_prepare_calibration_arrays_rejects_chw(tmp_path: Path) -> None:
         prepare_calibration_arrays(_Engine(), [source], tmp_path / "arrays")  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("invalid_value", [np.nan, np.inf, -np.inf])
+def test_validate_calibration_dataset_rejects_nonfinite_values(
+    tmp_path: Path, invalid_value: float
+) -> None:
+    """Reject non-finite ready calibration tensors before compilation."""
+
+    array = np.ones((2, 2, 3), dtype=np.float32)
+    array[0, 0, 0] = invalid_value
+    np.save(tmp_path / "selected.npy", array)
+
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        validate_calibration_dataset(tmp_path)
+
+
 def test_quantization_explicit_values_do_not_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -765,6 +780,24 @@ def test_compile_uses_obb_task_from_model_config(
     )
 
     assert calls["calibration_kwargs"]["output"] == 1
+
+
+def test_compile_rejects_non_onnx_local_model_with_ready_calibration_data(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fail clearly before sending an MXQ file to the ONNX compiler backend."""
+
+    mxq_path = tmp_path / "local.mxq"
+    mxq_path.write_bytes(b"mxq")
+
+    with pytest.raises(ValueError, match=r"requires an ONNX model.*local\.mxq"):
+        _run_fake_compile(
+            monkeypatch,
+            tmp_path,
+            task="image_classification",
+            model_path=mxq_path,
+            entry_level="calibration",
+        )
 
 
 def test_compile_ignores_missing_local_path_and_uses_hosted_onnx(
