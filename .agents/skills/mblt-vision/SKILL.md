@@ -64,6 +64,8 @@ description: >-
   dataset registry YAMLs, compilation defaults, and documented commands aligned to it.
 - Keep imports free of cache-directory creation, write probes, downloads, and temporary-directory
   allocation; resolve a writable cache only when an artifact or compilation output needs it.
+- Make fallback caches stable, private, and user-owned. Never use a new temporary directory per
+  process or trust a shared fallback cache without validating it.
 - For every significant package change (public API, CLI, runtime/dependency, artifact layout, or
   tooling structure), update `AGENTS.md`, this canonical skill, the Claude skill entry point when
   its workflow changes, and the relevant README in the same change.

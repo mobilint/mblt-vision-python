@@ -7,6 +7,8 @@ import sys
 
 import numpy as np
 import pytest
+import torch
+from PIL import Image
 from mblt_vision.utils.preprocess.center_crop import CenterCrop
 from mblt_vision.utils.preprocess.letterbox import LetterBox
 from mblt_vision.utils.preprocess.normalize import Normalize
@@ -61,6 +63,33 @@ def test_preprocessing_styles_raise_explicit_errors(
 
     with pytest.raises(expected):
         factory()
+
+
+@pytest.mark.parametrize("interpolation", ["box", "hamming", "lanczos"])
+@pytest.mark.parametrize(
+    "image", [np.zeros((2, 3, 3), dtype=np.uint8), torch.zeros((3, 2, 3))]
+)
+def test_resize_rejects_pil_only_modes_for_tensor_backed_inputs(
+    interpolation: str, image: np.ndarray | torch.Tensor
+) -> None:
+    """Fail clearly instead of passing unsupported modes to torch.interpolate."""
+
+    with pytest.raises(ValueError, match="supported only for PIL images"):
+        Resize([4, 6], interpolation)(image)
+
+
+@pytest.mark.parametrize("interpolation", ["box", "hamming", "lanczos"])
+def test_resize_keeps_pil_only_modes_available_for_pil_images(
+    interpolation: str,
+) -> None:
+    """Retain the documented PIL resize modes for PIL callers."""
+
+    image = Image.fromarray(np.zeros((2, 3, 3), dtype=np.uint8))
+
+    resized = Resize([4, 6], interpolation)(image)
+
+    assert isinstance(resized, Image.Image)
+    assert resized.size == (6, 4)
 
 
 def test_runtime_validation_survives_optimized_python() -> None:

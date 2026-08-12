@@ -101,6 +101,8 @@ The current ownership boundary is deliberate:
   dataset registry YAMLs, compilation defaults, and documented commands must agree on that root.
 - Keep package imports free of cache-directory creation, write probes, downloads, and temporary
   directory allocation. Resolve a writable cache lazily only when an artifact or compilation output needs it.
+- If the preferred cache is unavailable, use a stable, private, user-owned fallback cache. Do not
+  create a new temporary cache per process or reuse an unsafe shared directory.
 - Benchmark and compilation commands are development tools; do not package them as public CLI
   entry points without an explicit product decision. The supported end-user command is
   `mblt-vision`.

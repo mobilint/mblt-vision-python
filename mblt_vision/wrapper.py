@@ -7,17 +7,17 @@ from __future__ import annotations
 import copy
 import importlib
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Sequence, cast
+from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import numpy as np
 import torch
 import yaml
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
-from qbruntime import Cluster, CoreId
 
 from mblt_npu import MobilintNPUBackend, ONNXBackend, normalize_target_device
 from ._model_paths import resolve_framework as _resolve_framework
@@ -29,6 +29,9 @@ from .utils.postprocess import build_postprocess
 from .utils.preprocess import build_preprocess
 from .utils.results import Results
 from .utils.types import TensorLike
+
+if TYPE_CHECKING:
+    from qbruntime import Cluster, CoreId
 
 MODEL_CONFIG_DIR = Path(__file__).parent / "models"
 
@@ -108,7 +111,42 @@ def _default_cache_dir() -> str:
             pass
         return str(preferred)
     except OSError:
-        return tempfile.mkdtemp(prefix="mblt_model_zoo-", dir=tempfile.gettempdir())
+        return _fallback_cache_dir()
+
+
+def _fallback_cache_dir() -> str:
+    """Return a stable private fallback cache when the home cache is unavailable."""
+
+    uid = os.getuid()
+    fallback = Path(tempfile.gettempdir()) / f"mblt_model_zoo-{uid}"
+    try:
+        os.mkdir(fallback, mode=0o700)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to create fallback Mobilint cache directory: {fallback}"
+        ) from exc
+
+    fallback_stat = os.lstat(fallback)
+    if (
+        not stat.S_ISDIR(fallback_stat.st_mode)
+        or stat.S_ISLNK(fallback_stat.st_mode)
+        or fallback_stat.st_uid != uid
+        or fallback_stat.st_mode & 0o077
+    ):
+        raise RuntimeError(
+            f"Fallback Mobilint cache directory is not a private directory owned by this user: {fallback}"
+        )
+
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".write_test-", dir=fallback):
+            pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"Fallback Mobilint cache directory is not writable: {fallback}"
+        ) from exc
+    return str(fallback)
 
 
 MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
@@ -389,8 +427,8 @@ class MBLT_Engine:
                 cast(str, dev_no or ""),
                 cast(int | None, core_mode),
                 cast(CoreMode | None, target_cores),
-                cast(Sequence[str | CoreId] | None, target_clusters),
-                cast(Sequence[int | Cluster] | None, postprocess_kwargs),
+                cast(Sequence[str | Any] | None, target_clusters),
+                cast(Sequence[int | Any] | None, postprocess_kwargs),
                 cast(dict[str, Any] | None, framework),
                 cast(str | None, onnx_providers),
                 cast(Sequence[str] | None, model_path or None),
@@ -413,6 +451,11 @@ class MBLT_Engine:
             raise FileNotFoundError(
                 "Explicit MXQ model path does not exist: "
                 f"{mxq_path}. Remove model_path/mxq_path to download the configured artifact."
+            )
+        if _onnx_path_passed and not os.path.isfile(onnx_path):
+            raise FileNotFoundError(
+                "Explicit ONNX model path does not exist: "
+                f"{onnx_path}. Remove model_path/onnx_path to download the configured artifact."
             )
         _dev_no_passed = dev_no is not None
         _core_mode_passed = core_mode is not None

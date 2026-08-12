@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -99,14 +100,10 @@ def test_local_mxq_dense_pipeline_uses_normalized_results(
         engine.dispose()
 
 
-def test_default_cache_dir_uses_private_temporary_fallback(
+def test_default_cache_dir_uses_stable_private_fallback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Avoid a predictable shared cache when the preferred cache cannot be created."""
-
-    shared_cache = tmp_path / "mblt_model_zoo"
-    shared_cache.mkdir()
-    (shared_cache / "poisoned.onnx").write_bytes(b"untrusted")
+    """Reuse a private fallback cache when the preferred cache cannot be created."""
 
     def _fail_mkdir(self: Path, *args: object, **kwargs: object) -> None:
         del self, args, kwargs
@@ -117,11 +114,29 @@ def test_default_cache_dir_uses_private_temporary_fallback(
 
     cache_dir = Path(wrapper._default_cache_dir())
 
-    assert cache_dir.parent == tmp_path
-    assert cache_dir.name.startswith("mblt_model_zoo-")
-    assert cache_dir != shared_cache
-    assert not (cache_dir / "poisoned.onnx").exists()
+    assert cache_dir == tmp_path / f"mblt_model_zoo-{os.getuid()}"
+    assert wrapper._default_cache_dir() == str(cache_dir)
     assert cache_dir.stat().st_mode & 0o777 == 0o700
+
+
+def test_default_cache_dir_rejects_unsafe_existing_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not reuse a fallback cache that other users can write to."""
+
+    unsafe_fallback = tmp_path / f"mblt_model_zoo-{os.getuid()}"
+    unsafe_fallback.mkdir(mode=0o700)
+    unsafe_fallback.chmod(0o777)
+
+    def _fail_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        del self, args, kwargs
+        raise OSError("home cache is unavailable")
+
+    monkeypatch.setattr(wrapper.Path, "mkdir", _fail_mkdir)
+    monkeypatch.setattr(wrapper.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    with pytest.raises(RuntimeError, match="not a private directory"):
+        wrapper._default_cache_dir()
 
 
 def test_default_cache_dir_preserves_existing_probe_named_file(
@@ -274,6 +289,29 @@ def test_engine_init_rejects_nonexistent_explicit_mxq_path(
 
     with pytest.raises(
         FileNotFoundError, match=r"Explicit MXQ model path.*missing\.mxq"
+    ):
+        MBLT_Engine(model_config, **{path_argument: str(missing_path)})
+
+
+@pytest.mark.parametrize("path_argument", ["model_path", "onnx_path"])
+def test_engine_init_rejects_nonexistent_explicit_onnx_path(
+    tmp_path: Path, path_argument: str
+) -> None:
+    """Do not replace an explicit missing ONNX path with a Hub artifact."""
+
+    missing_path = tmp_path / "missing.onnx"
+    model_config = {
+        "file_cfg": {
+            "repo_id": "mobilint/example",
+            "filename": "model.mxq",
+            "revision": "main",
+        },
+        "pre_cfg": {},
+        "post_cfg": {},
+    }
+
+    with pytest.raises(
+        FileNotFoundError, match=r"Explicit ONNX model path.*missing\.onnx"
     ):
         MBLT_Engine(model_config, **{path_argument: str(missing_path)})
 

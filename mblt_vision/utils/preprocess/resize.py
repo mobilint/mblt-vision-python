@@ -21,6 +21,7 @@ PIL_INTERP_CODES = {
     "hamming": Image.Resampling.HAMMING,
     "lanczos": Image.Resampling.LANCZOS,
 }
+TORCH_INTERPOLATION_MODES = frozenset({"nearest", "bilinear", "bicubic"})
 
 
 class Resize(PreOps):
@@ -69,9 +70,10 @@ class Resize(PreOps):
 
         Raises:
             TypeError: If input type is not supported.
-            ValueError: If a NumPy input is not HWC or a tensor input is not CHW or BCHW.
+            ValueError: If an input has an invalid layout or uses a PIL-only interpolation mode.
         """
         if isinstance(x, np.ndarray):
+            self._validate_tensor_interpolation()
             if x.ndim != 3:
                 raise ValueError(
                     f"Expected an HWC NumPy array, but got x.shape={x.shape}."
@@ -100,6 +102,7 @@ class Resize(PreOps):
             )
             return tensor_x.permute(1, 2, 0).cpu().numpy()
         elif isinstance(x, torch.Tensor):
+            self._validate_tensor_interpolation()
             tensor_x = x.to(self.device)
         elif isinstance(x, Image.Image):
             img_w, img_h = x.size
@@ -135,6 +138,15 @@ class Resize(PreOps):
         )
         tensor_x = self._cast_squeeze_out(tensor_x, need_cast, need_squeeze, out_dtype)
         return tensor_x.to(self.device)
+
+    def _validate_tensor_interpolation(self) -> None:
+        """Reject interpolation modes unsupported by PyTorch tensors."""
+
+        if self.interpolation not in TORCH_INTERPOLATION_MODES:
+            raise ValueError(
+                f"Resize interpolation {self.interpolation!r} is supported only for PIL images; "
+                f"NumPy arrays and tensors require one of {sorted(TORCH_INTERPOLATION_MODES)}."
+            )
 
     def _compute_resized_output_size(self, img_h: int, img_w: int) -> list[int]:
         if isinstance(self.size, int):
