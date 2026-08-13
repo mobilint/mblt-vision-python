@@ -538,6 +538,94 @@ def test_engine_init_rejects_invalid_core_modes(
         )
 
 
+def test_engine_init_rejects_core_modes_not_supported_by_regulus() -> None:
+    """Reject an Aries-only allocation mode before creating a Regulus backend."""
+
+    with pytest.raises(ValueError, match="not supported by regulus-ra"):
+        MBLT_Engine(
+            model_cls={"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
+            core_mode="global8",
+            target_device="regulus-ra",
+        )
+
+
+@pytest.mark.parametrize(
+    (
+        "explicit_target_device",
+        "expected_target_device",
+        "expected_cores",
+        "expected_core_mode",
+    ),
+    [
+        (None, "regulus-rb", [], "single"),
+        (
+            "aries-rb",
+            "aries-rb",
+            ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"],
+            "global8",
+        ),
+    ],
+)
+def test_engine_init_resolves_target_device_before_default_core_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    explicit_target_device: str | None,
+    expected_target_device: str,
+    expected_cores: list[str],
+    expected_core_mode: str,
+) -> None:
+    """Prefer an explicit board, otherwise retain the configured board and defaults."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+    backend_kwargs: dict[str, Any] = {}
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            backend_kwargs.update(kwargs)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(
+        wrapper,
+        "build_postprocess",
+        lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs),
+    )
+
+    engine = MBLT_Engine(
+        model_cls={
+            "file_cfg": {"target_device": "regulus-rb", "core_mode": "global8"},
+            "pre_cfg": {},
+            "post_cfg": {},
+        },
+        model_path=str(mxq_path),
+        target_device=explicit_target_device,
+    )
+
+    try:
+        assert engine.file_cfg["target_device"] == expected_target_device
+        assert backend_kwargs["target_device"] == expected_target_device
+        assert backend_kwargs["core_mode"] == expected_core_mode
+        assert backend_kwargs["target_cores"] == expected_cores
+        assert backend_kwargs["target_clusters"] == (
+            [] if expected_target_device == "regulus-rb" else [0, 1]
+        )
+    finally:
+        engine.dispose()
+
+
 def test_engine_init_preserves_shifted_positional_mxq_runtime_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

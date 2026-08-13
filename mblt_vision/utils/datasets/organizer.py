@@ -5,6 +5,7 @@ Utilities for organizing datasets.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import os
 import re
 import shutil
@@ -49,14 +50,23 @@ DOTAV1_GOOGLE_DRIVE_ARCHIVES = {
 DOTAV1_CLASS_TO_IDX = {
     name: int(index) for index, name in get_dataset_config("dotav1")["names"].items()
 }
+COCO_DOWNLOAD_CONFIG = get_dataset_config("coco")["download"]
+ADE20K_DOWNLOAD_CONFIG = get_dataset_config("ade20k")["download"]
 NYU_DEPTH_URL = (
     "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 )
-ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip"
+ADE20K_URL = ADE20K_DOWNLOAD_CONFIG["url"]
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
 IMAGENET_SYNSET_PATTERN = re.compile(r"n\d{8}")
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 429})
+CONTENT_RANGE_PATTERN = re.compile(r"^bytes (\d+)-(\d+)/(\d+|\*)$")
+UNSATISFIABLE_CONTENT_RANGE_PATTERN = re.compile(r"^bytes \*/(\d+)$")
+PINNED_ARCHIVE_SHA256 = {
+    COCO_DOWNLOAD_CONFIG["images"]: COCO_DOWNLOAD_CONFIG["images_sha256"],
+    COCO_DOWNLOAD_CONFIG["annotations"]: COCO_DOWNLOAD_CONFIG["annotations_sha256"],
+    ADE20K_DOWNLOAD_CONFIG["url"]: ADE20K_DOWNLOAD_CONFIG["sha256"],
+}
 
 
 def _replace_staged_directories(
@@ -158,12 +168,66 @@ def _is_url(path_or_url: str) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _download_url(url: str, local_path: str) -> str:
+def _verify_archive_sha256(
+    archive_path: str, expected_sha256: str, source_url: str
+) -> None:
+    """Verify a downloaded archive before it can be extracted."""
+
+    digest = hashlib.sha256()
+    with open(archive_path, "rb") as archive:
+        for chunk in iter(lambda: archive.read(DOWNLOAD_CHUNK_SIZE), b""):
+            digest.update(chunk)
+    actual_sha256 = digest.hexdigest()
+    if actual_sha256 != expected_sha256:
+        Path(archive_path).unlink(missing_ok=True)
+        raise ValueError(
+            f"Downloaded archive SHA-256 mismatch for {source_url}: "
+            f"expected {expected_sha256}, got {actual_sha256}."
+        )
+
+
+def _has_expected_resume_offset(content_range: str | None, existing_size: int) -> bool:
+    """Return whether a partial response begins exactly after local archive bytes."""
+
+    if content_range is None:
+        return False
+    match = CONTENT_RANGE_PATTERN.fullmatch(content_range)
+    if match is None:
+        return False
+    start, end, total = match.groups()
+    return (
+        int(start) == existing_size
+        and int(end) >= int(start)
+        and (total == "*" or int(end) < int(total))
+    )
+
+
+def _is_completed_range_response(content_range: str | None, existing_size: int) -> bool:
+    """Return whether a 416 confirms that the local archive is complete."""
+
+    if content_range is None:
+        return False
+    match = UNSATISFIABLE_CONTENT_RANGE_PATTERN.fullmatch(content_range)
+    return match is not None and int(match.group(1)) == existing_size
+
+
+def _restart_partial_download(local_path: str, url: str) -> None:
+    """Discard an invalid partial archive before retrying from byte zero."""
+
+    Path(local_path).unlink(missing_ok=True)
+    print(
+        f"Server returned an invalid resume response for {os.path.basename(local_path)}; "
+        "restarting from byte zero."
+    )
+
+
+def _download_url(url: str, local_path: str, expected_sha256: str | None = None) -> str:
     """Downloads a URL to a local file with progress and resume support.
 
     Args:
         url: HTTP(S) URL to download.
         local_path: Destination file path.
+        expected_sha256: Optional pinned SHA-256 digest to verify before return.
 
     Returns:
         The local destination path.
@@ -185,11 +249,28 @@ def _download_url(url: str, local_path: str) -> str:
             with requests.get(
                 url, stream=True, timeout=DOWNLOAD_TIMEOUT, headers=headers
             ) as response:
+                if response.status_code == 416 and existing_size > 0:
+                    if _is_completed_range_response(
+                        response.headers.get("Content-Range"), existing_size
+                    ):
+                        if expected_sha256 is not None:
+                            _verify_archive_sha256(local_path, expected_sha256, url)
+                        return local_path
+                    _restart_partial_download(local_path, url)
+                    continue
                 response.raise_for_status()
 
                 if response.status_code == 200 and existing_size > 0:
                     existing_size = 0
                     mode = "wb"
+                elif existing_size > 0 and (
+                    response.status_code != 206
+                    or not _has_expected_resume_offset(
+                        response.headers.get("Content-Range"), existing_size
+                    )
+                ):
+                    _restart_partial_download(local_path, url)
+                    continue
 
                 total_size = response.headers.get("Content-Length")
                 total_bytes = (
@@ -213,6 +294,8 @@ def _download_url(url: str, local_path: str) -> str:
                                 continue
                             file_obj.write(chunk)
                             pbar.update(len(chunk))
+            if expected_sha256 is not None:
+                _verify_archive_sha256(local_path, expected_sha256, url)
             return local_path
         except (
             requests.ConnectionError,
@@ -278,13 +361,22 @@ def _download_if_url(path_or_url: str, download_dir: str) -> str:
         return path_or_url
 
     parsed = urlparse(path_or_url)
+    if parsed.scheme != "https":
+        raise ValueError(
+            "Dataset archive URLs must use HTTPS. Download the archive locally "
+            f"and provide its path instead: {path_or_url}"
+        )
     filename = os.path.basename(parsed.path)
     if not filename:
         raise ValueError(f"Unable to determine a filename from URL: {path_or_url}")
 
     local_path = os.path.join(download_dir, filename)
     print(f"Downloading dataset archive from {path_or_url} to {local_path}...")
-    _download_url(path_or_url, local_path)
+    _download_url(
+        path_or_url,
+        local_path,
+        expected_sha256=PINNED_ARCHIVE_SHA256.get(path_or_url),
+    )
     print("Download completed")
     return local_path
 

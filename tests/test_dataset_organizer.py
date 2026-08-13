@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import inspect
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from zipfile import ZipFile
 
 import pytest
@@ -128,7 +130,10 @@ def test_download_url_retries_and_resumes_partial_file(
         ),
         _FakeResponse(
             status_code=206,
-            headers={"Content-Length": str(len(second_chunk))},
+            headers={
+                "Content-Length": str(len(second_chunk)),
+                "Content-Range": "bytes 3-5/6",
+            },
             chunks=[second_chunk],
         ),
     ]
@@ -150,6 +155,112 @@ def test_download_url_retries_and_resumes_partial_file(
     assert result == str(local_path)
     assert local_path.read_bytes() == first_chunk + second_chunk
     assert calls == [{}, {"Range": "bytes=3-"}]
+
+
+def test_download_url_restarts_when_resume_offset_does_not_match(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Discard a partial file when a range response starts at another offset."""
+
+    calls: list[dict[str, str]] = []
+    responses = [
+        _FakeResponse(
+            status_code=206,
+            headers={"Content-Length": "3", "Content-Range": "bytes 0-2/6"},
+            chunks=[b"bad"],
+        ),
+        _FakeResponse(
+            status_code=200,
+            headers={"Content-Length": "6"},
+            chunks=[b"fresh!"],
+        ),
+    ]
+
+    def _fake_get(
+        url: str, stream: bool, timeout: tuple[int, int], headers: dict[str, str]
+    ) -> _FakeResponse:
+        del url, stream, timeout
+        calls.append(dict(headers))
+        return responses.pop(0)
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
+    local_path = tmp_path / "archive.tar"
+    local_path.write_bytes(b"old")
+
+    assert organizer._download_url(
+        "https://example.com/archive.tar", str(local_path)
+    ) == str(local_path)
+    assert local_path.read_bytes() == b"fresh!"
+    assert calls == [{"Range": "bytes=3-"}, {}]
+
+
+def test_download_url_accepts_completed_archive_on_range_not_satisfiable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Treat a matching 416 total as confirmation that the local file is complete."""
+
+    payload = b"complete"
+    calls: list[dict[str, str]] = []
+
+    def _fake_get(
+        url: str, stream: bool, timeout: tuple[int, int], headers: dict[str, str]
+    ) -> _FakeResponse:
+        del url, stream, timeout
+        calls.append(dict(headers))
+        return _FakeResponse(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{len(payload)}"},
+            chunks=[],
+        )
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    local_path = tmp_path / "archive.tar"
+    local_path.write_bytes(payload)
+
+    assert organizer._download_url(
+        "https://example.com/archive.tar",
+        str(local_path),
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+    ) == str(local_path)
+    assert local_path.read_bytes() == payload
+    assert calls == [{"Range": f"bytes={len(payload)}-"}]
+
+
+def test_download_url_restarts_after_incomplete_range_not_satisfiable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Do not accept a 416 when the local partial file has the wrong size."""
+
+    responses = [
+        _FakeResponse(
+            status_code=416,
+            headers={"Content-Range": "bytes */6"},
+            chunks=[],
+        ),
+        _FakeResponse(
+            status_code=200,
+            headers={"Content-Length": "6"},
+            chunks=[b"fresh!"],
+        ),
+    ]
+
+    def _fake_get(url: str, **kwargs: Any) -> _FakeResponse:
+        del url, kwargs
+        return responses.pop(0)
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
+    local_path = tmp_path / "archive.tar"
+    local_path.write_bytes(b"old")
+
+    assert organizer._download_url(
+        "https://example.com/archive.tar", str(local_path)
+    ) == str(local_path)
+    assert local_path.read_bytes() == b"fresh!"
 
 
 @pytest.mark.parametrize("status_code", [408, 429, 503])
@@ -206,6 +317,111 @@ def test_download_url_does_not_retry_permanent_http_client_errors(
         )
 
     assert calls == 1
+
+
+def test_download_url_verifies_pinned_archive_sha256(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Accept only downloaded archive bytes matching the configured digest."""
+
+    payload = b"verified archive"
+
+    def _fake_get(url: str, **kwargs: Any) -> _FakeResponse:
+        del url, kwargs
+        return _FakeResponse(
+            status_code=200,
+            headers={"Content-Length": str(len(payload))},
+            chunks=[payload],
+        )
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
+    local_path = tmp_path / "archive.zip"
+
+    assert organizer._download_url(
+        "https://example.com/archive.zip",
+        str(local_path),
+        expected_sha256=hashlib.sha256(payload).hexdigest(),
+    ) == str(local_path)
+    assert local_path.read_bytes() == payload
+
+
+def test_download_url_rejects_and_removes_digest_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Never leave an unverified archive available for later extraction."""
+
+    def _fake_get(url: str, **kwargs: Any) -> _FakeResponse:
+        del url, kwargs
+        return _FakeResponse(
+            status_code=200,
+            headers={"Content-Length": "9"},
+            chunks=[b"malicious"],
+        )
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
+    local_path = tmp_path / "archive.zip"
+
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        organizer._download_url(
+            "https://example.com/archive.zip",
+            str(local_path),
+            expected_sha256=hashlib.sha256(b"expected").hexdigest(),
+        )
+
+    assert not local_path.exists()
+
+
+def test_download_if_url_passes_registered_archive_digest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Use the package-pinned digest whenever a default archive is downloaded."""
+
+    source_url, expected_sha256 = next(iter(organizer.PINNED_ARCHIVE_SHA256.items()))
+    recorded: dict[str, str | None] = {}
+
+    def _fake_download(
+        url: str, local_path: str, expected_sha256: str | None = None
+    ) -> str:
+        recorded.update(url=url, local_path=local_path, expected_sha256=expected_sha256)
+        return local_path
+
+    monkeypatch.setattr(organizer, "_download_url", _fake_download)
+
+    assert organizer._download_if_url(source_url, str(tmp_path)) == str(
+        tmp_path / Path(urlparse(source_url).path).name
+    )
+    assert recorded["url"] == source_url
+    assert recorded["expected_sha256"] == expected_sha256
+
+
+def test_download_if_url_rejects_plaintext_http(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not fetch benchmark inputs over an unauthenticated transport."""
+
+    monkeypatch.setattr(
+        organizer.requests,
+        "get",
+        lambda *args, **kwargs: pytest.fail("plaintext URL must not be requested"),
+    )
+
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        organizer._download_if_url("http://example.com/archive.zip", str(tmp_path))
+
+
+def test_coco_and_ade20k_downloads_use_pinned_https_archives() -> None:
+    """Keep default benchmark datasets on authenticated, integrity-checked URLs."""
+
+    assert all(url.startswith("https://") for url in organizer.PINNED_ARCHIVE_SHA256)
+    assert all(
+        len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+        for digest in organizer.PINNED_ARCHIVE_SHA256.values()
+    )
 
 
 def test_should_download_serially_for_same_host_urls() -> None:

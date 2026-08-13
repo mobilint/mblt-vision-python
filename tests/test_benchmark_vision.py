@@ -308,9 +308,62 @@ def test_benchmark_forwards_normalized_target_device(
             "framework": None,
             "dev_no": 0,
             "target_device": "regulus-ra",
-            "core_mode": "global8",
+            "core_mode": "single",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("target_device", "core_mode", "expected_modes"),
+    [
+        ("aries-rb", None, ("global8",)),
+        ("aries-rb", "all", ("single", "multi", "global4", "global8")),
+        ("regulus-ra", None, ("single",)),
+        ("regulus-rb", "all", ("single",)),
+    ],
+)
+def test_benchmark_core_modes_follow_the_selected_target_device(
+    target_device: str, core_mode: str | None, expected_modes: tuple[str, ...]
+) -> None:
+    """Use only execution modes supported by the selected NPU board."""
+
+    assert (
+        benchmark_vision_models._core_modes(core_mode, target_device=target_device)
+        == expected_modes
+    )
+
+
+def test_benchmark_rejects_explicit_unsupported_regulus_core_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fail before creating an invalid Regulus benchmark engine."""
+
+    monkeypatch.setattr(
+        benchmark_vision_models,
+        "_run_target",
+        lambda *args: pytest.fail("unsupported mode must not start a benchmark"),
+    )
+
+    assert (
+        benchmark_vision_models.main(
+            [
+                "--models",
+                "model-a",
+                "--task",
+                "image_classification",
+                "--target-device",
+                "regulus-ra",
+                "--core-mode",
+                "global8",
+                "--data-path",
+                str(tmp_path / "dataset"),
+                "--results-dir",
+                str(tmp_path / "results"),
+                "--no-plot",
+            ]
+        )
+        == 2
+    )
 
 
 def test_comparison_rejects_matching_metrics_from_different_tasks(

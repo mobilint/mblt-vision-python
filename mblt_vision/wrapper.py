@@ -45,21 +45,41 @@ ONNXRUNTIME_INSTALL_GUIDE = (
     )
 )
 CoreMode = str
+CORE_MODES: tuple[CoreMode, ...] = ("single", "multi", "global4", "global8")
+REGULUS_TARGET_DEVICES = frozenset({"regulus-ra", "regulus-rb"})
 
 
-def normalize_core_mode(core_mode: str) -> CoreMode:
-    """Validate a Vision engine core-mode value."""
+def core_modes_for_target_device(target_device: str) -> tuple[CoreMode, ...]:
+    """Return the Vision core modes supported by a normalized NPU board."""
 
-    valid_modes = {"single", "multi", "global4", "global8"}
-    if core_mode not in valid_modes:
+    if normalize_target_device(target_device) in REGULUS_TARGET_DEVICES:
+        return ("single",)
+    return CORE_MODES
+
+
+def normalize_core_mode(
+    core_mode: str, *, target_device: str | None = None
+) -> CoreMode:
+    """Validate a Vision engine core mode, including board compatibility."""
+
+    if core_mode not in CORE_MODES:
         raise ValueError(
-            f"Invalid core mode '{core_mode}'. Expected one of {sorted(valid_modes)}."
+            f"Invalid core mode '{core_mode}'. Expected one of {list(CORE_MODES)}."
         )
+    if target_device is not None:
+        normalized_target_device = normalize_target_device(target_device)
+        supported_modes = core_modes_for_target_device(normalized_target_device)
+        if core_mode not in supported_modes:
+            raise ValueError(
+                f"Core mode '{core_mode}' is not supported by "
+                f"{normalized_target_device}; expected one of {list(supported_modes)}."
+            )
     return core_mode
 
 
 __all__ = [
     "CoreMode",
+    "core_modes_for_target_device",
     "MOBILINT_CACHE_DIR",
     "get_mobilint_cache_dir",
     "normalize_core_mode",
@@ -376,7 +396,7 @@ class MBLT_Engine:
         framework: str | None = None,
         onnx_providers: Sequence[str] | None = None,
         model_path: str = "",
-        target_device: str = "aries-rb",
+        target_device: str | None = None,
     ) -> None:
         """Initializes the MBLT_Engine.
 
@@ -398,6 +418,8 @@ class MBLT_Engine:
             framework: Execution framework, either "mxq" or "onnx". When omitted,
                 ``model_path`` suffix is used first, then MXQ is the fallback.
             onnx_providers: Optional ONNX Runtime execution provider order.
+            target_device: NPU board identifier. An explicit value takes precedence
+                over ``file_cfg.target_device``; otherwise defaults to ``aries-rb``.
         """
 
         if _uses_shifted_engine_model_path_layout(
@@ -467,12 +489,16 @@ class MBLT_Engine:
 
         if dev_no is None:
             dev_no = 0
+        if target_device is None:
+            target_device = model_config_part["file_cfg"].get(
+                "target_device", "aries-rb"
+            )
+        target_device = normalize_target_device(target_device)
+        is_regulus = target_device in {"regulus-ra", "regulus-rb"}
         if core_mode is None:
             core_mode = "single"
         else:
-            core_mode = normalize_core_mode(core_mode)
-        target_device = normalize_target_device(target_device)
-        is_regulus = target_device in {"regulus-ra", "regulus-rb"}
+            core_mode = normalize_core_mode(core_mode, target_device=target_device)
         if target_cores is None:
             target_cores = (
                 []
@@ -497,7 +523,7 @@ class MBLT_Engine:
             self.file_cfg["mxq_path"] = mxq_path
         if _onnx_path_passed or "onnx_path" not in self.file_cfg:
             self.file_cfg["onnx_path"] = onnx_path
-        if _core_mode_passed or "core_mode" not in self.file_cfg:
+        if _core_mode_passed or "core_mode" not in self.file_cfg or is_regulus:
             self.file_cfg["core_mode"] = core_mode
         if _target_cores_passed or "target_cores" not in self.file_cfg:
             self.file_cfg["target_cores"] = target_cores
@@ -505,7 +531,9 @@ class MBLT_Engine:
             self.file_cfg["target_clusters"] = target_clusters
         if _dev_no_passed or "dev_no" not in self.file_cfg:
             self.file_cfg["dev_no"] = dev_no
-        self.file_cfg["core_mode"] = normalize_core_mode(self.file_cfg["core_mode"])
+        self.file_cfg["core_mode"] = normalize_core_mode(
+            self.file_cfg["core_mode"], target_device=target_device
+        )
         self.file_cfg["target_device"] = target_device
 
         self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])

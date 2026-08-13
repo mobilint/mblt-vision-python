@@ -28,10 +28,13 @@ from mblt_vision.benchmark.summary_utils import (
 )
 from mblt_vision._model_paths import resolve_framework
 from mblt_vision._tasks import VISION_TASKS, normalize_vision_task
+from mblt_vision.wrapper import core_modes_for_target_device
 from mblt_npu import normalize_target_device
 
 CoreMode = Literal["single", "multi", "global4", "global8"]
-CORE_MODES: tuple[CoreMode, ...] = ("single", "multi", "global4", "global8")
+CORE_MODES: tuple[CoreMode, ...] = cast(
+    tuple[CoreMode, ...], core_modes_for_target_device("aries-rb")
+)
 TASK_CHOICES = VISION_TASKS
 SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 
@@ -133,9 +136,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--core-mode",
-        default="global8",
+        default=None,
         choices=[*CORE_MODES, "all"],
-        help="NPU core mode, or `all` to run every supported mode.",
+        help=(
+            "NPU core mode, or `all` to run every mode supported by the selected "
+            "board. Defaults to global8 on Aries and single on Regulus."
+        ),
     )
     parser.add_argument("--dev-no", type=int, default=0, help="NPU device number.")
     parser.add_argument(
@@ -187,19 +193,36 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def _core_modes(core_mode: str, framework: str | None = None) -> tuple[str, ...]:
+def _core_modes(
+    core_mode: str | None,
+    framework: str | None = None,
+    target_device: str = "aries-rb",
+) -> tuple[str, ...]:
     """Expand the multi-run core-mode shorthand.
 
     Args:
-        core_mode: Requested core mode.
+        core_mode: Requested core mode, or ``None`` for the board default.
         framework: Resolved inference framework.
+        target_device: Selected NPU board.
 
     Returns:
         One or more concrete core modes.
     """
     if framework == "onnx":
         return ("onnx",)
-    return CORE_MODES if core_mode == "all" else (normalize_core_mode(core_mode),)
+    supported_modes = core_modes_for_target_device(target_device)
+    if core_mode is None:
+        return (supported_modes[-1],)
+    if core_mode == "all":
+        return supported_modes
+    normalized_core_mode = normalize_core_mode(core_mode)
+    if normalized_core_mode not in supported_modes:
+        raise ValueError(
+            f"Core mode {normalized_core_mode!r} is not supported by "
+            f"{normalize_target_device(target_device)}; expected one of "
+            f"{list(supported_modes)}."
+        )
+    return (normalized_core_mode,)
 
 
 def _evaluate(
@@ -469,8 +492,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         framework_model_path = args.onnx_path
     framework = resolve_framework(args.framework, framework_model_path)
     rows: list[dict[str, Any]] = []
+    try:
+        core_modes = _core_modes(args.core_mode, framework, args.target_device)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     for model_name in args.models:
-        for core_mode in _core_modes(args.core_mode, framework):
+        for core_mode in core_modes:
             print(f"Benchmarking {model_name} with core mode {core_mode}...")
             row = _run_target(model_name, core_mode, args, results_dir)
             rows.append(row)

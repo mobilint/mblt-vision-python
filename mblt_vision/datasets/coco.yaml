@@ -7,8 +7,12 @@ tasks:
   - pose_estimation
 val: val2017
 download:
-  images: http://images.cocodataset.org/zips/val2017.zip
-  annotations: http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+  # The official COCO object-store hostname has no valid TLS certificate. Use a
+  # pinned HTTPS mirror and verify each archive digest before extraction.
+  images: https://huggingface.co/datasets/pcuenq/coco-2017-mirror/resolve/5200d2cffae8121713bec767b4693bdafc0eeb0b/val2017.zip
+  images_sha256: 4f7e2ccb2866ec5041993c9cf2a952bbed69647b115d0f74da7ce8f4bef82f05
+  annotations: https://huggingface.co/datasets/pcuenq/coco-2017-mirror/resolve/5200d2cffae8121713bec767b4693bdafc0eeb0b/annotations_trainval2017.zip
+  annotations_sha256: 113a836d90195ee1f884e704da6304dfaaecff1f023f49b6ca93c4aaae470268
 
 names:
   0: person
