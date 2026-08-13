@@ -104,7 +104,7 @@ class LetterBox(PreOps):
             torch.Tensor: Preprocessed image in HWC format on the selected device.
         """
         if isinstance(x, torch.Tensor):
-            x = x.cpu().numpy()
+            x = x.detach().cpu().numpy()
         elif not isinstance(x, np.ndarray):
             raise TypeError(
                 f"LetterBox expects a NumPy array or tensor, got {type(x).__name__}."

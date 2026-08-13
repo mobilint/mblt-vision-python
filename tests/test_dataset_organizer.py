@@ -98,7 +98,10 @@ class _FakeResponse:
         return None
 
     def raise_for_status(self) -> None:
-        return None
+        if self.status_code >= 400:
+            response = requests.Response()
+            response.status_code = self.status_code
+            raise requests.HTTPError(response=response)
 
     def iter_content(self, chunk_size: int) -> Any:
         del chunk_size
@@ -147,6 +150,62 @@ def test_download_url_retries_and_resumes_partial_file(
     assert result == str(local_path)
     assert local_path.read_bytes() == first_chunk + second_chunk
     assert calls == [{}, {"Range": "bytes=3-"}]
+
+
+@pytest.mark.parametrize("status_code", [408, 429, 503])
+def test_download_url_retries_transient_http_responses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status_code: int,
+) -> None:
+    """Retry transient HTTP responses before accepting a successful download."""
+
+    calls = 0
+    responses = [
+        _FakeResponse(status_code=status_code, headers={}, chunks=[]),
+        _FakeResponse(status_code=200, headers={"Content-Length": "2"}, chunks=[b"ok"]),
+    ]
+
+    def _fake_get(url: str, **kwargs: Any) -> _FakeResponse:
+        nonlocal calls
+        del url, kwargs
+        calls += 1
+        return responses.pop(0)
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
+    monkeypatch.setattr(organizer, "sleep", lambda _: None)
+
+    local_path = tmp_path / "archive.tar"
+    assert organizer._download_url(
+        "https://example.com/archive.tar", str(local_path)
+    ) == str(local_path)
+    assert local_path.read_bytes() == b"ok"
+    assert calls == 2
+
+
+def test_download_url_does_not_retry_permanent_http_client_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fail immediately for permanent client errors such as HTTP 404."""
+
+    calls = 0
+
+    def _fake_get(url: str, **kwargs: Any) -> _FakeResponse:
+        nonlocal calls
+        del url, kwargs
+        calls += 1
+        return _FakeResponse(status_code=404, headers={}, chunks=[])
+
+    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+
+    with pytest.raises(requests.HTTPError):
+        organizer._download_url(
+            "https://example.com/archive.tar", str(tmp_path / "archive.tar")
+        )
+
+    assert calls == 1
 
 
 def test_should_download_serially_for_same_host_urls() -> None:

@@ -38,7 +38,7 @@ class CenterCrop(PreOps):
             np.ndarray: Center-cropped image in HWC format.
         """
         if isinstance(x, torch.Tensor):
-            image = x.cpu().numpy()
+            image = x.detach().cpu().numpy()
         elif isinstance(x, Image.Image):
             image = np.array(x)
         elif isinstance(x, np.ndarray):

@@ -102,7 +102,7 @@ def _load_ground_truths(
                         f"got {len(parts)}."
                     )
                 cls = _label_to_index(parts[0])
-                if cls >= get_dotav1_class_num():
+                if not 0 <= cls < get_dotav1_class_num():
                     raise ValueError(
                         f"Unsupported DOTAv1 class index {cls} in {label_path}."
                     )
@@ -124,7 +124,7 @@ def _load_ground_truths(
                 if len(parts) < 9:
                     continue
                 cls = _label_to_index(parts[8])
-                if cls >= get_dotav1_class_num():
+                if not 0 <= cls < get_dotav1_class_num():
                     raise ValueError(
                         f"Unsupported DOTAv1 class index {cls} in {original_label_path}."
                     )

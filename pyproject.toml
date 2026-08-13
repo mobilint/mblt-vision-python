@@ -66,6 +66,7 @@ version = { attr = "mblt_vision.__version__" }
 
 [tool.setuptools.package-data]
 "mblt_vision" = [
+    "py.typed",
     "models/*.yaml",
     "datasets/*.yaml",
 ]

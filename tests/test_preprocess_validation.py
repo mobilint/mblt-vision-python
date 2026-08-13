@@ -50,6 +50,13 @@ def test_set_order_rejects_ambiguous_channel_layout() -> None:
         SetOrder("HWC")(np.zeros((3, 5, 3), dtype=np.uint8))
 
 
+def test_normalize_rejects_ambiguous_channel_layout() -> None:
+    """Do not silently apply HWC statistics to potentially CHW data."""
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        Normalize("torch")(np.zeros((3, 640, 3), dtype=np.uint8))
+
+
 def test_normalize_supports_channel_first_set_order_output() -> None:
     """Broadcast normalization statistics per channel after a CHW conversion."""
 
@@ -73,6 +80,26 @@ def test_normalize_supports_channel_first_set_order_output() -> None:
     np.testing.assert_allclose(
         normalized, expected.astype(np.float32), rtol=1e-6, atol=1e-6
     )
+
+
+@pytest.mark.parametrize(
+    ("operation", "output_type"),
+    [
+        (Reader("numpy"), np.ndarray),
+        (Reader("pil"), Image.Image),
+        (Normalize("cv"), np.ndarray),
+        (CenterCrop([2, 3]), np.ndarray),
+        (LetterBox([2, 3]), torch.Tensor),
+    ],
+)
+def test_preprocessors_accept_grad_tracking_tensors(
+    operation: object, output_type: type[object]
+) -> None:
+    """Detach tensors before preprocessing converts them to NumPy arrays."""
+
+    image = torch.ones((4, 5, 3), requires_grad=True)
+
+    assert isinstance(operation(image), output_type)  # type: ignore[operator]
 
 
 @pytest.mark.parametrize(

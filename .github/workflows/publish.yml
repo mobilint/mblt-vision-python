@@ -33,6 +33,10 @@ jobs:
       - name: Validate distributions
         run: python -m twine check dist/*
 
+      - name: Verify wheel package contents
+        run: |
+          python -c "from pathlib import Path; from zipfile import ZipFile; wheel, = Path('dist').glob('*.whl'); archive = ZipFile(wheel); assert 'mblt_vision/py.typed' in archive.namelist(), 'Wheel is missing mblt_vision/py.typed'"
+
       - name: Upload built distributions
         uses: actions/upload-artifact@v7
         with:

@@ -53,7 +53,7 @@ class Reader(PreOps):
             if isinstance(x, np.ndarray):
                 return x
             elif isinstance(x, torch.Tensor):
-                return x.cpu().numpy()
+                return x.detach().cpu().numpy()
             elif isinstance(x, (str, Path)):
                 image = cv2.imread(str(x))
                 if image is None:
@@ -69,7 +69,7 @@ class Reader(PreOps):
             if isinstance(x, np.ndarray):
                 return Image.fromarray(x.astype(np.uint8))
             elif isinstance(x, torch.Tensor):
-                x = x.cpu().numpy()
+                x = x.detach().cpu().numpy()
                 return Image.fromarray(x.astype(np.uint8))
             elif isinstance(x, (str, Path)):
                 return Image.open(x).convert("RGB")

@@ -56,6 +56,7 @@ ADE20K_URL = "http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
 IMAGENET_SYNSET_PATTERN = re.compile(r"n\d{8}")
+RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 429})
 
 
 def _replace_staged_directories(
@@ -217,7 +218,15 @@ def _download_url(url: str, local_path: str) -> str:
             requests.ConnectionError,
             requests.Timeout,
             requests.exceptions.ChunkedEncodingError,
+            requests.HTTPError,
         ) as exc:
+            if isinstance(exc, requests.HTTPError):
+                status_code = getattr(exc.response, "status_code", None)
+                if not isinstance(status_code, int) or (
+                    status_code not in RETRYABLE_HTTP_STATUS_CODES
+                    and not 500 <= status_code < 600
+                ):
+                    raise
             if attempt == DOWNLOAD_RETRY_LIMIT:
                 raise RuntimeError(
                     f"Failed to download {url} after {DOWNLOAD_RETRY_LIMIT} attempts."
@@ -226,7 +235,7 @@ def _download_url(url: str, local_path: str) -> str:
                 os.path.getsize(local_path) if os.path.exists(local_path) else 0
             )
             print(
-                f"Download interrupted for {os.path.basename(local_path)}; "
+                f"Download attempt failed for {os.path.basename(local_path)}; "
                 f"retrying from {resumed_size} bytes (attempt {attempt + 1}/{DOWNLOAD_RETRY_LIMIT})..."
             )
             sleep(DOWNLOAD_RETRY_BACKOFF_SECONDS * attempt)

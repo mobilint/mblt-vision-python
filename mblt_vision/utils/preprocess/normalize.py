@@ -62,7 +62,7 @@ class Normalize(PreOps):
             np.ndarray: The normalized image as a float32 numpy array.
         """
         if isinstance(x, torch.Tensor):
-            x = x.cpu().numpy()
+            x = x.detach().cpu().numpy()
         elif isinstance(x, Image.Image):
             x = np.array(x)
         elif not isinstance(x, np.ndarray):
@@ -74,9 +74,15 @@ class Normalize(PreOps):
                 f"Normalize expects a three-dimensional image, got shape {x.shape}."
             )
         x = x.astype(np.float32) / 255.0
-        if x.shape[-1] == len(self.mean):
+        channels_first = x.shape[0] == len(self.mean)
+        channels_last = x.shape[-1] == len(self.mean)
+        if channels_first and channels_last:
+            raise ValueError(
+                f"Normalize cannot infer channel order from ambiguous shape {x.shape}."
+            )
+        if channels_last:
             mean, std = self.mean, self.std
-        elif x.shape[0] == len(self.mean):
+        elif channels_first:
             mean = self.mean[:, None, None]
             std = self.std[:, None, None]
         else:
