@@ -284,6 +284,7 @@ def test_comparison_rejects_matching_metrics_from_different_tasks(
         ["--framework", "onnx"],
         ["--model-path", "model.onnx"],
         ["--model-path", "MODEL.ONNX"],
+        ["--onnx-path", "model.onnx"],
     ],
 )
 def test_onnx_benchmark_uses_one_neutral_runtime_target(

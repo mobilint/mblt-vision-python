@@ -454,7 +454,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     args = _parse_args(argv)
     results_dir = args.results_dir.expanduser().resolve()
-    framework = resolve_framework(args.framework, args.model_path)
+    # Keep compatibility-path routing aligned with MBLT_Engine: an explicit
+    # ONNX path selects the ONNX backend unless an MXQ path takes precedence.
+    framework_model_path = args.model_path
+    if not framework_model_path and not args.mxq_path:
+        framework_model_path = args.onnx_path
+    framework = resolve_framework(args.framework, framework_model_path)
     rows: list[dict[str, Any]] = []
     for model_name in args.models:
         for core_mode in _core_modes(args.core_mode, framework):
