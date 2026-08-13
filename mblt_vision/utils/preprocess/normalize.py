@@ -74,5 +74,15 @@ class Normalize(PreOps):
                 f"Normalize expects a three-dimensional image, got shape {x.shape}."
             )
         x = x.astype(np.float32) / 255.0
-        x = (x - self.mean) / self.std
+        if x.shape[-1] == len(self.mean):
+            mean, std = self.mean, self.std
+        elif x.shape[0] == len(self.mean):
+            mean = self.mean[:, None, None]
+            std = self.std[:, None, None]
+        else:
+            raise ValueError(
+                f"Normalize expects HWC or CHW data with {len(self.mean)} channels, "
+                f"got shape {x.shape}."
+            )
+        x = (x - mean) / std
         return x.astype(np.float32)

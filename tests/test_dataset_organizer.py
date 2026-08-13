@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import inspect
 import tarfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
@@ -70,7 +71,7 @@ def test_dotav1_normalized_labels_preserve_difficult_metadata(tmp_path: Path) ->
     ],
 )
 def test_organizer_defaults_match_registry_cache_root(
-    organize_dataset: object, dataset_name: str
+    organize_dataset: Callable[..., Any], dataset_name: str
 ) -> None:
     """Write datasets where the packaged registry resolves them by default."""
 

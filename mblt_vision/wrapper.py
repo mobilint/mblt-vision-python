@@ -469,6 +469,8 @@ class MBLT_Engine:
             dev_no = 0
         if core_mode is None:
             core_mode = "single"
+        else:
+            core_mode = normalize_core_mode(core_mode)
         target_device = normalize_target_device(target_device)
         is_regulus = target_device in {"regulus-ra", "regulus-rb"}
         if target_cores is None:
@@ -503,6 +505,7 @@ class MBLT_Engine:
             self.file_cfg["target_clusters"] = target_clusters
         if _dev_no_passed or "dev_no" not in self.file_cfg:
             self.file_cfg["dev_no"] = dev_no
+        self.file_cfg["core_mode"] = normalize_core_mode(self.file_cfg["core_mode"])
         self.file_cfg["target_device"] = target_device
 
         self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])

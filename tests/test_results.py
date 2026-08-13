@@ -97,6 +97,8 @@ def test_object_detection_plot_preserves_raw_output_coordinates() -> None:
 
     torch.testing.assert_close(box_cls, expected)
     torch.testing.assert_close(result._box_cls_tensor(), expected)
+    assert first is not None
+    assert second is not None
     assert np.array_equal(first, second)
 
 
@@ -112,6 +114,7 @@ def test_plot_converts_rgb_array_source_to_bgr() -> None:
 
     plotted = result.plot(rgb)
 
+    assert plotted is not None
     assert np.array_equal(plotted, np.array([[[0, 0, 255]]], dtype=np.uint8))
     assert np.array_equal(rgb, np.array([[[255, 0, 0]]], dtype=np.uint8))
 

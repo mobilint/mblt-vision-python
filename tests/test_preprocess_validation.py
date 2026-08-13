@@ -24,16 +24,15 @@ def test_image_size_operations_reject_nonpositive_sizes(operation: object) -> No
     """Keep size validation active when Python assertions are optimized away."""
 
     operation_type = type(operation)
-    argument = [0, 2] if operation_type is not Resize else 0
     if operation_type is Resize:
         with pytest.raises(ValueError, match="positive"):
-            Resize(argument, "bilinear")
+            Resize(0, "bilinear")
     elif operation_type is CenterCrop:
         with pytest.raises(ValueError, match="positive"):
-            CenterCrop(argument)
+            CenterCrop([0, 2])
     else:
         with pytest.raises(ValueError, match="positive"):
-            LetterBox(argument)
+            LetterBox([0, 2])
 
 
 @pytest.mark.parametrize("size", [[1], [1, 2, 3], [1.5, 2], "2"])
@@ -49,6 +48,31 @@ def test_set_order_rejects_ambiguous_channel_layout() -> None:
 
     with pytest.raises(ValueError, match="ambiguous"):
         SetOrder("HWC")(np.zeros((3, 5, 3), dtype=np.uint8))
+
+
+def test_normalize_supports_channel_first_set_order_output() -> None:
+    """Broadcast normalization statistics per channel after a CHW conversion."""
+
+    image = np.array(
+        [
+            [[255, 0, 127], [0, 255, 127], [127, 127, 255], [64, 32, 16], [1, 2, 3]],
+            [[4, 5, 6], [7, 8, 9], [10, 11, 12], [13, 14, 15], [16, 17, 18]],
+            [[19, 20, 21], [22, 23, 24], [25, 26, 27], [28, 29, 30], [31, 32, 33]],
+            [[34, 35, 36], [37, 38, 39], [40, 41, 42], [43, 44, 45], [46, 47, 48]],
+        ],
+        dtype=np.uint8,
+    )
+
+    normalized = Normalize("torch")(SetOrder("CHW")(image))
+    expected = (
+        image.transpose(2, 0, 1) / 255.0
+        - np.array([0.485, 0.456, 0.406])[:, None, None]
+    ) / np.array([0.229, 0.224, 0.225])[:, None, None]
+
+    assert normalized.shape == (3, 4, 5)
+    np.testing.assert_allclose(
+        normalized, expected.astype(np.float32), rtol=1e-6, atol=1e-6
+    )
 
 
 @pytest.mark.parametrize(

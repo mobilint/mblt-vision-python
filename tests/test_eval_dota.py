@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
 import torch
 
+from mblt_vision.utils.datasets import CustomDOTAv1
 from mblt_vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     evaluate_dota_predictions,
@@ -23,10 +25,13 @@ def test_normalized_difficult_flag_loads_as_an_ignored_region(tmp_path) -> None:
         "0 0 0 0.2 0 0.2 0.2 0 0.2 0\n" "0 0.4 0.4 0.6 0.4 0.6 0.6 0.4 0.6 1\n",
         encoding="utf-8",
     )
-    dataset = SimpleNamespace(
-        ids=["image"],
-        image_paths=["unused"],
-        _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
     )
 
     ground_truth = _load_ground_truths(str(tmp_path), dataset)["image"]
@@ -42,10 +47,13 @@ def test_normalized_truncated_annotation_raises_with_file_and_line(tmp_path) -> 
     label_dir.mkdir(parents=True)
     label_path = label_dir / "image.txt"
     label_path.write_text("\n0 0 0 0.2\n", encoding="utf-8")
-    dataset = SimpleNamespace(
-        ids=["image"],
-        image_paths=["unused"],
-        _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
     )
 
     with pytest.raises(

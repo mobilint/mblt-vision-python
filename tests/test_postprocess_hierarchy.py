@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import torch
@@ -131,7 +131,7 @@ def test_empty_anchorless_outputs_preserve_input_device_and_dtype(
 ) -> None:
     """Create empty decoded rows from the selected input tensor."""
 
-    postprocessor = postprocessor_type.__new__(postprocessor_type)
+    postprocessor = cast(Any, postprocessor_type.__new__(postprocessor_type))
     postprocessor.nc = 1
     postprocessor.n_extra = n_extra
     postprocessor.inv_conf_thres = 1.0

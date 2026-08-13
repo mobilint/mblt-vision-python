@@ -290,7 +290,8 @@ def test_engine_init_rejects_nonexistent_explicit_mxq_path(
     with pytest.raises(
         FileNotFoundError, match=r"Explicit MXQ model path.*missing\.mxq"
     ):
-        MBLT_Engine(model_config, **{path_argument: str(missing_path)})
+        path_kwargs: dict[str, Any] = {path_argument: str(missing_path)}
+        MBLT_Engine(model_config, **path_kwargs)
 
 
 @pytest.mark.parametrize("path_argument", ["model_path", "onnx_path"])
@@ -313,7 +314,8 @@ def test_engine_init_rejects_nonexistent_explicit_onnx_path(
     with pytest.raises(
         FileNotFoundError, match=r"Explicit ONNX model path.*missing\.onnx"
     ):
-        MBLT_Engine(model_config, **{path_argument: str(missing_path)})
+        path_kwargs: dict[str, Any] = {path_argument: str(missing_path)}
+        MBLT_Engine(model_config, **path_kwargs)
 
 
 def test_engine_init_disposes_mxq_backend_after_postprocess_setup_failure(
@@ -513,6 +515,27 @@ def test_engine_init_preserves_legacy_positional_arguments(
         assert backend_kwargs["core_mode"] == "global8"
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("configured_core_mode", "core_mode"),
+    [(None, "unsupported"), ("unsupported", None)],
+)
+def test_engine_init_rejects_invalid_core_modes(
+    configured_core_mode: str | None,
+    core_mode: str | None,
+) -> None:
+    """Validate direct caller and model-config core modes before backend setup."""
+
+    file_cfg: dict[str, Any] = {}
+    if configured_core_mode is not None:
+        file_cfg["core_mode"] = configured_core_mode
+
+    with pytest.raises(ValueError, match="Invalid core mode 'unsupported'"):
+        MBLT_Engine(
+            model_cls={"file_cfg": file_cfg, "pre_cfg": {}, "post_cfg": {}},
+            core_mode=core_mode,
+        )
 
 
 def test_engine_init_preserves_shifted_positional_mxq_runtime_arguments(
