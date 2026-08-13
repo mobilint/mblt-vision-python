@@ -374,9 +374,17 @@ def _run_target(
     ) as exc:
         row["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        row["elapsed_s"] = round(time.perf_counter() - started, 6)
         if model is not None:
-            model.dispose()
+            try:
+                model.dispose()
+            except Exception as exc:
+                cleanup_error = f"{type(exc).__name__}: {exc}"
+                if "error" in row:
+                    row["cleanup_error"] = cleanup_error
+                else:
+                    row["error"] = cleanup_error
+                row["status"] = "error"
+        row["elapsed_s"] = round(time.perf_counter() - started, 6)
     return row
 
 

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from mblt_vision._tasks import normalize_vision_task
+from mblt_vision.benchmark.argparse_utils import parse_positive_int
 from mblt_vision.datasets import get_dataset_config, get_dataset_config_for_task
 from mblt_vision.utils.datasets.readiness import dataset_ready
 
@@ -515,7 +516,10 @@ def add_val_parser(
         help="Optional semicolon-separated cluster list for multi/global modes, for example `0;1`.",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=1, help="Batch size for validation."
+        "--batch-size",
+        type=parse_positive_int,
+        default=1,
+        help="Positive batch size for validation.",
     )
     parser.add_argument(
         "--data-path",

@@ -51,6 +51,16 @@ def test_vision_cli_uses_single_core_mode_by_default_on_regulus() -> None:
     assert args.core_mode is None
 
 
+@pytest.mark.parametrize("batch_size", ["0", "-1"])
+def test_val_rejects_nonpositive_batch_sizes(batch_size: str) -> None:
+    """Fail argument parsing before validation can construct a model."""
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["val", "--model", "resnet50", "--batch-size", batch_size]
+        )
+
+
 @pytest.mark.parametrize("removed_alias", ["classify", "detect", "pose", "segment"])
 def test_predict_command_has_no_task_aliases(removed_alias: str) -> None:
     """Keep prediction discoverable through one task-agnostic command."""

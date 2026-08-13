@@ -15,6 +15,7 @@ from mblt_vision.utils.preprocess.letterbox import letterbox_semantic_mask
 from PIL import Image
 
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
+from .readiness import IMAGE_SUFFIXES
 
 
 class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
@@ -715,6 +716,8 @@ class CustomImageFolder(torch.utils.data.Dataset[tuple[Image.Image, int]]):
                 continue
             for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):
                 for fname in sorted(fnames):
+                    if os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES:
+                        continue
                     path = os.path.join(root, fname)
                     item = path, class_index
                     instances.append(item)
@@ -820,6 +823,8 @@ class CustomWiderFaceDataset(torch.utils.data.Dataset[tuple[np.ndarray, str, str
                 continue
             for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):
                 for fname in sorted(fnames):
+                    if os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES:
+                        continue
                     path = os.path.join(root, fname)
                     item = path, target_class, fname
                     instances.append(item)

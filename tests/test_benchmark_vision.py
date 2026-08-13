@@ -198,6 +198,63 @@ def test_benchmark_continues_after_evaluator_type_error(
     assert rows[0]["error"] == "TypeError: Unsupported model output"
 
 
+def test_benchmark_records_dispose_failures_without_losing_other_results(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Write artifacts and continue when a backend fails during cleanup."""
+
+    class FakeEngine:
+        """Minimal engine that can fail evaluation or disposal by model name."""
+
+        def __init__(self, *, model_cls: str, **kwargs: object) -> None:
+            self.model_cls = model_cls
+
+        def dispose(self) -> None:
+            if self.model_cls in {"evaluation-failure", "cleanup-failure"}:
+                raise RuntimeError("Backend cleanup failed")
+
+    def fake_evaluate(
+        model: FakeEngine,
+        args: object,
+        run_dir: Path,
+    ) -> tuple[float, str, dict[str, float]]:
+        if model.model_cls == "evaluation-failure":
+            raise ValueError("Evaluation failed")
+        return 0.9, "top1_accuracy", {"top1_accuracy": 0.9}
+
+    import mblt_vision as vision
+
+    monkeypatch.setattr(vision, "MBLT_Engine", FakeEngine)
+    monkeypatch.setattr(benchmark_vision_models, "_evaluate", fake_evaluate)
+
+    result = benchmark_vision_models.main(
+        [
+            "--models",
+            "evaluation-failure",
+            "cleanup-failure",
+            "valid-output",
+            "--task",
+            "image_classification",
+            "--data-path",
+            str(tmp_path / "dataset"),
+            "--results-dir",
+            str(tmp_path / "results"),
+            "--no-plot",
+        ]
+    )
+
+    with (tmp_path / "results" / "results.csv").open(
+        newline="", encoding="utf-8"
+    ) as results_file:
+        rows = list(csv.DictReader(results_file))
+
+    assert result == 1
+    assert [row["status"] for row in rows] == ["error", "error", "ok"]
+    assert rows[0]["error"] == "ValueError: Evaluation failed"
+    assert rows[0]["cleanup_error"] == "RuntimeError: Backend cleanup failed"
+    assert rows[1]["error"] == "RuntimeError: Backend cleanup failed"
+
+
 def test_benchmark_forwards_normalized_target_device(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
