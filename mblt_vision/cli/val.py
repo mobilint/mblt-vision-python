@@ -11,6 +11,7 @@ from mblt_vision._tasks import normalize_vision_task
 from mblt_vision.benchmark.argparse_utils import parse_positive_int
 from mblt_vision.datasets import get_dataset_config, get_dataset_config_for_task
 from mblt_vision.utils.datasets.readiness import dataset_ready
+from mblt_vision.wrapper import get_mobilint_cache_dir
 
 from ._vision import (
     add_e2e_arg,
@@ -218,9 +219,17 @@ def _default_data_path_for_task(task: str, dataset: str | None = None) -> str:
     """Returns the default organized dataset path for a vision task."""
 
     try:
-        return str(get_dataset_config_for_task(task, dataset)["path"])
+        configured_path = Path(get_dataset_config_for_task(task, dataset)["path"])
     except ValueError as exc:
         raise SystemExit(f"Unsupported vision task for validation: {task}") from exc
+
+    configured_path = configured_path.expanduser()
+    default_cache_root = Path.home() / ".mblt_model_zoo"
+    try:
+        relative_path = configured_path.relative_to(default_cache_root)
+    except ValueError:
+        return str(configured_path)
+    return str(Path(get_mobilint_cache_dir()) / relative_path)
 
 
 def _dataset_ready(task: str, data_path: str, dataset: str | None = None) -> bool:

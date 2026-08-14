@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from mblt_vision.cli import build_parser
 from mblt_vision.cli.compile import _run_compile
 from mblt_vision.cli.predict import _cmd_predict
+from mblt_vision.cli import val as val_module
 from mblt_vision.cli.val import _cmd_val
 
 
@@ -81,3 +84,24 @@ def test_predict_help_explains_supported_workflows(
     assert "Supported tasks:" in help_text
     assert "--framework onnx" in help_text
     assert "--target-device regulus-ra" in help_text
+
+
+def test_validation_default_dataset_path_uses_resolved_cache_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep default organization alongside artifacts when the home cache falls back."""
+
+    configured_path = Path.home() / ".mblt_model_zoo" / "datasets" / "coco"
+    fallback_cache = tmp_path / "cache"
+    monkeypatch.setattr(
+        val_module,
+        "get_dataset_config_for_task",
+        lambda _task, _dataset: {"path": str(configured_path)},
+    )
+    monkeypatch.setattr(
+        val_module, "get_mobilint_cache_dir", lambda: str(fallback_cache)
+    )
+
+    assert val_module._default_data_path_for_task("object_detection") == str(
+        fallback_cache / "datasets" / "coco"
+    )

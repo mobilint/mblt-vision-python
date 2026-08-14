@@ -370,6 +370,19 @@ class YOLODetectionPostBase(PostBase):
             tensor = x.to(self.device)
         batches: list[torch.Tensor] = []
         for batch in tensor:
+            valid_rows = torch.isfinite(batch).all(dim=1)
+            if not bool(valid_rows.all()):
+                invalid_rows = (
+                    torch.nonzero(~valid_rows, as_tuple=False)
+                    .flatten()
+                    .detach()
+                    .cpu()
+                    .tolist()
+                )
+                raise ValueError(
+                    "Decoded detection rows must contain only finite values; "
+                    f"invalid rows: {invalid_rows}."
+                )
             labels = batch[:, 5]
             valid_labels = (
                 torch.isfinite(labels)

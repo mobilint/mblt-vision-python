@@ -81,7 +81,7 @@ def test_classification_postprocessor_rejects_nonfinite_scores(
         ClsPost({}, {"task": "image_classification", "dataset": "imagenet"})(scores)
 
 
-@pytest.mark.parametrize("invalid_class", [-1.0, 1.5, 2.0, float("nan")])
+@pytest.mark.parametrize("invalid_class", [-1.0, 1.5, 2.0])
 def test_already_decoded_detections_reject_invalid_task_class_ids(
     invalid_class: float,
 ) -> None:
@@ -98,6 +98,28 @@ def test_already_decoded_detections_reject_invalid_task_class_ids(
     )
 
     with pytest.raises(ValueError, match="Decoded detection class IDs"):
+        postprocessor._final_detection_batches(detections)
+
+
+@pytest.mark.parametrize(
+    ("column", "invalid_value"),
+    [(0, float("nan")), (4, float("inf")), (5, float("-inf"))],
+)
+def test_already_decoded_detections_reject_nonfinite_rows(
+    column: int, invalid_value: float
+) -> None:
+    """Reject malformed coordinates, scores, and labels before filtering them."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    detections = torch.tensor([[[0.0, 0.0, 1.0, 1.0, 0.9, 1.0]]], dtype=torch.float32)
+    detections[0, 0, column] = invalid_value
+
+    with pytest.raises(ValueError, match="finite values"):
         postprocessor._final_detection_batches(detections)
 
 

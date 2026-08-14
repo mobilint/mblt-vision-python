@@ -200,6 +200,11 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
             raise ValueError(
                 f"NYU Depth target must be two-dimensional, got {depth.shape}: {depth_path}"
             )
+        if depth.shape != image.shape[:2]:
+            raise ValueError(
+                "NYU Depth image and target shapes must match for "
+                f"{stem}: image {image.shape[:2]}, depth {depth.shape}."
+            )
         return (
             cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
             np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0),

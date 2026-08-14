@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-
+import cv2
+import numpy as np
 import pytest
 import torch
-from mblt_vision.utils.postprocess import DepthPost
 
+from mblt_vision.utils.datasets import CustomNYUDepth
+from mblt_vision.utils.postprocess import DepthPost
 from mblt_vision.wrapper import resolve_model_config
 
 
@@ -110,3 +112,19 @@ def test_depth_post_normalizes_quarter_resolution_channel_last_output() -> None:
 
     assert isinstance(normalized, torch.Tensor)
     assert torch.equal(normalized, expected)
+
+
+def test_nyu_depth_dataset_rejects_mismatched_image_and_target_shapes(tmp_path) -> None:
+    """Reject paired NYU files whose pixels cannot be compared one-to-one."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    assert cv2.imwrite(
+        str(image_dir / "sample.png"), np.zeros((4, 5, 3), dtype=np.uint8)
+    )
+    np.save(depth_dir / "sample.npy", np.zeros((3, 5), dtype=np.float32))
+
+    with pytest.raises(ValueError, match=r"sample: image \(4, 5\), depth \(3, 5\)"):
+        CustomNYUDepth(str(tmp_path))[0]
