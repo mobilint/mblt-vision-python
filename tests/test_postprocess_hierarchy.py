@@ -249,6 +249,25 @@ def test_decoded_segmentation_propagates_invalid_mask_prototypes(
         postprocessor.extract_final_outputs(outputs)
 
 
+def test_decoded_segmentation_requires_mask_prototypes() -> None:
+    """Reject decoded segmentation artifacts that cannot produce instance masks."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    postprocessor.n_extra = 2
+    postprocessor.task = "instance_segmentation"
+    detections = torch.tensor(
+        [[[0.0, 0.0, 1.0, 1.0, 0.9, 1.0, 0.0, 0.0]]], dtype=torch.float32
+    )
+
+    with pytest.raises(ValueError, match="require a mask prototype tensor"):
+        postprocessor.extract_final_outputs([detections])
+
+
 @pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
 def test_detection_postprocessor_rejects_nonfinite_raw_heads(
     invalid_value: float,

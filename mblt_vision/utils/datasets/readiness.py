@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from importlib.resources import files
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from faster_coco_eval import mask as coco_mask
 from scipy.io import loadmat
 from scipy.io.matlab import MatReadError
 
@@ -162,6 +164,7 @@ def _load_coco_image_names(
         return None
     names: list[str] = []
     image_ids: list[int] = []
+    image_shapes: dict[int, tuple[int, int] | None] = {}
     for record in image_records:
         if not isinstance(record, dict):
             continue
@@ -174,6 +177,18 @@ def _load_coco_image_names(
         ):
             names.append(file_name)
             image_ids.append(image_id)
+            height, width = record.get("height"), record.get("width")
+            if (
+                isinstance(height, int)
+                and not isinstance(height, bool)
+                and height > 0
+                and isinstance(width, int)
+                and not isinstance(width, bool)
+                and width > 0
+            ):
+                image_shapes[image_id] = (height, width)
+            else:
+                image_shapes[image_id] = None
     if (
         len(names) != len(image_records)
         or len(names) != len(set(names))
@@ -284,28 +299,7 @@ def _load_coco_image_names(
                 ):
                     return None
             elif isinstance(segmentation, dict):
-                counts = segmentation.get("counts")
-                size = segmentation.get("size")
-                if (
-                    not isinstance(size, list)
-                    or len(size) != 2
-                    or any(
-                        not isinstance(value, int)
-                        or isinstance(value, bool)
-                        or value <= 0
-                        for value in size
-                    )
-                    or not isinstance(counts, (str, list))
-                    or (
-                        isinstance(counts, list)
-                        and any(
-                            not isinstance(value, int)
-                            or isinstance(value, bool)
-                            or value < 0
-                            for value in counts
-                        )
-                    )
-                ):
+                if not _valid_coco_rle(segmentation, image_shapes.get(image_id)):
                     return None
             else:
                 return None
@@ -336,6 +330,81 @@ def _load_coco_image_names(
     if len(annotation_ids) != len(set(annotation_ids)):
         return None
     return set(names)
+
+
+def _decode_coco_rle_counts(counts: str) -> list[int] | None:
+    """Decode COCO's compact RLE run-length string without trusting its payload."""
+
+    run_counts: list[int] = []
+    position = 0
+    while position < len(counts):
+        value = 0
+        shift = 0
+        more = True
+        while more:
+            if position >= len(counts):
+                return None
+            code = ord(counts[position]) - 48
+            position += 1
+            if not 0 <= code <= 0x3F:
+                return None
+            value |= (code & 0x1F) << shift
+            more = bool(code & 0x20)
+            shift += 5
+            if shift > 60:
+                return None
+            if not more and code & 0x10:
+                value |= -1 << shift
+        if len(run_counts) > 2:
+            value += run_counts[-2]
+        if value < 0:
+            return None
+        run_counts.append(value)
+    return run_counts
+
+
+def _valid_coco_rle(
+    segmentation: dict[str, Any], image_shape: tuple[int, int] | None
+) -> bool:
+    """Validate and decode an RLE mask against its referenced COCO image shape."""
+
+    counts = segmentation.get("counts")
+    size = segmentation.get("size")
+    if (
+        image_shape is None
+        or not isinstance(size, list)
+        or len(size) != 2
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            for value in size
+        )
+        or tuple(size) != image_shape
+        or not isinstance(counts, (str, list))
+    ):
+        return False
+    if isinstance(counts, list):
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in counts
+        ):
+            return False
+        run_counts = counts
+    else:
+        run_counts = _decode_coco_rle_counts(counts)
+        if run_counts is None:
+            return False
+    if sum(run_counts) != math.prod(size):
+        return False
+    try:
+        encoded = (
+            coco_mask.frPyObjects(segmentation, size[0], size[1])
+            if isinstance(counts, list)
+            else segmentation
+        )
+        decoded = np.asarray(coco_mask.decode(encoded))
+    except (RuntimeError, TypeError, ValueError):
+        return False
+    return decoded.shape == tuple(size) and bool(np.any(decoded))
 
 
 def _coco_ready(root: Path, task: str) -> bool:

@@ -336,6 +336,10 @@ class YOLODetectionPostBase(PostBase):
             if normalized_detections is not None:
                 if invalid_proto_error is not None:
                     raise invalid_proto_error
+                if self.task == "instance_segmentation" and normalized_proto is None:
+                    raise ValueError(
+                        "Decoded instance-segmentation outputs require a mask prototype tensor."
+                    )
                 return self._final_detection_batches(
                     normalized_detections
                 ), normalized_proto
@@ -343,6 +347,10 @@ class YOLODetectionPostBase(PostBase):
 
         normalized_x = self._normalize_final_detection_tensor(x, final_det_dim)
         if normalized_x is not None:
+            if self.task == "instance_segmentation":
+                raise ValueError(
+                    "Decoded instance-segmentation outputs require a mask prototype tensor."
+                )
             return self._final_detection_batches(normalized_x), None
 
         return None, None

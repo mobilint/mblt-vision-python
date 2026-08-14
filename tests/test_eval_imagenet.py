@@ -84,7 +84,11 @@ def test_imagenet_evaluation_preserves_canonical_synset_indices(
 ) -> None:
     """Do not renumber a partial ImageNet directory tree by local sort order."""
 
-    dataset = SimpleNamespace(
+    class _Dataset(SimpleNamespace):
+        def __len__(self) -> int:
+            return 1
+
+    dataset = _Dataset(
         classes=["n00000001"],
         class_to_idx={"n00000001": 0},
         make_dataset=lambda: None,
@@ -116,6 +120,42 @@ def test_imagenet_evaluation_preserves_canonical_synset_indices(
         )
 
     assert dataset.class_to_idx == {"n00000001": 1}
+
+
+def test_imagenet_evaluation_rejects_empty_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail before loader construction when no supported samples are available."""
+
+    class _EmptyDataset:
+        classes = ["n00000000"]
+        class_to_idx = {"n00000000": 0}
+
+        def make_dataset(self) -> None:
+            return None
+
+        def __len__(self) -> int:
+            return 0
+
+    monkeypatch.setattr(
+        eval_imagenet_module, "CustomImageFolder", lambda _: _EmptyDataset()
+    )
+    monkeypatch.setattr(eval_imagenet_module, "IMAGENET_SYNSET_ORDER", ("n00000000",))
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSETS", frozenset({"n00000000"})
+    )
+    monkeypatch.setattr(
+        eval_imagenet_module,
+        "get_imagenet_loader",
+        lambda *_: pytest.fail("empty datasets must not create an ImageNet loader"),
+    )
+
+    with pytest.raises(ValueError, match="contains no supported images"):
+        eval_imagenet_module.eval_imagenet_metrics(
+            SimpleNamespace(post_cfg={"dataset": "imagenet"}, preprocess=object()),
+            "/empty",
+            batch_size=1,
+        )
 
 
 def test_imagenet_evaluation_rejects_wrong_model_taxonomy() -> None:

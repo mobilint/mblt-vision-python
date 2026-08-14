@@ -275,6 +275,57 @@ def test_coco_readiness_rejects_invalid_instance_box_geometry(
     assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
 
 
+@pytest.mark.parametrize(
+    ("counts", "expected_ready"),
+    [([3, 1], True), ("31", True), ([4], False), ([3], False), ("4", False)],
+)
+def test_coco_readiness_decodes_and_validates_rle_segmentations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    counts: list[int] | str,
+    expected_ready: bool,
+) -> None:
+    """Require nonempty, complete RLE masks with the referenced image geometry."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    _write_file(tmp_path / "val2017" / "000000000001.jpg")
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [
+                    {
+                        "id": 1,
+                        "file_name": "000000000001.jpg",
+                        "height": 2,
+                        "width": 2,
+                    }
+                ],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {
+                        "id": 1,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "bbox": [0, 0, 1, 1],
+                        "area": 1,
+                        "iscrowd": 0,
+                        "segmentation": {"size": [2, 2], "counts": counts},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
+        is expected_ready
+    )
+
+
 def test_coco_annotation_identity_digest_rejects_wrong_validation_split(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

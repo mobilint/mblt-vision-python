@@ -70,8 +70,12 @@ def eval_imagenet_metrics(
         if synset in dataset.class_to_idx
     }
     dataset.make_dataset()
-    dataloader = get_imagenet_loader(dataset, batch_size, model.preprocess)
     num_data = len(dataset)
+    if num_data == 0:
+        raise ValueError(
+            f"ImageNet evaluation dataset contains no supported images: {data_path}."
+        )
+    dataloader = get_imagenet_loader(dataset, batch_size, model.preprocess)
     total_iter = math.ceil(num_data / batch_size)
     pbar = tqdm(dataloader, total=total_iter, desc="Evaluating ImageNet")
     inference_time = 0.0
