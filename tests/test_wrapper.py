@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import gc
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,6 +33,7 @@ from mblt_vision.utils.postprocess.yolo_anchorless_post import (
 import mblt_vision.wrapper as wrapper
 from mblt_vision._compat import create_model_class
 from mblt_vision.utils.letterbox import resolve_ratio_pad
+from mblt_vision.utils.preprocess import build_preprocess
 from mblt_vision.utils.results import Results
 from mblt_vision.utils.types import ListTensorLike
 from mblt_vision.wrapper import MBLT_Engine
@@ -110,8 +111,10 @@ def test_default_cache_dir_uses_stable_private_fallback(
         del self, args, kwargs
         raise OSError("home cache is unavailable")
 
-    monkeypatch.setattr(wrapper.Path, "mkdir", _fail_mkdir)
-    monkeypatch.setattr(wrapper.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(Path, "mkdir", _fail_mkdir)
+    monkeypatch.setattr(
+        "mblt_vision.wrapper.tempfile.gettempdir", lambda: str(tmp_path)
+    )
 
     cache_dir = Path(wrapper._default_cache_dir())
 
@@ -133,8 +136,10 @@ def test_default_cache_dir_rejects_unsafe_existing_fallback(
         del self, args, kwargs
         raise OSError("home cache is unavailable")
 
-    monkeypatch.setattr(wrapper.Path, "mkdir", _fail_mkdir)
-    monkeypatch.setattr(wrapper.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(Path, "mkdir", _fail_mkdir)
+    monkeypatch.setattr(
+        "mblt_vision.wrapper.tempfile.gettempdir", lambda: str(tmp_path)
+    )
 
     with pytest.raises(RuntimeError, match="not a private directory"):
         wrapper._default_cache_dir()
@@ -149,7 +154,9 @@ def test_default_cache_dir_preserves_existing_probe_named_file(
     preferred.mkdir()
     marker = preferred / ".write_test"
     marker.write_bytes(b"caller-owned")
-    monkeypatch.setattr(wrapper.os.path, "expanduser", lambda _: str(preferred))
+    monkeypatch.setattr(
+        "mblt_vision.wrapper.os.path.expanduser", lambda _: str(preferred)
+    )
 
     assert wrapper._default_cache_dir() == str(preferred)
     assert marker.read_bytes() == b"caller-owned"
@@ -2895,7 +2902,7 @@ def test_preprocess_with_metadata_returns_letterbox_ratio_pad() -> None:
         "SetOrder": {"shape": "HWC"},
         "Normalize": {"style": "cv"},
     }
-    engine.preprocessor = wrapper.build_preprocess(engine.pre_cfg)
+    engine.preprocessor = build_preprocess(engine.pre_cfg)
     image = np.zeros((481, 640, 3), dtype=np.uint8)
 
     processed, metadata = engine.preprocess_with_metadata(image)

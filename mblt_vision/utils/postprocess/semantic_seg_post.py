@@ -8,10 +8,11 @@ from typing import Any
 import torch
 import torch.nn.functional as functional
 
+from ..letterbox import RatioPad
 from ..types import ListTensorLike, TensorLike
 from ._letterbox import crop_letterbox, get_letterbox_input_shape, resolve_ratio_pads
 from .base import PostBase
-from .common import RatioPad, normalize_image_shapes
+from .common import normalize_image_shapes
 
 
 class SemanticSegPost(PostBase):

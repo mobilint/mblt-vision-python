@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import cv2
 import numpy as np
@@ -53,10 +54,13 @@ def test_class_based_datasets_ignore_non_image_files(
 def test_coco_dataset_rejects_annotation_geometry_mismatching_image() -> None:
     """Do not evaluate COCO labels with geometry different from their decoded image."""
 
-    dataset = SimpleNamespace(
-        ids=[1],
-        coco=SimpleNamespace(imgs={1: {"height": 4, "width": 5}}),
-        _load_image=lambda _: np.zeros((3, 5, 3), dtype=np.uint8),
+    dataset = cast(
+        CustomCOCODataset,
+        SimpleNamespace(
+            ids=[1],
+            coco=SimpleNamespace(imgs={1: {"height": 4, "width": 5}}),
+            _load_image=lambda _: np.zeros((3, 5, 3), dtype=np.uint8),
+        ),
     )
 
     with pytest.raises(

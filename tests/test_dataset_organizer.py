@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import io
 import inspect
+import os
+import shutil
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -176,7 +178,7 @@ def test_download_url_retries_and_resumes_partial_file(
         calls.append(dict(headers))
         return responses.pop(0)
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
     monkeypatch.setattr(organizer, "sleep", lambda _: None)
 
@@ -215,7 +217,7 @@ def test_download_url_restarts_when_resume_offset_does_not_match(
         calls.append(dict(headers))
         return responses.pop(0)
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
     local_path = tmp_path / "archive.tar"
     local_path.write_bytes(b"old")
@@ -247,7 +249,7 @@ def test_download_url_accepts_completed_archive_on_range_not_satisfiable(
             chunks=[],
         )
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     local_path = tmp_path / "archive.tar"
     local_path.write_bytes(payload)
 
@@ -283,7 +285,7 @@ def test_download_url_restarts_after_incomplete_range_not_satisfiable(
         del url, kwargs
         return responses.pop(0)
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
     local_path = tmp_path / "archive.tar"
     local_path.write_bytes(b"old")
@@ -314,7 +316,7 @@ def test_download_url_retries_transient_http_responses(
         calls += 1
         return responses.pop(0)
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
     monkeypatch.setattr(organizer, "sleep", lambda _: None)
 
@@ -340,7 +342,7 @@ def test_download_url_does_not_retry_permanent_http_client_errors(
         calls += 1
         return _FakeResponse(status_code=404, headers={}, chunks=[])
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
 
     with pytest.raises(requests.HTTPError):
         organizer._download_url(
@@ -366,7 +368,7 @@ def test_download_url_verifies_pinned_archive_sha256(
             chunks=[payload],
         )
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
     local_path = tmp_path / "archive.zip"
 
@@ -392,7 +394,7 @@ def test_download_url_rejects_and_removes_digest_mismatches(
             chunks=[b"malicious"],
         )
 
-    monkeypatch.setattr(organizer.requests, "get", _fake_get)
+    monkeypatch.setattr("mblt_vision.utils.datasets.organizer.requests.get", _fake_get)
     monkeypatch.setattr(organizer, "tqdm", _DummyTqdm)
     local_path = tmp_path / "archive.zip"
 
@@ -435,8 +437,7 @@ def test_download_if_url_rejects_plaintext_http(
     """Do not fetch benchmark inputs over an unauthenticated transport."""
 
     monkeypatch.setattr(
-        organizer.requests,
-        "get",
+        "mblt_vision.utils.datasets.organizer.requests.get",
         lambda *args, **kwargs: pytest.fail("plaintext URL must not be requested"),
     )
 
@@ -842,7 +843,7 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     (output_dir / "images" / "keep.jpg").write_bytes(b"old image")
     (output_dir / "depth" / "keep.npy").write_bytes(b"old depth")
 
-    real_replace = organizer.os.replace
+    real_replace = os.replace
 
     def _fail_install_and_rollback(source: str, destination: str) -> None:
         source_path = Path(source)
@@ -859,7 +860,9 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
             raise OSError("simulated rollback failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(organizer.os, "replace", _fail_install_and_rollback)
+    monkeypatch.setattr(
+        "mblt_vision.utils.datasets.organizer.os.replace", _fail_install_and_rollback
+    )
 
     with pytest.raises(OSError, match="backups are preserved"):
         organizer.construct_nyu_depth(str(dataset_dir), str(output_dir))
@@ -987,14 +990,17 @@ def test_construct_ade20k_preserves_cache_when_metadata_staging_fails(
     output_dir = tmp_path / "organized"
     output_dir.mkdir()
     (output_dir / "valid-cache-marker").write_bytes(b"existing")
-    real_copy2 = organizer.shutil.copy2
+    real_copy2 = shutil.copy2
 
     def _fail_scene_metadata_copy(source: str, destination: str) -> str:
         if Path(source).name == "sceneCategories.txt":
             raise OSError("simulated metadata copy failure")
         return real_copy2(source, destination)
 
-    monkeypatch.setattr(organizer.shutil, "copy2", _fail_scene_metadata_copy)
+    monkeypatch.setattr(
+        "mblt_vision.utils.datasets.organizer.shutil.copy2",
+        _fail_scene_metadata_copy,
+    )
 
     with pytest.raises(OSError, match="simulated metadata copy failure"):
         organizer.construct_ade20k(str(dataset_dir), str(output_dir))
@@ -1323,7 +1329,7 @@ def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
     (output_dir / "annotations").mkdir()
     (output_dir / "images" / "keep.png").write_bytes(b"old image")
     (output_dir / "annotations" / "keep.png").write_bytes(b"old annotation")
-    real_replace = organizer.os.replace
+    real_replace = os.replace
     failed = False
 
     def _fail_annotation_install(source: str, destination: str) -> None:
@@ -1337,7 +1343,9 @@ def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
             raise OSError("simulated install failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(organizer.os, "replace", _fail_annotation_install)
+    monkeypatch.setattr(
+        "mblt_vision.utils.datasets.organizer.os.replace", _fail_annotation_install
+    )
 
     with pytest.raises(OSError, match="simulated"):
         organizer.organize_cityscapes(
@@ -1368,7 +1376,7 @@ def test_dense_install_preserves_backups_when_rollback_fails(
     (output_dir / "images" / "keep.png").write_bytes(b"old image")
     (output_dir / "annotations" / "keep.png").write_bytes(b"old annotation")
 
-    real_replace = organizer.os.replace
+    real_replace = os.replace
 
     def _fail_install_and_rollback(source: str, destination: str) -> None:
         source_path = Path(source)
@@ -1382,7 +1390,9 @@ def test_dense_install_preserves_backups_when_rollback_fails(
             raise OSError("simulated rollback failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(organizer.os, "replace", _fail_install_and_rollback)
+    monkeypatch.setattr(
+        "mblt_vision.utils.datasets.organizer.os.replace", _fail_install_and_rollback
+    )
 
     replacements = (
         (str(staged_images), str(output_dir / "images")),
