@@ -7,6 +7,7 @@ from __future__ import annotations
 import concurrent.futures
 import cv2
 import hashlib
+import json
 import math
 import os
 import re
@@ -30,6 +31,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from ...datasets import get_dataset_config
+from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 from .readiness import (
     ADE20K_METADATA_FILES,
     ADE20K_VALIDATION_SAMPLE_COUNT,
@@ -163,7 +165,6 @@ def _validate_staged_payloads(staged_root: Path, dataset: str) -> None:
 
     image_roots = {
         "imagenet": (staged_root,),
-        "coco": (staged_root / "val2017",),
         "widerface": (staged_root / "images",),
         "dotav1": (staged_root / "images",),
         "ade20k": (staged_root / "images",),
@@ -185,10 +186,70 @@ def _validate_staged_payloads(staged_root: Path, dataset: str) -> None:
                         f"Staged {dataset} image is unreadable: {image_path}."
                     )
 
-    if dataset in {"ade20k", "cityscapes"}:
+    if dataset == "coco":
+        _validate_staged_coco_image_geometry(staged_root)
+    elif dataset in {"ade20k", "cityscapes"}:
         _validate_staged_semantic_masks(staged_root, dataset)
     elif dataset == "dotav1":
         _validate_staged_dotav1_labels(staged_root)
+
+
+def _validate_staged_coco_image_geometry(staged_root: Path) -> None:
+    """Compare every staged COCO image with its JSON-declared geometry."""
+
+    image_root = staged_root / "val2017"
+    decoded_shapes: dict[str, tuple[int, int]] = {}
+    for annotation_path in sorted(staged_root.glob("*_val2017.json")):
+        try:
+            annotation = json.loads(annotation_path.read_text(encoding="utf-8"))
+            image_records = annotation["images"]
+        except (json.JSONDecodeError, KeyError, OSError, TypeError) as exc:
+            raise ValueError(
+                f"Staged COCO annotation is unreadable: {annotation_path}."
+            ) from exc
+        if not isinstance(image_records, list):
+            raise ValueError(
+                f"Staged COCO annotation has an invalid images table: {annotation_path}."
+            )
+        for record in image_records:
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"Staged COCO annotation has an invalid image record: {annotation_path}."
+                )
+            file_name, height, width = (
+                record.get("file_name"),
+                record.get("height"),
+                record.get("width"),
+            )
+            if (
+                not isinstance(file_name, str)
+                or not file_name
+                or Path(file_name).is_absolute()
+                or ".." in Path(file_name).parts
+                or not isinstance(height, int)
+                or isinstance(height, bool)
+                or not isinstance(width, int)
+                or isinstance(width, bool)
+                or height <= 0
+                or width <= 0
+            ):
+                raise ValueError(
+                    f"Staged COCO image metadata is invalid: {annotation_path}."
+                )
+            image_shape = decoded_shapes.get(file_name)
+            if image_shape is None:
+                image = cv2.imread(str(image_root / file_name), cv2.IMREAD_COLOR)
+                if image is None:
+                    raise ValueError(
+                        f"Staged COCO image is unreadable: {image_root / file_name}."
+                    )
+                image_shape = (int(image.shape[0]), int(image.shape[1]))
+                decoded_shapes[file_name] = image_shape
+            if image_shape != (height, width):
+                raise ValueError(
+                    "Staged COCO image geometry does not match annotation metadata for "
+                    f"{file_name}: image {image_shape}, annotation {(height, width)}."
+                )
 
 
 def _validate_staged_semantic_masks(staged_root: Path, dataset: str) -> None:
@@ -246,6 +307,17 @@ def _validate_staged_semantic_masks(staged_root: Path, dataset: str) -> None:
                     "Staged Cityscapes annotation contains unsupported source IDs "
                     f"{invalid_ids.tolist()}; expected IDs in [0, 33] or 255: {annotation_path}."
                 )
+            has_evaluable_class = bool(
+                (
+                    CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)] != 255
+                ).any()
+            )
+        else:
+            has_evaluable_class = bool((annotation > 0).any())
+        if not has_evaluable_class:
+            raise ValueError(
+                f"Staged {dataset} annotation contains no evaluable class IDs: {annotation_path}."
+            )
 
 
 def _validate_staged_dotav1_labels(staged_root: Path) -> None:
@@ -1322,7 +1394,7 @@ def organize_ade20k(
 ) -> None:
     """Organizes ADE20K validation data, downloading and unpacking when necessary."""
 
-    output_dir = _resolve_organizer_output_dir(output_dir, "ADEChallengeData2016")
+    output_dir = _resolve_organizer_output_dir(output_dir, "ade20k")
     output_dir = _validate_dense_output_root(
         output_dir, "ADE20K", ("images", "annotations")
     )

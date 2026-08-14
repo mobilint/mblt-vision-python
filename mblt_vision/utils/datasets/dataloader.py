@@ -390,6 +390,10 @@ class CustomADE20K(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]])
         target = np.full(annotation.shape, 255, dtype=np.uint8)
         valid = annotation > 0
         target[valid] = annotation[valid] - 1
+        if not valid.any():
+            raise ValueError(
+                f"ADE20K annotation contains no evaluable class IDs: {annotation_path}"
+            )
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem
 
     def __len__(self) -> int:
@@ -552,6 +556,10 @@ class CustomCityscapes(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, st
                 f"{unknown_ids.tolist()}: {annotation_path}"
             )
         target = CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)]
+        if not (target != 255).any():
+            raise ValueError(
+                f"Cityscapes annotation contains no evaluable class IDs: {annotation_path}"
+            )
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem
 
     def __len__(self) -> int:

@@ -25,7 +25,7 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
                 root=root, annotation_path=annotation_path, **kwargs
             )
             self.ids = [1, 2]
-            self.coco = object()
+            self.coco = SimpleNamespace(cats={1: {}})
 
         def __len__(self) -> int:
             return len(self.ids)
@@ -74,6 +74,22 @@ def test_coco_evaluation_rejects_non_coco_model_taxonomy() -> None:
 
     with pytest.raises(ValueError, match="post_cfg.dataset to be 'coco'"):
         eval_coco_module.eval_coco_metrics(model, "/dataset", batch_size=1)
+
+
+def test_coco_evaluation_rejects_noncanonical_artifact_categories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not score direct COCO artifacts with an incompatible category taxonomy."""
+
+    dataset = SimpleNamespace(coco=SimpleNamespace(cats={999: {}}))
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match=r"unsupported category IDs: \[999\]"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
 
 
 def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:

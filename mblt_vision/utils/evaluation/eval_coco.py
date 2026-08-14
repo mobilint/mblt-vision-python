@@ -12,6 +12,7 @@ from faster_coco_eval import COCO, COCOeval_faster
 from tqdm import tqdm
 
 from ..._tasks import normalize_vision_task
+from ...datasets import get_dataset_category_ids
 from ..datasets import CustomCOCODataset, get_coco_loader
 
 if TYPE_CHECKING:
@@ -51,6 +52,29 @@ def _require_batch_cardinality(expected: int, **values: Any) -> None:
         raise ValueError(
             "COCO evaluation batch cardinality mismatch: "
             f"expected {expected}, got {details}."
+        )
+
+
+def _validate_coco_dataset_taxonomy(dataset: CustomCOCODataset, task: str) -> None:
+    """Ensure direct COCO evaluation uses only task-compatible category IDs."""
+
+    categories = getattr(dataset.coco, "cats", None)
+    if not isinstance(categories, dict) or not categories:
+        raise ValueError("COCO evaluation dataset must define at least one category.")
+    category_ids = set(categories)
+    if any(
+        not isinstance(category_id, int) or isinstance(category_id, bool)
+        for category_id in category_ids
+    ):
+        raise ValueError("COCO evaluation dataset contains invalid category IDs.")
+    expected_ids = (
+        {1} if task == "pose_estimation" else set(get_dataset_category_ids("coco"))
+    )
+    unsupported_ids = category_ids - expected_ids
+    if unsupported_ids:
+        raise ValueError(
+            "COCO evaluation dataset contains unsupported category IDs: "
+            f"{sorted(unsupported_ids)}."
         )
 
 
@@ -233,6 +257,7 @@ def eval_coco_metrics(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "person_keypoints_val2017.json"),
         )
+    _validate_coco_dataset_taxonomy(dataset, task)
 
     dataloader = get_coco_loader(dataset, batch_size, model.preprocess_with_metadata)
     model.set_postprocess_thresholds(conf_thres=conf_thres, iou_thres=iou_thres)

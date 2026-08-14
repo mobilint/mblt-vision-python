@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import inspect
+import json
 import os
 import shutil
 import tarfile
@@ -92,7 +93,7 @@ def test_dotav1_organizer_rejects_truncated_raw_annotation_rows(
         (organizer.organize_coco, "coco"),
         (organizer.organize_widerface, "widerface"),
         (organizer.organize_nyu_depth, "nyu-depth"),
-        (organizer.organize_ade20k, "ADEChallengeData2016"),
+        (organizer.organize_ade20k, "ade20k"),
         (organizer.organize_cityscapes, "cityscapes"),
         (organizer.organize_dotav1, "dotav1"),
     ],
@@ -973,6 +974,56 @@ def test_staged_cityscapes_payload_validation_rejects_unknown_source_ids(
 
     with pytest.raises(ValueError, match="unsupported source IDs.*34"):
         organizer._validate_staged_payloads(tmp_path, "cityscapes")
+
+
+@pytest.mark.parametrize(
+    ("dataset", "source_id"),
+    [("ade20k", 0), ("cityscapes", 255)],
+)
+def test_staged_semantic_payload_validation_rejects_all_ignored_targets(
+    tmp_path: Path, dataset: str, source_id: int
+) -> None:
+    """Do not install semantic masks that cannot contribute to validation metrics."""
+
+    image_dir = tmp_path / "images"
+    annotation_dir = tmp_path / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir()
+    Image.new("RGB", (2, 2)).save(image_dir / "sample.png")
+    Image.fromarray(np.full((2, 2), source_id, dtype=np.uint8)).save(
+        annotation_dir / "sample.png"
+    )
+
+    with pytest.raises(ValueError, match="contains no evaluable class IDs"):
+        organizer._validate_staged_payloads(tmp_path, dataset)
+
+
+def test_staged_coco_payload_validation_rejects_annotation_geometry_mismatch(
+    tmp_path: Path,
+) -> None:
+    """Preserve a usable cache when JSON dimensions differ from staged image bytes."""
+
+    image_dir = tmp_path / "val2017"
+    image_dir.mkdir()
+    Image.new("RGB", (2, 1)).save(image_dir / "000000000001.jpg")
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [
+                    {
+                        "id": 1,
+                        "file_name": "000000000001.jpg",
+                        "height": 2,
+                        "width": 1,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="geometry does not match"):
+        organizer._validate_staged_payloads(tmp_path, "coco")
 
 
 def _create_ade20k_source(tmp_path: Path) -> Path:

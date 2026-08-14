@@ -76,9 +76,43 @@ def test_widerface_evaluation_rejects_truncated_postprocess_batch(
     )
     monkeypatch.setattr(eval_widerface_module, "CustomWiderface", lambda _: _Dataset())
     monkeypatch.setattr(
+        eval_widerface_module,
+        "_load_widerface_image_names",
+        lambda _: {"event": {"first.jpg", "second.jpg"}},
+    )
+    monkeypatch.setattr(
+        eval_widerface_module, "_widerface_difficulty_metadata_ready", lambda *_: True
+    )
+    monkeypatch.setattr(
         eval_widerface_module, "get_widerface_loader", lambda *_: [batch]
     )
     monkeypatch.setattr(eval_widerface_module, "tqdm", _Progress)
 
     with pytest.raises(ValueError, match="WiderFace evaluation batch length mismatch"):
         eval_widerface_module.eval_widerface(_Model(), "/dataset", batch_size=2)
+
+
+def test_widerface_evaluation_rejects_malformed_difficulty_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate metadata before direct evaluation constructs a dataset or loader."""
+
+    model = SimpleNamespace(post_cfg={"task": "face_detection", "dataset": "widerface"})
+    monkeypatch.setattr(
+        eval_widerface_module,
+        "_load_widerface_image_names",
+        lambda _: {"0--Parade": {"sample.jpg"}},
+    )
+    monkeypatch.setattr(
+        eval_widerface_module, "_widerface_difficulty_metadata_ready", lambda *_: False
+    )
+    monkeypatch.setattr(
+        eval_widerface_module,
+        "CustomWiderface",
+        lambda _: pytest.fail(
+            "invalid metadata must not construct a WiderFace dataset"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="metadata is malformed"):
+        eval_widerface_module.eval_widerface(model, "/dataset", batch_size=1)

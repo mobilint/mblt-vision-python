@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -13,6 +14,10 @@ from scipy.io import loadmat
 from tqdm import tqdm
 
 from ..datasets import CustomWiderFaceDataset, get_widerface_loader
+from ..datasets.readiness import (
+    _load_widerface_image_names,
+    _widerface_difficulty_metadata_ready,
+)
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -108,6 +113,15 @@ def eval_widerface(
         raise ValueError(
             "WiderFace evaluation requires model post_cfg.dataset to be 'widerface', "
             f"got {dataset_name!r}."
+        )
+
+    dataset_root = Path(data_path)
+    expected_images = _load_widerface_image_names(dataset_root / "wider_face_val.mat")
+    if expected_images is None or not _widerface_difficulty_metadata_ready(
+        dataset_root, expected_images
+    ):
+        raise ValueError(
+            "WiderFace evaluation metadata is malformed or has inconsistent difficulty indices."
         )
 
     dataset = CustomWiderface(os.path.join(data_path, "images"))

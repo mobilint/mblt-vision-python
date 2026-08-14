@@ -103,6 +103,31 @@ def test_dota_dataset_rejects_duplicate_image_stems(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("dataset_class", "source_id"),
+    [(CustomADE20K, 0), (CustomCityscapes, 255)],
+)
+def test_dense_semantic_datasets_reject_all_ignored_targets(
+    tmp_path: Path,
+    dataset_class: type[CustomADE20K] | type[CustomCityscapes],
+    source_id: int,
+) -> None:
+    """Reject direct semantic evaluation samples that contain no valid labels."""
+
+    image_dir = tmp_path / "images"
+    annotation_dir = tmp_path / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir()
+    Image.new("RGB", (2, 2)).save(image_dir / "sample.png")
+    Image.fromarray(np.full((2, 2), source_id, dtype=np.uint8)).save(
+        annotation_dir / "sample.png"
+    )
+    dataset = dataset_class(str(tmp_path))
+
+    with pytest.raises(ValueError, match="contains no evaluable class IDs"):
+        dataset[0]
+
+
+@pytest.mark.parametrize(
     ("dataset_class", "target_dir", "target_names"),
     [
         (CustomNYUDepth, "depth", ("sample.npy", "sample.NPY")),
