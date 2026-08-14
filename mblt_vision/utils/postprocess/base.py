@@ -8,9 +8,10 @@ import numpy as np
 import torch
 
 from ..._tasks import normalize_vision_task
+from ..letterbox import RatioPad
 from ..preprocess._validation import normalize_image_size
 from ..types import ListTensorLike, TensorLike
-from .common import RatioPad, nmsout2eval, process_mask_upsample
+from .common import nmsout2eval, process_mask_upsample
 
 
 class PostBase(ABC):
