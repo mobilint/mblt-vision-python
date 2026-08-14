@@ -142,6 +142,24 @@ def test_detection_postprocessor_rejects_nonfinite_raw_heads(
         postprocessor.check_input(raw_head)
 
 
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_detection_postprocessor_rejects_nonfinite_mask_prototypes(
+    invalid_value: float,
+) -> None:
+    """Reject invalid mask prototypes from already-decoded segmentation artifacts."""
+
+    postprocessor = cast(Any, YOLOAnchorlessSegPost.__new__(YOLOAnchorlessSegPost))
+    postprocessor.device = torch.device("cpu")
+    postprocessor.n_extra = 2
+    prototype = torch.zeros((1, 2, 2, 2))
+    prototype[0, 0, 0, 0] = invalid_value
+
+    with pytest.raises(
+        ValueError, match="Mask prototype tensor must contain only finite"
+    ):
+        postprocessor._normalize_proto_batch(prototype)
+
+
 @pytest.mark.parametrize(
     ("post_cfg", "expected_type"),
     [

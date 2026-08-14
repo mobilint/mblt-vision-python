@@ -38,6 +38,7 @@ def test_imagenet_readiness_requires_complete_official_class_tree(
 
     monkeypatch.setattr(readiness, "IMAGENET_CLASS_COUNT", 2)
     monkeypatch.setattr(readiness, "IMAGENET_IMAGES_PER_CLASS", 2)
+    monkeypatch.setattr(readiness, "IMAGENET_SYNSETS", {"n00000000", "n00000001"})
     for class_index in range(2):
         for image_index in range(2):
             if (class_index, image_index) == (1, 1):
@@ -73,6 +74,8 @@ def test_coco_readiness_matches_images_to_task_annotations(
     """Require every official COCO image in the task-specific annotation file."""
 
     monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, annotation_name, 2)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, annotation_name, 1)
     image_names = ["000000000001.jpg", "000000000002.jpg"]
     for image_name in image_names:
         _write_file(tmp_path / "val2017" / image_name)
@@ -89,7 +92,12 @@ def test_coco_readiness_matches_images_to_task_annotations(
                 "images": [
                     {"id": index, "file_name": image_name}
                     for index, image_name in enumerate(image_names, start=1)
-                ]
+                ],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {"id": index, "image_id": index, "category_id": 1}
+                    for index in range(1, 3)
+                ],
             }
         ),
         encoding="utf-8",
@@ -105,6 +113,8 @@ def test_coco_readiness_rejects_duplicate_image_ids(
     """Reject COCO metadata whose duplicate IDs would overwrite image records."""
 
     monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 2)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
     image_names = ["000000000001.jpg", "000000000002.jpg"]
     for image_name in image_names:
         _write_file(tmp_path / "val2017" / image_name)
@@ -114,13 +124,67 @@ def test_coco_readiness_rejects_duplicate_image_ids(
                 "images": [
                     {"id": 1, "file_name": image_names[0]},
                     {"id": 1, "file_name": image_names[1]},
-                ]
+                ],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 1},
+                    {"id": 2, "image_id": 1, "category_id": 1},
+                ],
             }
         ),
         encoding="utf-8",
     )
 
     assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+
+def test_coco_readiness_rejects_truncated_annotation_table(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not reuse complete-looking images with incomplete COCO ground truth."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 2)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    image_names = ["000000000001.jpg", "000000000002.jpg"]
+    for image_name in image_names:
+        _write_file(tmp_path / "val2017" / image_name)
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [
+                    {"id": index, "file_name": image_name}
+                    for index, image_name in enumerate(image_names, start=1)
+                ],
+                "categories": [{"id": 1}],
+                "annotations": [{"id": 1, "image_id": 1, "category_id": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+
+def test_widerface_readiness_rejects_invalid_difficulty_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject present-but-malformed difficulty files before evaluation indexes them."""
+
+    monkeypatch.setattr(readiness, "WIDERFACE_EVENT_COUNT", 1)
+    monkeypatch.setattr(readiness, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 1)
+    _write_widerface_metadata(
+        tmp_path / "wider_face_val.mat", {"0--Parade": ["sample"]}
+    )
+    for file_name in (
+        "wider_easy_val.mat",
+        "wider_medium_val.mat",
+        "wider_hard_val.mat",
+    ):
+        _write_file(tmp_path / file_name)
+    _write_file(tmp_path / "images" / "0--Parade" / "sample.jpg")
+
+    assert not readiness.dataset_ready(tmp_path, "face_detection", "widerface")
 
 
 @pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])
@@ -164,6 +228,9 @@ def test_widerface_readiness_requires_complete_event_tree_and_metadata(
 
     monkeypatch.setattr(readiness, "WIDERFACE_EVENT_COUNT", 2)
     monkeypatch.setattr(readiness, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setattr(
+        readiness, "_widerface_difficulty_metadata_ready", lambda *_: True
+    )
     _write_widerface_metadata(
         tmp_path / "wider_face_val.mat",
         {"0--Parade": ["sample-0"], "1--Handshaking": ["sample-1"]},

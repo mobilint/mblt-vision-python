@@ -114,6 +114,18 @@ def test_depth_post_normalizes_quarter_resolution_channel_last_output() -> None:
     assert torch.equal(normalized, expected)
 
 
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_depth_post_rejects_nonfinite_outputs(invalid_value: float) -> None:
+    """Reject invalid local depth tensors before resizing or visualization."""
+
+    post = DepthPost({"LetterBox": {"img_size": [8, 8]}}, {})
+    depth = torch.zeros((1, 8, 8))
+    depth[0, 0, 0] = invalid_value
+
+    with pytest.raises(ValueError, match="must contain only finite values"):
+        post(depth)
+
+
 def test_nyu_depth_dataset_rejects_mismatched_image_and_target_shapes(tmp_path) -> None:
     """Reject paired NYU files whose pixels cannot be compared one-to-one."""
 
@@ -127,4 +139,25 @@ def test_nyu_depth_dataset_rejects_mismatched_image_and_target_shapes(tmp_path) 
     np.save(depth_dir / "sample.npy", np.zeros((3, 5), dtype=np.float32))
 
     with pytest.raises(ValueError, match=r"sample: image \(4, 5\), depth \(3, 5\)"):
+        CustomNYUDepth(str(tmp_path))[0]
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_nyu_depth_dataset_rejects_nonfinite_targets(
+    tmp_path, invalid_value: float
+) -> None:
+    """Do not silently remove invalid NYU ground-truth pixels from metrics."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    assert cv2.imwrite(
+        str(image_dir / "sample.png"), np.zeros((4, 5, 3), dtype=np.uint8)
+    )
+    depth = np.ones((4, 5), dtype=np.float32)
+    depth[0, 0] = invalid_value
+    np.save(depth_dir / "sample.npy", depth)
+
+    with pytest.raises(ValueError, match=r"finite values: .*sample\.npy"):
         CustomNYUDepth(str(tmp_path))[0]

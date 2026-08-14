@@ -49,8 +49,6 @@ def uses_shifted_engine_model_path_layout(
         and model_path.lower() not in SUPPORTED_FRAMEWORKS
     ):
         return False
-    if inferred_framework == "onnx":
-        return True
     return (
         isinstance(dev_no, str)
         or isinstance(core_mode, int)

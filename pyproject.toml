@@ -69,6 +69,7 @@ version = { attr = "mblt_vision.__version__" }
     "py.typed",
     "models/*.yaml",
     "datasets/*.yaml",
+    "datasets/*.txt",
 ]
 
 [tool.pytest.ini_options]

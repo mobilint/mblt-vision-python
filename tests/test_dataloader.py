@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import pytest
+from PIL import Image
 
 from mblt_vision.utils.datasets.dataloader import (
     CustomCOCODataset,
+    CustomCityscapes,
     CustomImageFolder,
     CustomWiderFaceDataset,
 )
@@ -60,3 +63,21 @@ def test_coco_dataset_rejects_annotation_geometry_mismatching_image() -> None:
         ValueError, match=r"image ID 1: annotation \(4, 5\), image \(3, 5\)"
     ):
         CustomCOCODataset.__getitem__(dataset, 0)
+
+
+def test_cityscapes_dataset_rejects_unknown_source_ids(tmp_path: Path) -> None:
+    """Reject corrupted Cityscapes labels instead of remapping them to ignore."""
+
+    image_dir = tmp_path / "images"
+    annotation_dir = tmp_path / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir()
+    assert cv2.imwrite(
+        str(image_dir / "sample.png"), np.zeros((2, 2, 3), dtype=np.uint8)
+    )
+    Image.fromarray(np.full((2, 2), 200, dtype=np.uint8)).save(
+        annotation_dir / "sample.png"
+    )
+
+    with pytest.raises(ValueError, match=r"unsupported source IDs \[200\]"):
+        CustomCityscapes(str(tmp_path))[0]

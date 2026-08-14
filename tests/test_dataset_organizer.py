@@ -674,6 +674,28 @@ def test_safe_unpack_archive_preserves_regular_tar_layout(tmp_path: Path) -> Non
     assert (extract_dir / "dataset" / "sample.txt").read_bytes() == b"dataset contents"
 
 
+@pytest.mark.parametrize("suffix", [".zip", ".tar"])
+def test_safe_unpack_archive_rejects_duplicate_member_paths(
+    tmp_path: Path, suffix: str
+) -> None:
+    """Reject duplicate archive members before any staged file can be replaced."""
+
+    archive_path = tmp_path / f"dataset{suffix}"
+    if suffix == ".zip":
+        with ZipFile(archive_path, "w") as archive:
+            archive.writestr("dataset/sample.txt", b"first")
+            archive.writestr("dataset/sample.txt", b"second")
+    else:
+        with tarfile.open(archive_path, "w") as archive:
+            for payload in (b"first", b"second"):
+                member = tarfile.TarInfo("dataset/sample.txt")
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+
+    with pytest.raises(ValueError, match="Duplicate archive member path"):
+        organizer._safe_unpack_archive(str(archive_path), str(tmp_path / "extracted"))
+
+
 def test_safe_unpack_archive_rejects_tar_traversal_before_writing(
     tmp_path: Path,
 ) -> None:

@@ -1414,8 +1414,14 @@ def _safe_unpack_archive(archive_path: str, destination: str) -> None:
     if zipfile.is_zipfile(archive_path):
         with zipfile.ZipFile(archive_path) as archive:
             members = archive.infolist()
+            targets: set[str] = set()
             for member in members:
-                _safe_archive_member_path(member.filename, destination)
+                target = _safe_archive_member_path(member.filename, destination)
+                if target in targets:
+                    raise ValueError(
+                        f"Duplicate archive member path: {member.filename!r}."
+                    )
+                targets.add(target)
                 file_type = stat.S_IFMT(member.external_attr >> 16)
                 if file_type and not (
                     stat.S_ISREG(file_type) or stat.S_ISDIR(file_type)
@@ -1436,8 +1442,12 @@ def _safe_unpack_archive(archive_path: str, destination: str) -> None:
     if tarfile.is_tarfile(archive_path):
         with tarfile.open(archive_path) as archive:
             members = archive.getmembers()
+            targets: set[str] = set()
             for member in members:
-                _safe_archive_member_path(member.name, destination)
+                target = _safe_archive_member_path(member.name, destination)
+                if target in targets:
+                    raise ValueError(f"Duplicate archive member path: {member.name!r}.")
+                targets.add(target)
                 if not (member.isfile() or member.isdir()):
                     raise ValueError(f"Unsafe archive member type: {member.name!r}.")
             for member in members:

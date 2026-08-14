@@ -319,6 +319,17 @@ def test_engine_init_rejects_nonexistent_explicit_onnx_path(
         MBLT_Engine(model_config, **path_kwargs)
 
 
+def test_engine_init_rejects_wrong_suffix_for_mxq_path(tmp_path: Path) -> None:
+    """Do not route an existing ONNX file through the MXQ compatibility alias."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+    with pytest.raises(ValueError, match=r"mxq_path must end in '.mxq'"):
+        MBLT_Engine(
+            {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}}, mxq_path=str(onnx_path)
+        )
+
+
 def test_engine_init_disposes_mxq_backend_after_postprocess_setup_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1021,7 +1032,7 @@ def test_engine_init_auto_detects_mxq_framework_from_model_path(
 
 
 @pytest.mark.parametrize(
-    "model_path_style", ["keyword", "positional", "positional-runtime", "onnx-path"]
+    "model_path_style", ["keyword", "positional-runtime", "onnx-path"]
 )
 def test_engine_init_accepts_local_onnx_model_path(
     monkeypatch: pytest.MonkeyPatch,
@@ -1077,9 +1088,7 @@ def test_engine_init_accepts_local_onnx_model_path(
         "pre_cfg": {},
         "post_cfg": {},
     }
-    if model_path_style == "positional":
-        engine = MBLT_Engine(model_config, "DEFAULT", str(onnx_path))
-    elif model_path_style == "positional-runtime":
+    if model_path_style == "positional-runtime":
         # Keep this legacy positional-runtime invocation untyped: its argument
         # order is normalized at runtime by ``MBLT_Engine``.
         engine = cast(Any, MBLT_Engine)(

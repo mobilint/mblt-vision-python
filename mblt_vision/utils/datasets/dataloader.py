@@ -211,9 +211,13 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
                 "NYU Depth image and target shapes must match for "
                 f"{stem}: image {image.shape[:2]}, depth {depth.shape}."
             )
+        if not bool(np.isfinite(depth).all()):
+            raise ValueError(
+                f"NYU Depth target must contain only finite values: {depth_path}"
+            )
         return (
             cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
-            np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0),
+            depth,
             stem,
         )
 
@@ -504,6 +508,14 @@ class CustomCityscapes(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, st
         ):
             raise ValueError(
                 f"Cityscapes annotation values must be in [0, 255]: {annotation_path}"
+            )
+        source_ids = np.unique(annotation.astype(np.uint8))
+        known_ids = np.array([*range(34), 255], dtype=np.uint8)
+        unknown_ids = source_ids[~np.isin(source_ids, known_ids)]
+        if unknown_ids.size:
+            raise ValueError(
+                "Cityscapes annotation contains unsupported source IDs "
+                f"{unknown_ids.tolist()}: {annotation_path}"
             )
         target = CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)]
         return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem

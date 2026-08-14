@@ -78,6 +78,8 @@ class DepthPost(PostBase):
                 f"got {tuple(depth.shape)}."
             )
         depth = depth.to(device=self.device, dtype=torch.float32)
+        if not bool(torch.isfinite(depth).all()):
+            raise ValueError("Depth estimation output must contain only finite values.")
         if tuple(depth.shape[-2:]) == self.input_shape:
             return depth
 

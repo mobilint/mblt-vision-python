@@ -413,6 +413,8 @@ class YOLODetectionPostBase(PostBase):
             raise ValueError(
                 f"Expected 4D prototype tensor, got shape {tuple(proto.shape)}."
             )
+        if not bool(torch.isfinite(proto).all()):
+            raise ValueError("Mask prototype tensor must contain only finite values.")
         if proto.shape[-1] == self.n_extra:
             return proto
         if proto.shape[1] == self.n_extra:

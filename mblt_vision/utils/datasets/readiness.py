@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,20 @@ WIDERFACE_EVENT_PATTERN = re.compile(r"\d+--\S.*")
 CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(
     r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$"
 )
+IMAGENET_SYNSETS = frozenset(
+    files("mblt_vision.datasets")
+    .joinpath("imagenet_synsets.txt")
+    .read_text(encoding="utf-8")
+    .splitlines()
+)
+COCO_ANNOTATION_COUNTS = {
+    "instances_val2017.json": 36781,
+    "person_keypoints_val2017.json": 11004,
+}
+COCO_CATEGORY_COUNTS = {
+    "instances_val2017.json": 80,
+    "person_keypoints_val2017.json": 1,
+}
 
 
 def _path_has_symlink_component(path: Path) -> bool:
@@ -88,7 +103,7 @@ def _imagenet_ready(root: Path) -> bool:
     if not root.is_dir():
         return False
     class_dirs = [path for path in root.iterdir() if path.is_dir()]
-    if len(class_dirs) != IMAGENET_CLASS_COUNT:
+    if {path.name for path in class_dirs} != IMAGENET_SYNSETS:
         return False
     image_names: set[str] = set()
     for class_dir in class_dirs:
@@ -116,7 +131,9 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
         annotation: Any = json.loads(annotation_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, UnicodeError):
         return None
-    image_records = annotation.get("images") if isinstance(annotation, dict) else None
+    if not isinstance(annotation, dict):
+        return None
+    image_records = annotation.get("images")
     if (
         not isinstance(image_records, list)
         or len(image_records) != COCO_VALIDATION_SAMPLE_COUNT
@@ -141,6 +158,48 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
         or len(names) != len(set(names))
         or len(image_ids) != len(set(image_ids))
     ):
+        return None
+    annotation_records = annotation.get("annotations")
+    categories = annotation.get("categories")
+    expected_annotations = COCO_ANNOTATION_COUNTS.get(annotation_path.name)
+    expected_categories = COCO_CATEGORY_COUNTS.get(annotation_path.name)
+    if (
+        not isinstance(annotation_records, list)
+        or not isinstance(categories, list)
+        or len(annotation_records) != expected_annotations
+        or len(categories) != expected_categories
+    ):
+        return None
+    category_ids = [
+        category.get("id") for category in categories if isinstance(category, dict)
+    ]
+    if (
+        len(category_ids) != len(categories)
+        or any(
+            not isinstance(category_id, int) or isinstance(category_id, bool)
+            for category_id in category_ids
+        )
+        or len(category_ids) != len(set(category_ids))
+    ):
+        return None
+    annotation_ids: list[int] = []
+    for record in annotation_records:
+        if not isinstance(record, dict):
+            return None
+        annotation_id = record.get("id")
+        image_id = record.get("image_id")
+        category_id = record.get("category_id")
+        if (
+            not isinstance(annotation_id, int)
+            or isinstance(annotation_id, bool)
+            or not isinstance(image_id, int)
+            or isinstance(image_id, bool)
+            or image_id not in image_ids
+            or category_id not in category_ids
+        ):
+            return None
+        annotation_ids.append(annotation_id)
+    if len(annotation_ids) != len(set(annotation_ids)):
         return None
     return set(names)
 
@@ -228,7 +287,62 @@ def _widerface_ready(root: Path) -> bool:
         actual_images == expected_images
         and sum(len(image_names) for image_names in actual_images.values())
         == WIDERFACE_VALIDATION_SAMPLE_COUNT
+        and _widerface_difficulty_metadata_ready(root, expected_images)
     )
+
+
+def _widerface_difficulty_metadata_ready(
+    root: Path, expected_images: dict[str, set[str]]
+) -> bool:
+    """Validate WiderFace difficulty table dimensions and one-based face indices."""
+
+    try:
+        main = loadmat(root / "wider_face_val.mat")
+        face_boxes = main["face_bbx_list"]
+        difficulties = [
+            loadmat(root / file_name)["gt_list"]
+            for file_name in (
+                "wider_easy_val.mat",
+                "wider_medium_val.mat",
+                "wider_hard_val.mat",
+            )
+        ]
+    except (IndexError, KeyError, MatReadError, OSError, TypeError, ValueError):
+        return False
+    if len(face_boxes) != len(expected_images) or any(
+        len(table) != len(expected_images) for table in difficulties
+    ):
+        return False
+    for event_index, image_names in enumerate(expected_images.values()):
+        try:
+            event_faces = face_boxes[event_index][0]
+        except (IndexError, TypeError):
+            return False
+        if len(event_faces) != len(image_names):
+            return False
+        for table in difficulties:
+            try:
+                event_indices = table[event_index][0]
+            except (IndexError, TypeError):
+                return False
+            if len(event_indices) != len(image_names):
+                return False
+            for image_index, face_entry in enumerate(event_faces):
+                try:
+                    face_count = len(np.asarray(face_entry[0]))
+                    keep_indices = np.asarray(event_indices[image_index][0])
+                except (IndexError, TypeError):
+                    return False
+                if (
+                    not np.isfinite(keep_indices).all()
+                    or not np.equal(keep_indices, np.trunc(keep_indices)).all()
+                ):
+                    return False
+                if keep_indices.size and (
+                    int(keep_indices.min()) < 1 or int(keep_indices.max()) > face_count
+                ):
+                    return False
+    return True
 
 
 def _flatten_matlab_strings(value: Any) -> list[str]:

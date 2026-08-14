@@ -458,6 +458,13 @@ class MBLT_Engine:
             )
         model_config_part = resolve_model_config(model_cls, model_type)
 
+        if mxq_path and Path(mxq_path).suffix.lower() != ".mxq":
+            raise ValueError(f"Explicit mxq_path must end in '.mxq', got {mxq_path!r}.")
+        if onnx_path and Path(onnx_path).suffix.lower() != ".onnx":
+            raise ValueError(
+                f"Explicit onnx_path must end in '.onnx', got {onnx_path!r}."
+            )
+
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
         file_cfg_onnx_path = str(model_config_part["file_cfg"].get("onnx_path", ""))
         framework_model_path = model_path or file_cfg_model_path
