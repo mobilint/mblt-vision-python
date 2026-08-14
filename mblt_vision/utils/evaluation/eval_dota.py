@@ -109,6 +109,11 @@ def _load_ground_truths(
                 coords = torch.tensor(
                     [float(value) for value in parts[1:9]], dtype=torch.float32
                 ).reshape(4, 2)
+                if not bool(torch.isfinite(coords).all()):
+                    raise ValueError(
+                        "DOTAv1 annotation coordinates must be finite at "
+                        f"{label_path}:{line_number}."
+                    )
                 if coords.numel() and float(coords.max()) <= 1.5:
                     coords[:, 0] *= width
                     coords[:, 1] *= height
@@ -141,6 +146,11 @@ def _load_ground_truths(
                 coords = torch.tensor(
                     [float(value) for value in parts[:8]], dtype=torch.float32
                 ).reshape(4, 2)
+                if not bool(torch.isfinite(coords).all()):
+                    raise ValueError(
+                        "DOTAv1 annotation coordinates must be finite at "
+                        f"{original_label_path}:{line_number}."
+                    )
                 if parts[9] in {"1", "2"}:
                     ignore_classes.append(cls)
                     ignore_polygons.append(coords)

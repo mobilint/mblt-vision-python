@@ -123,6 +123,25 @@ def test_already_decoded_detections_reject_nonfinite_rows(
         postprocessor._final_detection_batches(detections)
 
 
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_detection_postprocessor_rejects_nonfinite_raw_heads(
+    invalid_value: float,
+) -> None:
+    """Reject malformed raw detector heads before they reach decoding and NMS."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    raw_head = torch.zeros((1, 6, 2, 2), dtype=torch.float32)
+    raw_head[0, 0, 0, 0] = invalid_value
+
+    with pytest.raises(
+        ValueError, match="Detection output tensors must contain only finite"
+    ):
+        postprocessor.check_input(raw_head)
+
+
 @pytest.mark.parametrize(
     ("post_cfg", "expected_type"),
     [

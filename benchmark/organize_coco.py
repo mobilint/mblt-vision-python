@@ -6,7 +6,6 @@ and organizes them into a structure suitable for the model zoo.
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -39,8 +38,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
-        help="Path to the directory to save the organized dataset",
+        default=None,
+        help="Path to the directory to save the organized dataset (defaults to cache)",
     )
     args = parser.parse_args()
 

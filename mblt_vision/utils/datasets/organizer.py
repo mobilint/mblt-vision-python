@@ -69,6 +69,16 @@ PINNED_ARCHIVE_SHA256 = {
 }
 
 
+def _resolve_organizer_output_dir(output_dir: str | None, dataset_name: str) -> str:
+    """Return an explicit output directory or the lazily resolved artifact cache."""
+
+    if output_dir is not None:
+        return os.path.expanduser(output_dir)
+    from mblt_vision.wrapper import get_mobilint_cache_dir
+
+    return os.path.join(get_mobilint_cache_dir(), "datasets", dataset_name)
+
+
 def _replace_staged_directories(
     replacements: Iterable[tuple[str, str]],
     output_parent_dir: str,
@@ -551,16 +561,17 @@ def construct_imagenet(image_dir: str, xml_dir: str, output_dir: str) -> None:
 def organize_imagenet(
     image_dir: str,
     xml_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/imagenet"),
+    output_dir: str | None = None,
 ) -> None:
     """Organizes the ImageNet dataset, unpacking archives if necessary.
 
     Args:
         image_dir (str): Path or URL to the image directory or archive (.tar).
         xml_dir (str): Path or URL to the XML directory or archive (.tgz).
-        output_dir (str, optional): Directory to store the organized dataset.
-            Defaults to ~/.mblt_model_zoo/datasets/imagenet.
+        output_dir: Directory to store the organized dataset. Defaults to the
+            resolved Mobilint cache directory.
     """
+    output_dir = _resolve_organizer_output_dir(output_dir, "imagenet")
     with TemporaryDirectory() as temp_dir:
         local_image_dir, local_xml_dir = _resolve_sources(
             [image_dir, xml_dir], temp_dir
@@ -626,16 +637,17 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None
 def organize_coco(
     image_dir: str,
     annotation_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/coco"),
+    output_dir: str | None = None,
 ) -> None:
     """Organizes the COCO dataset, unpacking archives if necessary.
 
     Args:
         image_dir (str): Path or URL to the image zip file or directory.
         annotation_dir (str): Path or URL to the annotation zip file or directory.
-        output_dir (str, optional): Directory to store the organized dataset.
-            Defaults to ~/.mblt_model_zoo/datasets/coco.
+        output_dir: Directory to store the organized dataset. Defaults to the
+            resolved Mobilint cache directory.
     """
+    output_dir = _resolve_organizer_output_dir(output_dir, "coco")
     with TemporaryDirectory() as temp_dir:
         local_image_dir, local_annotation_dir = _resolve_sources(
             [image_dir, annotation_dir], temp_dir
@@ -695,16 +707,17 @@ def construct_widerface(image_dir: str, annotation_dir: str, output_dir: str) ->
 def organize_widerface(
     image_dir: str,
     annotation_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/widerface"),
+    output_dir: str | None = None,
 ) -> None:
     """Organizes the WiderFace dataset, unpacking archives if necessary.
 
     Args:
         image_dir (str): Path or URL to the image zip file or directory.
         annotation_dir (str): Path or URL to the annotation zip file or directory.
-        output_dir (str, optional): Directory to store the organized dataset.
-            Defaults to ~/.mblt_model_zoo/datasets/widerface.
+        output_dir: Directory to store the organized dataset. Defaults to the
+            resolved Mobilint cache directory.
     """
+    output_dir = _resolve_organizer_output_dir(output_dir, "widerface")
     with TemporaryDirectory() as temp_dir:
         local_image_dir, local_annotation_dir = _resolve_sources(
             [image_dir, annotation_dir], temp_dir
@@ -926,15 +939,17 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
 
 def organize_nyu_depth(
     dataset_path: str = NYU_DEPTH_URL,
-    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/nyu-depth"),
+    output_dir: str | None = None,
 ) -> None:
     """Organizes NYU Depth, downloading and unpacking an archive when necessary.
 
     Args:
         dataset_path: Path or URL to the NYU Depth zip file or extracted dataset directory.
-        output_dir: Directory to store the organized dataset.
+        output_dir: Directory to store the organized dataset. Defaults to the
+            resolved Mobilint cache directory.
     """
 
+    output_dir = _resolve_organizer_output_dir(output_dir, "nyu-depth")
     output_dir = _validate_dense_output_root(
         output_dir, "NYU Depth", ("images", "depth")
     )
@@ -1066,12 +1081,11 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
 
 def organize_ade20k(
     dataset_path: str = ADE20K_URL,
-    output_dir: str = os.path.expanduser(
-        "~/.mblt_model_zoo/datasets/ADEChallengeData2016"
-    ),
+    output_dir: str | None = None,
 ) -> None:
     """Organizes ADE20K validation data, downloading and unpacking when necessary."""
 
+    output_dir = _resolve_organizer_output_dir(output_dir, "ADEChallengeData2016")
     output_dir = _validate_dense_output_root(
         output_dir, "ADE20K", ("images", "annotations")
     )
@@ -1172,7 +1186,7 @@ def _collect_cityscapes_validation_files(
 def organize_cityscapes(
     image_dir: str,
     annotation_dir: str,
-    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/cityscapes"),
+    output_dir: str | None = None,
 ) -> None:
     """Install official Cityscapes validation archives as lossless flat PNG pairs.
 
@@ -1183,12 +1197,14 @@ def organize_cityscapes(
         image_dir: Path to ``leftImg8bit_trainvaltest.zip``.
         annotation_dir: Path to ``gtFine_trainvaltest.zip``.
         output_dir: Directory where the organized validation dataset is stored.
+            Defaults to the resolved Mobilint cache directory.
 
     Raises:
         ValueError: If either source is invalid or does not contain exactly 500 matching pairs.
         OSError: If extraction, copying, or atomic installation fails.
     """
 
+    output_dir = _resolve_organizer_output_dir(output_dir, "cityscapes")
     output_dir = _validate_dense_output_root(
         output_dir, "Cityscapes", ("images", "annotations")
     )
@@ -1660,14 +1676,16 @@ def construct_dotav1(dataset_dir: str, output_dir: str) -> None:
 
 def organize_dotav1(
     dataset_path: str,
-    output_dir: str = os.path.expanduser("~/.mblt_model_zoo/datasets/dotav1"),
+    output_dir: str | None = None,
 ) -> None:
     """Organizes a validation-only DOTAv1 dataset.
 
     Args:
         dataset_path: Path or URL to the DOTAv1 zip file or extracted dataset directory.
-        output_dir: Directory to store the organized dataset.
+        output_dir: Directory to store the organized dataset. Defaults to the
+            resolved Mobilint cache directory.
     """
+    output_dir = _resolve_organizer_output_dir(output_dir, "dotav1")
     with TemporaryDirectory() as temp_dir:
         if _is_google_drive_folder_url(dataset_path):
             image_archive, label_archive = _download_dotav1_google_drive_archives(

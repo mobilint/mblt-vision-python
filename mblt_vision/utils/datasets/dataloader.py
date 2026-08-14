@@ -74,6 +74,12 @@ class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int
         image = self._load_image(image_id)
         height = self.coco.imgs[image_id]["height"]
         width = self.coco.imgs[image_id]["width"]
+        if (height, width) != image.shape[:2]:
+            raise ValueError(
+                "COCO annotation geometry does not match decoded image for "
+                f"image ID {image_id}: annotation {(height, width)}, "
+                f"image {image.shape[:2]}."
+            )
         return image, index, height, width
 
     def __len__(self) -> int:
@@ -719,13 +725,13 @@ class CustomImageFolder(torch.utils.data.Dataset[tuple[Image.Image, int]]):
             target_dir = os.path.join(self.root, target_class)
             if not os.path.isdir(target_dir):
                 continue
-            for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):
-                for fname in sorted(fnames):
-                    if os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES:
-                        continue
-                    path = os.path.join(root, fname)
-                    item = path, class_index
-                    instances.append(item)
+            for fname in sorted(os.listdir(target_dir)):
+                path = os.path.join(target_dir, fname)
+                if not os.path.isfile(path):
+                    continue
+                if os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES:
+                    continue
+                instances.append((path, class_index))
 
         self.samples = instances
 

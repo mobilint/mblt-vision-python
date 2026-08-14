@@ -489,6 +489,10 @@ class YOLODetectionPostBase(PostBase):
                 tensors = [xi.to(self.device) for xi in torch_inputs]
             else:
                 raise TypeError(f"Got unexpected element type for x[0]={type(x[0])}.")
+        if any(not bool(torch.isfinite(tensor).all()) for tensor in tensors):
+            raise ValueError(
+                "Detection output tensors must contain only finite values."
+            )
         return self.check_dim(tensors)
 
     def check_dim(self, x: list[torch.Tensor]) -> list[torch.Tensor]:

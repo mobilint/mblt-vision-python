@@ -77,7 +77,7 @@ def test_coco_readiness_matches_images_to_task_annotations(
     for image_name in image_names:
         _write_file(tmp_path / "val2017" / image_name)
     (tmp_path / annotation_name).write_text(
-        json.dumps({"images": [{"file_name": image_names[0]}]}),
+        json.dumps({"images": [{"id": 1, "file_name": image_names[0]}]}),
         encoding="utf-8",
     )
 
@@ -85,13 +85,42 @@ def test_coco_readiness_matches_images_to_task_annotations(
 
     (tmp_path / annotation_name).write_text(
         json.dumps(
-            {"images": [{"file_name": image_name} for image_name in image_names]}
+            {
+                "images": [
+                    {"id": index, "file_name": image_name}
+                    for index, image_name in enumerate(image_names, start=1)
+                ]
+            }
         ),
         encoding="utf-8",
     )
 
     assert readiness.dataset_ready(tmp_path, task, "coco")
     assert not readiness.dataset_ready(tmp_path, task, "imagenet")
+
+
+def test_coco_readiness_rejects_duplicate_image_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject COCO metadata whose duplicate IDs would overwrite image records."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
+    image_names = ["000000000001.jpg", "000000000002.jpg"]
+    for image_name in image_names:
+        _write_file(tmp_path / "val2017" / image_name)
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [
+                    {"id": 1, "file_name": image_names[0]},
+                    {"id": 1, "file_name": image_names[1]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
 
 
 @pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])

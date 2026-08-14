@@ -89,23 +89,21 @@ class SemanticSegPost(PostBase):
         output = torch.as_tensor(x, device=self.device)
         if output.ndim == 4:
             if output.shape[1] == self.nc:
-                return output.to(dtype=torch.float32), True
+                return self._validate_logits(output), True
             if output.shape[-1] == self.nc:
-                return output.permute(0, 3, 1, 2).to(dtype=torch.float32), True
+                return self._validate_logits(output.permute(0, 3, 1, 2)), True
             raise ValueError(
                 f"Semantic segmentation for '{self.dataset}' expects [B, {self.nc}, H, W] or "
                 f"[B, H, W, {self.nc}] logits, got {tuple(output.shape)}."
             )
         if output.ndim == 3:
+            if output.shape[-1] == self.nc and output.is_floating_point():
+                return self._validate_logits(output.permute(2, 0, 1).unsqueeze(0)), True
             if tuple(output.shape[:2]) == self.input_shape:
-                if output.shape[-1] != self.nc:
-                    raise ValueError(
-                        f"Semantic segmentation for '{self.dataset}' expects [H, W, {self.nc}] MXQ logits, "
-                        f"got {tuple(output.shape)}."
-                    )
-                return output.permute(2, 0, 1).unsqueeze(0).to(
-                    dtype=torch.float32
-                ), True
+                raise ValueError(
+                    f"Semantic segmentation for '{self.dataset}' expects [H, W, {self.nc}] MXQ logits, "
+                    f"got {tuple(output.shape)}."
+                )
             if output.is_complex():
                 raise ValueError("Semantic class-map values must be finite integers.")
             if output.is_floating_point():
@@ -126,6 +124,15 @@ class SemanticSegPost(PostBase):
             f"Semantic segmentation expects [B, C, H, W] or [B, H, W, C] logits, or [B, H, W] class maps, "
             f"got {tuple(output.shape)}."
         )
+
+    @staticmethod
+    def _validate_logits(output: torch.Tensor) -> torch.Tensor:
+        """Convert semantic logits to float while rejecting invalid artifact output."""
+
+        logits = output.to(dtype=torch.float32)
+        if not bool(torch.isfinite(logits).all()):
+            raise ValueError("Semantic logits must contain only finite values.")
+        return logits
 
     def _to_input_space(self, output: torch.Tensor, is_logits: bool) -> torch.Tensor:
         """Restore model output resolution to configured input space."""

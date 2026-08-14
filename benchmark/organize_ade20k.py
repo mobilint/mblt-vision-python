@@ -1,7 +1,6 @@
 """Organize the ADE20K validation dataset for local use."""
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -22,8 +21,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output-dir",
-        default=os.path.expanduser("~/.mblt_model_zoo/datasets/ADEChallengeData2016"),
-        help="Path to the organized validation dataset",
+        default=None,
+        help="Path to the organized validation dataset (defaults to cache)",
     )
     args = parser.parse_args()
     organize_ade20k(dataset_path=args.dataset_path, output_dir=args.output_dir)

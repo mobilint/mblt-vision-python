@@ -123,13 +123,26 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
     ):
         return None
     names: list[str] = []
+    image_ids: list[int] = []
     for record in image_records:
         if not isinstance(record, dict):
             continue
         file_name = record.get("file_name")
-        if isinstance(file_name, str):
+        image_id = record.get("id")
+        if (
+            isinstance(file_name, str)
+            and isinstance(image_id, int)
+            and not isinstance(image_id, bool)
+        ):
             names.append(file_name)
-    return set(names) if len(names) == len(image_records) == len(set(names)) else None
+            image_ids.append(image_id)
+    if (
+        len(names) != len(image_records)
+        or len(names) != len(set(names))
+        or len(image_ids) != len(set(image_ids))
+    ):
+        return None
+    return set(names)
 
 
 def _coco_ready(root: Path, task: str) -> bool:

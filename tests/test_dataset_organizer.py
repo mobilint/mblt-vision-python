@@ -94,14 +94,23 @@ def test_dotav1_organizer_rejects_truncated_raw_annotation_rows(
         (organizer.organize_dotav1, "dotav1"),
     ],
 )
-def test_organizer_defaults_match_registry_cache_root(
-    organize_dataset: Callable[..., Any], dataset_name: str
+def test_organizer_defaults_use_the_lazy_cache_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    organize_dataset: Callable[..., Any],
+    dataset_name: str,
+    tmp_path: Path,
 ) -> None:
-    """Write datasets where the packaged registry resolves them by default."""
+    """Keep direct organizer APIs consistent with artifact cache fallback behavior."""
 
     output_dir = inspect.signature(organize_dataset).parameters["output_dir"].default
-    assert output_dir == str(
-        Path.home() / ".mblt_model_zoo" / "datasets" / dataset_name
+    assert output_dir is None
+
+    import mblt_vision.wrapper as wrapper
+
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(wrapper, "get_mobilint_cache_dir", lambda: str(cache_dir))
+    assert organizer._resolve_organizer_output_dir(None, dataset_name) == str(
+        cache_dir / "datasets" / dataset_name
     )
 
 

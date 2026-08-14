@@ -32,8 +32,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir",
-        default="~/.mblt_model_zoo/datasets/cityscapes",
-        help="Destination for the flat images/ and annotations/ directories",
+        default=None,
+        help="Destination for the flat images/ and annotations/ directories (defaults to cache)",
     )
     args = parser.parse_args()
     organize_cityscapes(

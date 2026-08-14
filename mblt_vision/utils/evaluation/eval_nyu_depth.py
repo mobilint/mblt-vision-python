@@ -145,6 +145,12 @@ def eval_nyu_depth(
         elif len(targets) == 1 and depth.ndim == 2:
             maps = [depth]
         else:
+            if depth.ndim < 3 or depth.shape[0] != len(targets):
+                raise ValueError(
+                    "Depth postprocessor output batch length mismatch: "
+                    f"maps={depth.shape[0] if depth.ndim else 0}, "
+                    f"targets={len(targets)}."
+                )
             maps = [depth[index] for index in range(len(targets))]
         if len(maps) != len(targets):
             raise ValueError(

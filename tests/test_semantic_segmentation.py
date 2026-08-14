@@ -96,6 +96,13 @@ def test_semantic_postprocess_supports_mxq_hwc_and_batched_nhwc_logits() -> None
     assert torch.equal(nhwc_result[0], torch.full((4, 8), 3))
     assert torch.equal(nhwc_result[1], torch.full((4, 8), 9))
 
+    low_resolution_hwc_logits = torch.zeros((2, 4, 19))
+    low_resolution_hwc_logits[..., 12] = 2.0
+    low_resolution_result = post(low_resolution_hwc_logits)
+    assert isinstance(low_resolution_result, torch.Tensor)
+    assert low_resolution_result.shape == (1, 4, 8)
+    assert torch.equal(low_resolution_result, torch.full((1, 4, 8), 12))
+
     with pytest.raises(ValueError, match=r"expects \[B, 19, H, W\]"):
         post(torch.zeros((1, 4, 8, 18)))
     with pytest.raises(ValueError, match=r"expects \[H, W, 19\] MXQ logits"):
@@ -106,6 +113,21 @@ def test_semantic_postprocess_supports_mxq_hwc_and_batched_nhwc_logits() -> None
     assert isinstance(baked_result, torch.Tensor)
     assert baked_result.shape == (1, 4, 8)
     assert torch.equal(baked_result[0, 0], torch.tensor([0, 2, 4, 7, 9, 11, 14, 16]))
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_semantic_postprocess_rejects_nonfinite_logits(invalid_value: float) -> None:
+    """Reject invalid local logits before they can be converted by argmax."""
+
+    post = SemanticSegPost(
+        {"LetterBox": {"img_size": [4, 4]}},
+        {"task": "semantic_segmentation", "dataset": "cityscapes"},
+    )
+    logits = torch.zeros((1, 19, 2, 2))
+    logits[0, 0, 0, 0] = invalid_value
+
+    with pytest.raises(ValueError, match="logits must contain only finite values"):
+        post(logits)
 
 
 def test_semantic_postprocess_restores_letterbox_padding() -> None:

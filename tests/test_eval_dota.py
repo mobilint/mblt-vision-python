@@ -174,6 +174,34 @@ def test_dota_annotations_reject_negative_class_indices(
         _load_ground_truths(str(tmp_path), dataset)
 
 
+@pytest.mark.parametrize(
+    ("label_path", "annotation"),
+    [
+        ("labels/val/image.txt", "0 nan 0 0.2 0 0.2 0.2 0 0.2"),
+        ("labels/val_original/image.txt", "inf 0 20 0 20 20 0 20 plane 0"),
+    ],
+)
+def test_dota_annotations_reject_nonfinite_coordinates(
+    tmp_path, label_path: str, annotation: str
+) -> None:
+    """Reject poisoned normalized and original DOTA polygon coordinates."""
+
+    path = tmp_path / label_path
+    path.parent.mkdir(parents=True)
+    path.write_text(annotation, encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(ValueError, match=r"coordinates must be finite.*image\.txt:1"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
 def test_difficult_regions_do_not_count_as_positive_or_false_positive() -> None:
     """Ignore a detection on a difficult region while retaining positive matching."""
 
