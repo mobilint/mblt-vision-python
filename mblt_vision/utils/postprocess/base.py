@@ -394,6 +394,12 @@ class YOLODetectionPostBase(PostBase):
                     "Decoded detection confidence values must be in [0, 1]; "
                     f"got {invalid_scores}."
                 )
+            if not bool(
+                ((batch[:, 2] > batch[:, 0]) & (batch[:, 3] > batch[:, 1])).all()
+            ):
+                raise ValueError(
+                    "Decoded detection boxes must have positive xyxy area."
+                )
             valid_labels = (
                 torch.isfinite(labels)
                 & (labels == labels.round())

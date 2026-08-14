@@ -77,6 +77,26 @@ def test_classification_postprocessor_keeps_batched_singleton_outputs() -> None:
     assert output.shape == (2, 1000)
 
 
+@pytest.mark.parametrize(
+    "scores",
+    [
+        torch.tensor([[1.1] + [0.0] * 999]),
+        torch.tensor([[0.5] + [0.0] * 999]),
+    ],
+)
+def test_classification_probability_postprocessor_rejects_invalid_probabilities(
+    scores: torch.Tensor,
+) -> None:
+    """Validate local artifacts that declare already-softmaxed outputs."""
+
+    postprocessor = ClsPost(
+        {}, {"task": "image_classification", "dataset": "imagenet", "softmax": True}
+    )
+
+    with pytest.raises(ValueError, match="probability outputs"):
+        postprocessor(scores)
+
+
 @pytest.mark.parametrize("invalid_score", [float("nan"), float("inf")])
 def test_classification_postprocessor_rejects_nonfinite_scores(
     invalid_score: float,
@@ -149,6 +169,24 @@ def test_already_decoded_detections_reject_invalid_confidence(
     )
 
     with pytest.raises(ValueError, match=r"confidence values must be in \[0, 1\]"):
+        postprocessor._final_detection_batches(detections)
+
+
+@pytest.mark.parametrize("coordinates", [(1.0, 0.0, 1.0, 2.0), (0.0, 2.0, 1.0, 2.0)])
+def test_already_decoded_detections_reject_nonpositive_box_area(
+    coordinates: tuple[float, float, float, float],
+) -> None:
+    """Reject degenerate decoded XYXY boxes before they reach evaluation."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    detections = torch.tensor([[[*coordinates, 0.9, 1.0]]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="positive xyxy area"):
         postprocessor._final_detection_batches(detections)
 
 

@@ -161,3 +161,22 @@ def test_nyu_depth_dataset_rejects_nonfinite_targets(
 
     with pytest.raises(ValueError, match=r"finite values: .*sample\.npy"):
         CustomNYUDepth(str(tmp_path))[0]
+
+
+@pytest.mark.parametrize("dtype", [np.complex64, np.dtype("U4")])
+def test_nyu_depth_dataset_rejects_nonreal_or_nonnumeric_targets(
+    tmp_path, dtype: np.dtype
+) -> None:
+    """Reject target arrays before lossy conversion to float32."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    assert cv2.imwrite(
+        str(image_dir / "sample.png"), np.zeros((4, 5, 3), dtype=np.uint8)
+    )
+    np.save(depth_dir / "sample.npy", np.ones((4, 5), dtype=dtype))
+
+    with pytest.raises(ValueError, match="real numeric dtype"):
+        CustomNYUDepth(str(tmp_path))[0]

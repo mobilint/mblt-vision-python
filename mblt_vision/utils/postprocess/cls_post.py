@@ -100,5 +100,18 @@ class ClsPost(PostBase):
         if not torch.isfinite(x).all():
             raise ValueError("Classification output scores must all be finite.")
         if self.softmax:
+            if not bool(((x >= 0) & (x <= 1)).all()):
+                raise ValueError(
+                    "Classification probability outputs must be in [0, 1] when post_cfg.softmax is true."
+                )
+            if not torch.allclose(
+                x.sum(dim=-1),
+                torch.ones(x.shape[0], dtype=x.dtype, device=x.device),
+                rtol=1e-4,
+                atol=1e-4,
+            ):
+                raise ValueError(
+                    "Classification probability outputs must sum to 1 per sample when post_cfg.softmax is true."
+                )
             return x
         return x.softmax(dim=-1)

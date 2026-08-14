@@ -499,6 +499,17 @@ def test_validate_calibration_dataset_rejects_nonfinite_values(
         validate_calibration_dataset(tmp_path)
 
 
+def test_validate_calibration_dataset_rejects_unexpected_model_image_shape(
+    tmp_path: Path,
+) -> None:
+    """Ready calibration arrays must retain the configured preprocessor geometry."""
+
+    np.save(tmp_path / "selected.npy", np.ones((2, 2, 3), dtype=np.float32))
+
+    with pytest.raises(ValueError, match=r"pre_cfg image shape \(3, 2\)"):
+        validate_calibration_dataset(tmp_path, image_shape=(3, 2))
+
+
 def test_quantization_explicit_values_do_not_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -698,6 +709,7 @@ def _run_fake_compile(
                 "filename": "hosted-model.mxq",
                 "onnx_path": str(hosted_onnx),
             },
+            "pre_cfg": {"LetterBox": {"img_size": [2, 2]}},
             "post_cfg": {"task": task, "dataset": dataset},
         },
     )

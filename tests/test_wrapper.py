@@ -152,6 +152,7 @@ def test_default_cache_dir_preserves_existing_probe_named_file(
 
     preferred = tmp_path / "mblt_model_zoo"
     preferred.mkdir()
+    preferred.chmod(0o700)
     marker = preferred / ".write_test"
     marker.write_bytes(b"caller-owned")
     monkeypatch.setattr(
@@ -160,6 +161,40 @@ def test_default_cache_dir_preserves_existing_probe_named_file(
 
     assert wrapper._default_cache_dir() == str(preferred)
     assert marker.read_bytes() == b"caller-owned"
+
+
+def test_default_cache_dir_rejects_unsafe_preferred_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not use a preferred cache other users can write to."""
+
+    preferred = tmp_path / "mblt_model_zoo"
+    preferred.mkdir(mode=0o700)
+    preferred.chmod(0o777)
+    fallback = tmp_path / "fallback"
+    monkeypatch.setattr(
+        "mblt_vision.wrapper.os.path.expanduser", lambda _: str(preferred)
+    )
+    monkeypatch.setattr(wrapper, "_fallback_cache_dir", lambda: str(fallback))
+
+    assert wrapper._default_cache_dir() == str(fallback)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "expected_suffix"),
+    [("mxq_path", "artifact.onnx", ".mxq"), ("onnx_path", "artifact.mxq", ".onnx")],
+)
+def test_engine_rejects_wrong_suffix_in_direct_file_config(
+    key: str, value: str, expected_suffix: str
+) -> None:
+    """Validate compatibility path aliases provided through a direct config mapping."""
+
+    with pytest.raises(
+        ValueError, match=rf"file_cfg\.{key} must end in '{expected_suffix}'"
+    ):
+        MBLT_Engine(
+            {"file_cfg": {key: value}, "pre_cfg": {}, "post_cfg": {}},
+        )
 
 
 def test_cache_directory_is_resolved_lazily(monkeypatch: pytest.MonkeyPatch) -> None:

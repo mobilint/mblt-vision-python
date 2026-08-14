@@ -15,6 +15,7 @@ from mblt_vision.utils.datasets.dataloader import (
     CustomCOCODataset,
     CustomADE20K,
     CustomCityscapes,
+    CustomDOTAv1,
     CustomImageFolder,
     CustomWiderFaceDataset,
 )
@@ -68,6 +69,36 @@ def test_coco_dataset_rejects_annotation_geometry_mismatching_image() -> None:
         ValueError, match=r"image ID 1: annotation \(4, 5\), image \(3, 5\)"
     ):
         CustomCOCODataset.__getitem__(dataset, 0)
+
+
+@pytest.mark.parametrize("file_name", ["/tmp/outside.jpg", "../outside.jpg"])
+def test_coco_dataset_rejects_unsafe_annotation_file_names(file_name: str) -> None:
+    """Do not let COCO metadata access images outside the configured root."""
+
+    dataset = cast(
+        CustomCOCODataset,
+        SimpleNamespace(
+            root="/dataset",
+            coco=SimpleNamespace(
+                loadImgs=lambda _: [{"file_name": file_name}],
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unsafe file_name"):
+        CustomCOCODataset._load_image(dataset, 1)
+
+
+def test_dota_dataset_rejects_duplicate_image_stems(tmp_path: Path) -> None:
+    """Direct DOTAv1 loading must not silently collapse same-stem images."""
+
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    (image_dir / "sample.jpg").write_bytes(b"jpg")
+    (image_dir / "sample.png").write_bytes(b"png")
+
+    with pytest.raises(ValueError, match="duplicate filename stems"):
+        CustomDOTAv1(str(tmp_path))
 
 
 def test_cityscapes_dataset_rejects_unknown_source_ids(tmp_path: Path) -> None:

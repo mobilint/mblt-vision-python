@@ -5,6 +5,7 @@ Custom dataloaders for vision datasets.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Callable
 
 import cv2
@@ -58,10 +59,23 @@ class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int
 
     def _load_image(self, image_id: int) -> np.ndarray:
         """Load image by ID"""
-        image_path = os.path.join(
-            self.root, self.coco.loadImgs(image_id)[0]["file_name"]
-        )
-        image = cv2.imread(image_path)  # Load image (BGR format)
+        file_name = self.coco.loadImgs(image_id)[0]["file_name"]
+        if not isinstance(file_name, str) or not file_name:
+            raise ValueError(f"COCO image ID {image_id} has an invalid file_name.")
+        relative_path = Path(file_name)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError(
+                f"COCO image ID {image_id} has an unsafe file_name: {file_name!r}."
+            )
+        image_root = Path(self.root).resolve()
+        image_path = (image_root / relative_path).resolve()
+        try:
+            image_path.relative_to(image_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"COCO image ID {image_id} resolves outside the image root: {file_name!r}."
+            ) from exc
+        image = cv2.imread(str(image_path))  # Load image (BGR format)
 
         if image is None:
             raise FileNotFoundError(f"Image not found: {image_path}")
@@ -208,7 +222,15 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
         image = cv2.imread(image_path)
         if image is None:
             raise FileNotFoundError(f"NYU Depth image not found: {image_path}")
-        depth = np.asarray(np.load(depth_path), dtype=np.float32)
+        raw_depth = np.load(depth_path, allow_pickle=False)
+        if not np.issubdtype(raw_depth.dtype, np.number) or np.issubdtype(
+            raw_depth.dtype, np.complexfloating
+        ):
+            raise ValueError(
+                "NYU Depth target must use a real numeric dtype, "
+                f"got {raw_depth.dtype}: {depth_path}"
+            )
+        depth = np.asarray(raw_depth, dtype=np.float32)
         if depth.ndim != 2:
             raise ValueError(
                 f"NYU Depth target must be two-dimensional, got {depth.shape}: {depth_path}"
@@ -654,6 +676,10 @@ class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):
         self.ids = [
             os.path.splitext(os.path.basename(path))[0] for path in self.image_paths
         ]
+        if len(self.ids) != len(set(self.ids)):
+            raise ValueError(
+                "DOTAv1 validation images contain duplicate filename stems."
+            )
 
     def _find_image_paths(self, image_root: str) -> list[str]:
         """Return supported image files directly under a DOTAv1 image directory."""

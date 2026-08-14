@@ -127,7 +127,15 @@ def _default_cache_dir() -> str:
 
     preferred = Path(os.path.expanduser("~/.mblt_model_zoo"))
     try:
-        preferred.mkdir(parents=True, exist_ok=True)
+        preferred.mkdir(parents=True, mode=0o700, exist_ok=True)
+        preferred_stat = os.lstat(preferred)
+        if (
+            not stat.S_ISDIR(preferred_stat.st_mode)
+            or stat.S_ISLNK(preferred_stat.st_mode)
+            or preferred_stat.st_uid != os.getuid()
+            or preferred_stat.st_mode & 0o077
+        ):
+            return _fallback_cache_dir()
         with tempfile.NamedTemporaryFile(prefix=".write_test-", dir=preferred):
             pass
         return str(preferred)
@@ -469,6 +477,16 @@ class MBLT_Engine:
             raise ValueError(
                 f"Explicit onnx_path must end in '.onnx', got {onnx_path!r}."
             )
+        for key, suffix in (("mxq_path", ".mxq"), ("onnx_path", ".onnx")):
+            configured_path = model_config_part["file_cfg"].get(key)
+            if configured_path and (
+                not isinstance(configured_path, str)
+                or Path(configured_path).suffix.lower() != suffix
+            ):
+                raise ValueError(
+                    f"Configured file_cfg.{key} must end in {suffix!r}, "
+                    f"got {configured_path!r}."
+                )
 
         file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
         file_cfg_onnx_path = str(model_config_part["file_cfg"].get("onnx_path", ""))

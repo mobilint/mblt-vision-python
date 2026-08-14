@@ -14,6 +14,7 @@ from scipy.io import loadmat
 from scipy.io.matlab import MatReadError
 
 from ..._tasks import normalize_vision_task
+from ...datasets import get_dataset_category_ids
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
@@ -48,6 +49,8 @@ COCO_CATEGORY_COUNTS = {
     "instances_val2017.json": 80,
     "person_keypoints_val2017.json": 1,
 }
+COCO_CATEGORY_IDS = frozenset(get_dataset_category_ids("coco"))
+COCO_PERSON_KEYPOINT_CATEGORY_IDS = frozenset({1})
 
 
 def _path_has_symlink_component(path: Path) -> bool:
@@ -182,6 +185,13 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
         )
         or len(category_ids) != len(set(category_ids))
     ):
+        return None
+    expected_category_ids = (
+        COCO_PERSON_KEYPOINT_CATEGORY_IDS
+        if annotation_path.name == "person_keypoints_val2017.json"
+        else COCO_CATEGORY_IDS
+    )
+    if set(category_ids) != expected_category_ids:
         return None
     annotation_ids: list[int] = []
     for record in annotation_records:

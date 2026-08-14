@@ -1542,19 +1542,23 @@ def construct_dotav1_from_archives(
         _safe_unpack_archive(image_archive, image_dir)
         _safe_unpack_archive(label_archive, label_dir)
 
+        label_paths = list(_iter_files(label_dir, [".txt"]))
         labels = {
-            os.path.splitext(os.path.basename(path))[0]: path
-            for path in _iter_files(label_dir, [".txt"])
+            os.path.splitext(os.path.basename(path))[0]: path for path in label_paths
         }
+        if len(labels) != len(label_paths):
+            raise ValueError("DOTAv1 archive contains duplicate label stems.")
         if not labels:
             raise ValueError(f"No DOTAv1 label files found in {label_archive}.")
 
+        image_paths = list(
+            _iter_files(image_dir, [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"])
+        )
         images = {
-            os.path.splitext(os.path.basename(path))[0]: path
-            for path in _iter_files(
-                image_dir, [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".tiff"]
-            )
+            os.path.splitext(os.path.basename(path))[0]: path for path in image_paths
         }
+        if len(images) != len(image_paths):
+            raise ValueError("DOTAv1 archive contains duplicate image stems.")
         image_ids = set(images)
         label_ids = set(labels)
         missing_labels = sorted(image_ids - label_ids)

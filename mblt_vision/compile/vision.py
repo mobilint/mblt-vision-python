@@ -7,7 +7,7 @@ import importlib
 import json
 import shutil
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory, mkdtemp
 from typing import Any
@@ -544,7 +544,41 @@ def get_subset_images(subset_path: str | Path) -> list[Path]:
     return images
 
 
-def validate_calibration_dataset(calib_data_path: str | Path) -> Path:
+def _calibration_image_shape(pre_cfg: Mapping[str, Any]) -> tuple[int, int]:
+    """Derive the final HWC spatial shape produced by a model preprocessor."""
+
+    image_shape: tuple[int, int] | None = None
+    for operation, config in pre_cfg.items():
+        if operation not in {"LetterBox", "Resize", "CenterCrop"} or not isinstance(
+            config, Mapping
+        ):
+            continue
+        size = config.get("img_size", config.get("size"))
+        if isinstance(size, int) and not isinstance(size, bool) and size > 0:
+            image_shape = (size, size)
+        elif (
+            isinstance(size, Sequence)
+            and not isinstance(size, (str, bytes))
+            and len(size) == 2
+            and all(
+                isinstance(value, int) and not isinstance(value, bool) and value > 0
+                for value in size
+            )
+        ):
+            image_shape = (size[0], size[1])
+    if image_shape is None:
+        raise ValueError(
+            "Unable to derive calibration image shape from pre_cfg; expected a "
+            "positive LetterBox.img_size, Resize.size, or CenterCrop.size."
+        )
+    return image_shape
+
+
+def validate_calibration_dataset(
+    calib_data_path: str | Path,
+    *,
+    image_shape: tuple[int, int] | None = None,
+) -> Path:
     """Validate a ready directory of preprocessed calibration arrays.
 
     Args:
@@ -571,6 +605,11 @@ def validate_calibration_dataset(calib_data_path: str | Path) -> Path:
         if array.ndim != 3 or array.shape[-1] != 3:
             raise ValueError(
                 f"Calibration tensor {array_path} must be HWC with three channels; got {array.shape}."
+            )
+        if image_shape is not None and array.shape[:2] != image_shape:
+            raise ValueError(
+                f"Calibration tensor {array_path} must match the model pre_cfg "
+                f"image shape {image_shape}, got {array.shape[:2]}."
             )
         if array.dtype != np.float32:
             raise ValueError(
@@ -927,10 +966,15 @@ def compile_vision_model(
     mxq_compile, calibration_config_class = _load_qbcompiler()
     model_config = resolve_model_config(model_cls, model_type)
     file_cfg = model_config.get("file_cfg")
+    pre_cfg = model_config.get("pre_cfg")
     post_cfg = model_config.get("post_cfg")
-    if not isinstance(file_cfg, dict) or not isinstance(post_cfg, dict):
+    if (
+        not isinstance(file_cfg, dict)
+        or not isinstance(pre_cfg, dict)
+        or not isinstance(post_cfg, dict)
+    ):
         raise ValueError(
-            "Resolved vision model configuration requires `file_cfg` and `post_cfg` objects."
+            "Resolved vision model configuration requires `file_cfg`, `pre_cfg`, and `post_cfg` objects."
         )
     file_cfg["target_device"] = target_device
 
@@ -959,7 +1003,12 @@ def compile_vision_model(
         )
         mxq_compile(
             model=str(resolved_onnx),
-            calib_data_path=str(validate_calibration_dataset(calib_data_path)),
+            calib_data_path=str(
+                validate_calibration_dataset(
+                    calib_data_path,
+                    image_shape=_calibration_image_shape(pre_cfg),
+                )
+            ),
             save_path=str(output_path),
             image_channels=3,
             backend="onnx",

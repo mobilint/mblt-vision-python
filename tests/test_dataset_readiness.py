@@ -76,6 +76,7 @@ def test_coco_readiness_matches_images_to_task_annotations(
     monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
     monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, annotation_name, 2)
     monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, annotation_name, 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
     image_names = ["000000000001.jpg", "000000000002.jpg"]
     for image_name in image_names:
         _write_file(tmp_path / "val2017" / image_name)
@@ -107,6 +108,31 @@ def test_coco_readiness_matches_images_to_task_annotations(
     assert not readiness.dataset_ready(tmp_path, task, "imagenet")
 
 
+def test_coco_readiness_rejects_noncanonical_category_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Require the canonical COCO category-ID set, not merely its count."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    image_name = "000000000001.jpg"
+    _write_file(tmp_path / "val2017" / image_name)
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [{"id": 1, "file_name": image_name}],
+                "categories": [{"id": 2}],
+                "annotations": [{"id": 1, "image_id": 1, "category_id": 2}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+
 def test_coco_readiness_rejects_duplicate_image_ids(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -115,6 +141,7 @@ def test_coco_readiness_rejects_duplicate_image_ids(
     monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
     monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 2)
     monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
     image_names = ["000000000001.jpg", "000000000002.jpg"]
     for image_name in image_names:
         _write_file(tmp_path / "val2017" / image_name)
@@ -146,6 +173,7 @@ def test_coco_readiness_rejects_truncated_annotation_table(
     monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 2)
     monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 2)
     monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
     image_names = ["000000000001.jpg", "000000000002.jpg"]
     for image_name in image_names:
         _write_file(tmp_path / "val2017" / image_name)
