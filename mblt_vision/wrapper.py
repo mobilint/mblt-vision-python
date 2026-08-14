@@ -497,7 +497,7 @@ class MBLT_Engine:
         target_device = normalize_target_device(target_device)
         is_regulus = target_device in {"regulus-ra", "regulus-rb"}
         if core_mode is None:
-            core_mode = "single"
+            core_mode = "single" if is_regulus else "global8"
         else:
             core_mode = normalize_core_mode(core_mode, target_device=target_device)
         if target_cores is None:

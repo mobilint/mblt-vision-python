@@ -12,6 +12,7 @@ import torch
 from PIL import Image
 
 from ..types import TensorLike
+from ._validation import normalize_uint8_rgb_array
 from .base import PreOps
 
 
@@ -71,10 +72,14 @@ class Reader(PreOps):
                 )
         elif self.style == "pil":
             if isinstance(x, np.ndarray):
-                return Image.fromarray(self._to_uint8_image_array(x))
+                return Image.fromarray(
+                    normalize_uint8_rgb_array(x, operation="Reader(style='pil')")
+                )
             elif isinstance(x, torch.Tensor):
                 x = x.detach().cpu().numpy()
-                return Image.fromarray(self._to_uint8_image_array(x))
+                return Image.fromarray(
+                    normalize_uint8_rgb_array(x, operation="Reader(style='pil')")
+                )
             elif isinstance(x, (str, Path)):
                 return Image.open(x).convert("RGB")
             elif isinstance(x, Image.Image):
@@ -87,33 +92,3 @@ class Reader(PreOps):
             raise RuntimeError(
                 f"Reader has an invalid validated style: {self.style!r}."
             )
-
-    @staticmethod
-    def _to_uint8_image_array(image: np.ndarray) -> np.ndarray:
-        """Convert a validated array to byte RGB values for Pillow."""
-
-        if image.dtype == np.uint8:
-            return image
-        if not np.issubdtype(image.dtype, np.floating):
-            raise TypeError(
-                "Reader(style='pil') accepts uint8 arrays or floating-point arrays "
-                "with RGB values in [0, 1] or [0, 255]; "
-                f"got {image.dtype}."
-            )
-        if not np.isfinite(image).all():
-            raise ValueError(
-                "Reader(style='pil') requires floating-point image arrays to contain "
-                "only finite RGB values."
-            )
-
-        min_value = float(image.min())
-        max_value = float(image.max())
-        if min_value < 0.0 or max_value > 255.0:
-            raise ValueError(
-                "Reader(style='pil') accepts floating-point RGB values only in "
-                "[0, 1] or [0, 255]; "
-                f"got range [{min_value}, {max_value}]."
-            )
-        if max_value <= 1.0:
-            image = image * 255.0
-        return np.rint(image).astype(np.uint8)

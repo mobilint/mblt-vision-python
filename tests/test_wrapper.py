@@ -708,6 +708,59 @@ def test_engine_init_resolves_target_device_before_default_core_settings(
         engine.dispose()
 
 
+@pytest.mark.parametrize(
+    ("target_device", "expected_core_mode"),
+    [("aries-rb", "global8"), ("regulus-ra", "single")],
+)
+def test_engine_init_uses_board_specific_default_core_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    target_device: str,
+    expected_core_mode: str,
+) -> None:
+    """Keep direct engine construction aligned with the CLI board defaults."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+    backend_kwargs: dict[str, Any] = {}
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            backend_kwargs.update(kwargs)
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(
+        wrapper,
+        "build_postprocess",
+        lambda pre_cfg, post_cfg, **kwargs: (pre_cfg, post_cfg, kwargs),
+    )
+
+    engine = MBLT_Engine(
+        {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
+        model_path=str(mxq_path),
+        target_device=target_device,
+    )
+
+    try:
+        assert engine.file_cfg["core_mode"] == expected_core_mode
+        assert backend_kwargs["core_mode"] == expected_core_mode
+    finally:
+        engine.dispose()
+
+
 def test_engine_init_preserves_shifted_positional_mxq_runtime_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -2860,6 +2913,18 @@ def test_nmsout2eval_matches_coco_json_format_without_mutation() -> None:
     assert boxes == [[[10.123, 20.235, 100.222, 200.222]]]
     assert scores == [[0.87654]]
     assert torch.equal(nms_out, original)
+
+
+@pytest.mark.parametrize("class_id", [-1.0, 1.9, 80.0, float("nan"), float("inf")])
+def test_nmsout2eval_rejects_invalid_coco_class_ids(class_id: float) -> None:
+    """Reject malformed decoded class IDs before COCO taxonomy remapping."""
+
+    nms_out = torch.tensor(
+        [[10.0, 20.0, 110.0, 220.0, 0.9, class_id]], dtype=torch.float32
+    )
+
+    with pytest.raises(ValueError, match="finite integral values"):
+        nmsout2eval([nms_out], (640, 640), [(640, 640)])
 
 
 def test_nmsout2eval_uses_explicit_ratio_pad() -> None:

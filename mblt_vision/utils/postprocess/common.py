@@ -1278,6 +1278,18 @@ def nmsout2eval(
         boxes = nms_out[:, :4].clone()
         scores = nms_out[:, 4]
         labels = nms_out[:, 5]
+        valid_labels = (
+            torch.isfinite(labels)
+            & (labels == labels.round())
+            & (labels >= 0)
+            & (labels < 80)
+        )
+        if not bool(valid_labels.all()):
+            invalid_labels = labels[~valid_labels].detach().cpu().tolist()
+            raise ValueError(
+                "COCO class IDs must be finite integral values in [0, 79]; "
+                f"got {invalid_labels}."
+            )
         boxes = scale_boxes(
             img1_shape, boxes, img0_shape, ratio_pad=ratio_pad
         )  # scale boxes to original image size

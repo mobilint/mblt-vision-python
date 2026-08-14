@@ -112,6 +112,17 @@ def test_reader_pil_scales_normalized_float_arrays() -> None:
     np.testing.assert_array_equal(converted, np.full((2, 3, 3), 128, dtype=np.uint8))
 
 
+def test_letterbox_scales_normalized_float_arrays() -> None:
+    """Do not truncate normalized float RGB input before LetterBox resizing."""
+
+    image = np.full((2, 2, 3), 0.5, dtype=np.float32)
+
+    converted = LetterBox([4, 4])(image)
+
+    assert converted.dtype == torch.uint8
+    assert torch.equal(converted, torch.full((4, 4, 3), 128, dtype=torch.uint8))
+
+
 @pytest.mark.parametrize(
     "image",
     [
@@ -125,6 +136,21 @@ def test_reader_pil_rejects_invalid_float_image_arrays(image: np.ndarray) -> Non
 
     with pytest.raises(ValueError, match=r"finite RGB values|\[0, 1\] or \[0, 255\]"):
         Reader("pil")(image)
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        np.full((2, 3, 3), -0.1, dtype=np.float32),
+        np.full((2, 3, 3), 256.0, dtype=np.float32),
+        np.full((2, 3, 3), np.nan, dtype=np.float32),
+    ],
+)
+def test_letterbox_rejects_invalid_float_image_arrays(image: np.ndarray) -> None:
+    """Do not wrap out-of-range or non-finite float pixels to byte RGB."""
+
+    with pytest.raises(ValueError, match=r"finite RGB values|\[0, 1\] or \[0, 255\]"):
+        LetterBox([4, 4])(image)
 
 
 @pytest.mark.parametrize(

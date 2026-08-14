@@ -6,7 +6,7 @@ import torch
 
 from ..letterbox import LetterBoxGeometry, RatioPad
 from ..types import TensorLike
-from ._validation import normalize_image_size
+from ._validation import normalize_image_size, normalize_uint8_rgb_array
 from .base import PreOps
 
 
@@ -79,7 +79,9 @@ class LetterBox(PreOps):
     """Preprocessing for YOLO models, implementing letterbox resizing.
 
     Resizes the image while maintaining aspect ratio, adding padding to meet
-    target dimensions. Based on Ultralytics implementation.
+    target dimensions. Floating-point RGB inputs in ``[0, 1]`` are scaled to
+    byte RGB; other floating-point values must be finite and in ``[0, 255]``.
+    Based on Ultralytics implementation.
 
     Ref: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
     """
@@ -111,6 +113,7 @@ class LetterBox(PreOps):
             )
         if x.ndim != 3:
             raise ValueError(f"LetterBox expects an HWC image, got shape {x.shape}.")
+        x = normalize_uint8_rgb_array(x, operation="LetterBox")
         img, self.ratio_pad = _apply_letterbox(
             x,
             self.img_size,

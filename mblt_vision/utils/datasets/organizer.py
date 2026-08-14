@@ -1449,14 +1449,18 @@ def _write_dotav1_yolo_labels(
         width, height = image.size
     converted_lines: list[str] = []
     with open(original_label_path, encoding="utf-8") as label_file:
-        for line in label_file:
+        for line_number, line in enumerate(label_file, start=1):
             fields = line.split()
-            if (
-                len(fields) < 10
-                or fields[0].startswith("imagesource:")
-                or fields[0].startswith("gsd:")
+            if fields and (
+                fields[0].startswith("imagesource:") or fields[0].startswith("gsd:")
             ):
                 continue
+            if len(fields) < 10:
+                raise ValueError(
+                    "Malformed DOTAv1 annotation in "
+                    f"{original_label_path} at line {line_number}: expected at least "
+                    f"10 fields, got {len(fields)}."
+                )
             class_name = fields[8]
             if class_name not in DOTAV1_CLASS_TO_IDX:
                 raise ValueError(
