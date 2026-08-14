@@ -74,8 +74,18 @@ class SemanticMetricAccumulator:
                 f"Semantic prediction and target shapes must match, got {prediction.shape} and {target.shape}."
             )
         valid_target = (
-            (target != self.ignore_label) & (target >= 0) & (target < self.nc)
+            np.isfinite(target)
+            & (target >= 0)
+            & (target < self.nc)
+            & (target == np.floor(target))
         )
+        allowed_target = valid_target | (target == self.ignore_label)
+        if not bool(allowed_target.all()):
+            invalid_values = np.asarray(np.unique(target[~allowed_target]))
+            raise ValueError(
+                f"Semantic targets must be finite class IDs in [0, {self.nc - 1}] "
+                f"or ignore label {self.ignore_label}; got {invalid_values.tolist()}."
+            )
         valid_prediction = (
             np.isfinite(prediction)
             & (prediction >= 0)

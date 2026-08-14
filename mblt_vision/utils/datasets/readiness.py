@@ -329,7 +329,15 @@ def _widerface_difficulty_metadata_ready(
                 return False
             for image_index, face_entry in enumerate(event_faces):
                 try:
-                    face_count = len(np.asarray(face_entry[0]))
+                    face_array = np.asarray(face_entry[0])
+                    if (
+                        face_array.ndim != 2
+                        or face_array.shape[1] != 4
+                        or not np.isfinite(face_array).all()
+                        or (face_array[:, 2:] <= 0).any()
+                    ):
+                        return False
+                    face_count = len(face_array)
                     keep_indices = np.asarray(event_indices[image_index][0])
                 except (IndexError, TypeError):
                     return False

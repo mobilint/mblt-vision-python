@@ -165,10 +165,17 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
             raise FileNotFoundError(
                 f"NYU Depth requires images/ and depth/ directories under: {root}"
             )
-        images = {
-            os.path.splitext(name)[0]: os.path.join(image_root, name)
+        image_names = [
+            name
             for name in os.listdir(image_root)
             if name.lower().endswith(self.IMG_EXTENSIONS)
+        ]
+        image_stems = [os.path.splitext(name)[0] for name in image_names]
+        if len(image_stems) != len(set(image_stems)):
+            raise ValueError("ADE20K images contain duplicate filename stems.")
+        images = {
+            stem: os.path.join(image_root, name)
+            for stem, name in zip(image_stems, image_names, strict=True)
         }
         depths = {
             os.path.splitext(name)[0]: os.path.join(depth_root, name)
@@ -338,9 +345,18 @@ class CustomADE20K(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]])
         image = cv2.imread(image_path, cv2.IMREAD_COLOR)
         if image is None:
             raise FileNotFoundError(f"ADE20K image not found: {image_path}")
-        annotation = cv2.imread(annotation_path, cv2.IMREAD_GRAYSCALE)
-        if annotation is None:
-            raise FileNotFoundError(f"ADE20K annotation not found: {annotation_path}")
+        try:
+            with Image.open(annotation_path) as annotation_image:
+                annotation = np.asarray(annotation_image)
+        except OSError as exc:
+            raise FileNotFoundError(
+                f"ADE20K annotation not found: {annotation_path}"
+            ) from exc
+        if annotation.ndim != 2 or annotation.dtype != np.uint8:
+            raise ValueError(
+                "ADE20K annotations must be single-channel 8-bit PNG masks: "
+                f"{annotation_path}"
+            )
         if image.shape[:2] != annotation.shape:
             raise ValueError(
                 f"ADE20K image and annotation shapes must match, got {image.shape[:2]} and {annotation.shape}: {stem}"
@@ -844,13 +860,15 @@ class CustomWiderFaceDataset(torch.utils.data.Dataset[tuple[np.ndarray, str, str
             target_dir = os.path.join(self.root, target_class)
             if not os.path.isdir(target_dir):
                 continue
-            for root, _, fnames in sorted(os.walk(target_dir, followlinks=True)):
-                for fname in sorted(fnames):
-                    if os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES:
-                        continue
-                    path = os.path.join(root, fname)
-                    item = path, target_class, fname
-                    instances.append(item)
+            for fname in sorted(os.listdir(target_dir)):
+                path = os.path.join(target_dir, fname)
+                if (
+                    os.path.islink(path)
+                    or not os.path.isfile(path)
+                    or os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES
+                ):
+                    continue
+                instances.append((path, target_class, fname))
 
         self.samples = instances
 

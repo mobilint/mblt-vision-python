@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import pytest
 import torch
+import numpy as np
+from mblt_vision.utils.evaluation.eval_ade20k import SemanticMetricAccumulator
 from mblt_vision.utils.postprocess import SemanticSegPost
 
 
@@ -128,6 +130,15 @@ def test_semantic_postprocess_rejects_nonfinite_logits(invalid_value: float) -> 
 
     with pytest.raises(ValueError, match="logits must contain only finite values"):
         post(logits)
+
+
+@pytest.mark.parametrize("invalid_target", [1.5, -1.0, float("nan"), float("inf")])
+def test_semantic_metrics_reject_invalid_target_ids(invalid_target: float) -> None:
+    """Do not treat corrupted semantic ground truth as ignored pixels."""
+
+    target = torch.tensor([[invalid_target]], dtype=torch.float32).numpy()
+    with pytest.raises(ValueError, match="Semantic targets must be finite class IDs"):
+        SemanticMetricAccumulator(nc=2).update(np.zeros((1, 1)), target)
 
 
 def test_semantic_postprocess_restores_letterbox_padding() -> None:

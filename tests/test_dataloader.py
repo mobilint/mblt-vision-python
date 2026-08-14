@@ -13,6 +13,7 @@ from PIL import Image
 
 from mblt_vision.utils.datasets.dataloader import (
     CustomCOCODataset,
+    CustomADE20K,
     CustomCityscapes,
     CustomImageFolder,
     CustomWiderFaceDataset,
@@ -23,7 +24,7 @@ from mblt_vision.utils.datasets.dataloader import (
     ("dataset_class", "class_name", "expected_count", "expected_suffixes"),
     [
         (CustomImageFolder, "class-a", 1, {".jpg"}),
-        (CustomWiderFaceDataset, "0--Parade", 2, {".jpg", ".png"}),
+        (CustomWiderFaceDataset, "0--Parade", 1, {".jpg"}),
     ],
 )
 def test_class_based_datasets_ignore_non_image_files(
@@ -85,3 +86,24 @@ def test_cityscapes_dataset_rejects_unknown_source_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"unsupported source IDs \[200\]"):
         CustomCityscapes(str(tmp_path))[0]
+
+
+@pytest.mark.parametrize(
+    "mask", [np.zeros((2, 2, 3), dtype=np.uint8), np.zeros((2, 2), dtype=np.uint16)]
+)
+def test_ade20k_dataset_rejects_noncanonical_mask_encodings(
+    tmp_path: Path, mask: np.ndarray
+) -> None:
+    """Reject color and high-bit-depth ADE20K masks before source-ID conversion."""
+
+    image_dir = tmp_path / "images"
+    annotation_dir = tmp_path / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir()
+    assert cv2.imwrite(
+        str(image_dir / "sample.png"), np.zeros((2, 2, 3), dtype=np.uint8)
+    )
+    Image.fromarray(mask).save(annotation_dir / "sample.png")
+
+    with pytest.raises(ValueError, match="single-channel 8-bit PNG masks"):
+        CustomADE20K(str(tmp_path))[0]

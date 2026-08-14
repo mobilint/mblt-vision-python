@@ -1493,6 +1493,11 @@ def _write_dotav1_yolo_labels(
                     f"Unsupported DOTAv1 class in {original_label_path}: {class_name}"
                 )
             coordinates = [float(value) for value in fields[:8]]
+            if fields[9] not in {"0", "1", "2"}:
+                raise ValueError(
+                    f"Unsupported DOTAv1 difficulty flag {fields[9]!r} in "
+                    f"{original_label_path} at line {line_number}."
+                )
             normalized = [
                 coordinate / (width if index % 2 == 0 else height)
                 for index, coordinate in enumerate(coordinates)

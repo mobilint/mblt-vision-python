@@ -88,7 +88,10 @@ def _load_ground_truths(
         ignore_classes = []
         ignore_polygons = []
 
-        if label_path.is_file():
+        # Organizer output keeps the official original annotation alongside the
+        # normalized convenience label. Prefer the authoritative original when
+        # both are present so a stale normalized file cannot hide ground truth.
+        if label_path.is_file() and not original_label_path.is_file():
             for line_number, line in enumerate(
                 label_path.read_text(encoding="utf-8").splitlines(), start=1
             ):
@@ -117,6 +120,11 @@ def _load_ground_truths(
                 if coords.numel() and float(coords.max()) <= 1.5:
                     coords[:, 0] *= width
                     coords[:, 1] *= height
+                if len(parts) >= 10 and parts[9] not in {"0", "1", "2"}:
+                    raise ValueError(
+                        f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
+                        f"{label_path}:{line_number}."
+                    )
                 if len(parts) >= 10 and parts[9] in {"1", "2"}:
                     ignore_classes.append(cls)
                     ignore_polygons.append(coords)
@@ -149,6 +157,11 @@ def _load_ground_truths(
                 if not bool(torch.isfinite(coords).all()):
                     raise ValueError(
                         "DOTAv1 annotation coordinates must be finite at "
+                        f"{original_label_path}:{line_number}."
+                    )
+                if parts[9] not in {"0", "1", "2"}:
+                    raise ValueError(
+                        f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
                         f"{original_label_path}:{line_number}."
                     )
                 if parts[9] in {"1", "2"}:
