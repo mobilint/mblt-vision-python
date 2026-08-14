@@ -33,6 +33,7 @@ WIDERFACE_EVENT_PATTERN = re.compile(r"\d+--\S.*")
 CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(
     r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$"
 )
+CITYSCAPES_VALIDATION_CITY_COUNTS = {"frankfurt": 267, "lindau": 59, "munster": 174}
 IMAGENET_SYNSETS = frozenset(
     files("mblt_vision.datasets")
     .joinpath("imagenet_synsets.txt")
@@ -341,10 +342,14 @@ def _widerface_difficulty_metadata_ready(
                     keep_indices = np.asarray(event_indices[image_index][0])
                 except (IndexError, TypeError):
                     return False
-                if (
-                    not np.isfinite(keep_indices).all()
-                    or not np.equal(keep_indices, np.trunc(keep_indices)).all()
-                ):
+                try:
+                    valid_indices = (
+                        np.isfinite(keep_indices).all()
+                        and np.equal(keep_indices, np.trunc(keep_indices)).all()
+                    )
+                except (TypeError, ValueError):
+                    return False
+                if not valid_indices:
                     return False
                 if keep_indices.size and (
                     int(keep_indices.min()) < 1 or int(keep_indices.max()) > face_count
@@ -446,6 +451,12 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             )
         )
     if normalized == "cityscapes":
+        city_counts: dict[str, int] = {}
+        for stem in images:
+            match = CITYSCAPES_SAMPLE_ID_PATTERN.fullmatch(stem)
+            if match is not None:
+                city = match.group("city")
+                city_counts[city] = city_counts.get(city, 0) + 1
         return (
             len(images) == CITYSCAPES_VALIDATION_SAMPLE_COUNT
             and all(
@@ -453,6 +464,10 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
                 for stem in images
             )
             and all(path.suffix.lower() == ".png" for path in images.values())
+            and (
+                CITYSCAPES_VALIDATION_SAMPLE_COUNT != 500
+                or city_counts == CITYSCAPES_VALIDATION_CITY_COUNTS
+            )
         )
     return False
 

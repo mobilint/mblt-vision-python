@@ -384,6 +384,15 @@ class YOLODetectionPostBase(PostBase):
                     f"invalid rows: {invalid_rows}."
                 )
             labels = batch[:, 5]
+            scores = batch[:, 4]
+            if not bool(((scores >= 0) & (scores <= 1)).all()):
+                invalid_scores = (
+                    scores[(scores < 0) | (scores > 1)].detach().cpu().tolist()
+                )
+                raise ValueError(
+                    "Decoded detection confidence values must be in [0, 1]; "
+                    f"got {invalid_scores}."
+                )
             valid_labels = (
                 torch.isfinite(labels)
                 & (labels == labels.round())

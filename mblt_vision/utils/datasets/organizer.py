@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import hashlib
+import math
 import os
 import re
 import shutil
@@ -1493,6 +1494,11 @@ def _write_dotav1_yolo_labels(
                     f"Unsupported DOTAv1 class in {original_label_path}: {class_name}"
                 )
             coordinates = [float(value) for value in fields[:8]]
+            if not all(math.isfinite(coordinate) for coordinate in coordinates):
+                raise ValueError(
+                    f"DOTAv1 coordinates must be finite in {original_label_path} "
+                    f"at line {line_number}."
+                )
             if fields[9] not in {"0", "1", "2"}:
                 raise ValueError(
                     f"Unsupported DOTAv1 difficulty flag {fields[9]!r} in "

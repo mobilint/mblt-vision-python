@@ -68,6 +68,15 @@ def test_classification_postprocessor_rejects_wrong_taxonomy_width() -> None:
         postprocessor(torch.zeros((1, 999), dtype=torch.float32))
 
 
+def test_classification_postprocessor_keeps_batched_singleton_outputs() -> None:
+    """Preserve batch size for local logits shaped [B, C, 1]."""
+
+    postprocessor = ClsPost({}, {"task": "image_classification", "dataset": "imagenet"})
+    output = postprocessor(torch.zeros((2, 1000, 1), dtype=torch.float32))
+
+    assert output.shape == (2, 1000)
+
+
 @pytest.mark.parametrize("invalid_score", [float("nan"), float("inf")])
 def test_classification_postprocessor_rejects_nonfinite_scores(
     invalid_score: float,
@@ -120,6 +129,26 @@ def test_already_decoded_detections_reject_nonfinite_rows(
     detections[0, 0, column] = invalid_value
 
     with pytest.raises(ValueError, match="finite values"):
+        postprocessor._final_detection_batches(detections)
+
+
+@pytest.mark.parametrize("invalid_score", [-0.1, 1.1])
+def test_already_decoded_detections_reject_invalid_confidence(
+    invalid_score: float,
+) -> None:
+    """Reject finite but impossible confidence values before thresholding."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    detections = torch.tensor(
+        [[[0.0, 0.0, 1.0, 1.0, invalid_score, 1.0]]], dtype=torch.float32
+    )
+
+    with pytest.raises(ValueError, match=r"confidence values must be in \[0, 1\]"):
         postprocessor._final_detection_batches(detections)
 
 

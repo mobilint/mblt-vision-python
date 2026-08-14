@@ -59,6 +59,8 @@ class NYUDepthMetricAccumulator:
             raise ValueError(
                 f"NYU Depth prediction and target shapes must match, got {prediction.shape} and {target.shape}."
             )
+        if not np.isfinite(target).all():
+            raise ValueError("NYU Depth target contains non-finite values.")
         valid = (
             np.isfinite(target) & (target > self.MIN_DEPTH) & (target < self.MAX_DEPTH)
         )

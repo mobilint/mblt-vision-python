@@ -337,6 +337,18 @@ def test_engine_init_rejects_wrong_suffix_for_mxq_path(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize("section", ["file_cfg", "pre_cfg", "post_cfg"])
+def test_engine_init_rejects_nonmapping_direct_configuration_sections(
+    section: str,
+) -> None:
+    """Report malformed direct model mappings before backend construction."""
+
+    config: dict[str, Any] = {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}}
+    config[section] = []
+    with pytest.raises(ValueError, match=rf"section '{section}' must be a mapping"):
+        MBLT_Engine(config)
+
+
 def test_engine_init_disposes_mxq_backend_after_postprocess_setup_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

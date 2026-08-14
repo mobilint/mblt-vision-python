@@ -457,6 +457,11 @@ class MBLT_Engine:
                 cast(Sequence[str] | None, model_path or None),
             )
         model_config_part = resolve_model_config(model_cls, model_type)
+        for section in ("file_cfg", "pre_cfg", "post_cfg"):
+            if not isinstance(model_config_part.get(section), dict):
+                raise ValueError(
+                    f"Model configuration section '{section}' must be a mapping."
+                )
 
         if mxq_path and Path(mxq_path).suffix.lower() != ".mxq":
             raise ValueError(f"Explicit mxq_path must end in '.mxq', got {mxq_path!r}.")

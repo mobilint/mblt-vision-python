@@ -46,3 +46,12 @@ def test_nyu_depth_evaluation_rejects_surplus_output_batch(
         ValueError, match=r"output batch length mismatch: maps=2, targets=1"
     ):
         eval_nyu_depth_module.eval_nyu_depth(_Model(), "/dataset", batch_size=1)
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
+def test_nyu_depth_metrics_reject_nonfinite_targets(invalid_value: float) -> None:
+    """Keep direct metric callers from silently excluding corrupt depth targets."""
+
+    target = np.array([[1.0, invalid_value]], dtype=np.float32)
+    with pytest.raises(ValueError, match="target contains non-finite"):
+        eval_nyu_depth_module.calculate_nyu_depth_metrics(np.ones((1, 2)), target)

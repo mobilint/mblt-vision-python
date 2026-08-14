@@ -73,7 +73,18 @@ class ClsPost(PostBase):
         if x.ndim == 2:
             x = x.unsqueeze(-1).unsqueeze(-1)
         elif x.ndim == 3:
-            x = x.unsqueeze(0)
+            if self.num_classes is None:
+                raise ValueError(
+                    "Classification 3D outputs require a configured class count to disambiguate layout."
+                )
+            if x.shape[1] == self.num_classes and x.shape[-1] == 1:
+                x = x.unsqueeze(-1)
+            elif x.shape[0] == self.num_classes:
+                x = x.unsqueeze(0)
+            else:
+                raise ValueError(
+                    f"Unsupported 3D classification output shape {tuple(x.shape)} for {self.num_classes} classes."
+                )
         if x.ndim != 4:
             raise ValueError(
                 f"Classification output must be convertible to NCHW, got shape {tuple(x.shape)}."
