@@ -221,7 +221,10 @@ def test_already_decoded_obb_uses_width_height_geometry() -> None:
     assert postprocessor._final_detection_batches(detections)[0].shape == (1, 6)
 
 
-def test_decoded_segmentation_propagates_invalid_mask_prototypes() -> None:
+@pytest.mark.parametrize("prototype_first", [False, True])
+def test_decoded_segmentation_propagates_invalid_mask_prototypes(
+    prototype_first: bool,
+) -> None:
     """Do not discard malformed required prototype tensors as unrelated outputs."""
 
     postprocessor = cast(
@@ -236,11 +239,14 @@ def test_decoded_segmentation_propagates_invalid_mask_prototypes() -> None:
         [[[0.0, 0.0, 1.0, 1.0, 0.9, 1.0, 0.0, 0.0]]], dtype=torch.float32
     )
     invalid_proto = torch.full((1, 2, 2, 2), float("nan"))
+    outputs = (
+        [invalid_proto, detections] if prototype_first else [detections, invalid_proto]
+    )
 
     with pytest.raises(
         ValueError, match="Mask prototype tensor must contain only finite"
     ):
-        postprocessor.extract_final_outputs([detections, invalid_proto])
+        postprocessor.extract_final_outputs(outputs)
 
 
 @pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])

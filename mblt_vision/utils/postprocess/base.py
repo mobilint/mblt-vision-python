@@ -310,6 +310,7 @@ class YOLODetectionPostBase(PostBase):
 
             normalized_detections: np.ndarray | torch.Tensor | None = None
             normalized_proto: torch.Tensor | None = None
+            invalid_proto_error: ValueError | None = None
             for output in x:
                 if not isinstance(output, (np.ndarray, torch.Tensor)):
                     continue
@@ -322,16 +323,19 @@ class YOLODetectionPostBase(PostBase):
                 if normalized_proto is None:
                     try:
                         normalized_proto = self._normalize_proto_batch(output)
-                    except ValueError:
-                        if (
-                            normalized_detections is not None
-                            and self.task == "instance_segmentation"
-                            and output.ndim == 4
-                        ):
-                            raise
+                    except ValueError as exc:
+                        if self.task == "instance_segmentation" and output.ndim == 4:
+                            # Defer this until detections are found so unrelated
+                            # four-dimensional outputs do not prevent raw-head
+                            # decoding. Once this is a decoded segmentation output,
+                            # every candidate prototype must be valid regardless of
+                            # its position in the backend output sequence.
+                            invalid_proto_error = exc
                         continue
 
             if normalized_detections is not None:
+                if invalid_proto_error is not None:
+                    raise invalid_proto_error
                 return self._final_detection_batches(
                     normalized_detections
                 ), normalized_proto

@@ -596,6 +596,7 @@ def test_construct_coco_replaces_stale_output(
     }
     assert readiness_calls == [
         ("object_detection", "coco"),
+        ("instance_segmentation", "coco"),
         ("pose_estimation", "coco"),
     ]
 
@@ -829,6 +830,31 @@ def test_construct_nyu_depth_rejects_source_outside_resolved_root(
         organizer.construct_nyu_depth(str(dataset_dir), str(tmp_path / "organized"))
 
 
+def test_construct_nyu_depth_rejects_duplicate_nested_source_stems(
+    tmp_path: Path,
+) -> None:
+    """Do not let recursive NYU source traversal overwrite a flattened sample."""
+
+    dataset_dir = tmp_path / "source"
+    for relative_path in (
+        "images/first/sample.jpg",
+        "images/second/sample.png",
+        "depth/sample.npy",
+    ):
+        path = dataset_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"source")
+
+    with pytest.raises(
+        ValueError, match="NYU Depth images contain duplicate filename stem"
+    ):
+        organizer._collect_nyu_depth_validation_files(
+            str(dataset_dir / "images"),
+            str(dataset_dir / "depth"),
+            dataset_dir.resolve(),
+        )
+
+
 def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -931,6 +957,24 @@ def test_staged_payload_validation_rejects_corrupt_files(
         organizer._validate_staged_payloads(tmp_path, dataset)
 
 
+def test_staged_cityscapes_payload_validation_rejects_unknown_source_ids(
+    tmp_path: Path,
+) -> None:
+    """Reject source IDs the Cityscapes loader cannot classify consistently."""
+
+    image_dir = tmp_path / "images"
+    annotation_dir = tmp_path / "annotations"
+    image_dir.mkdir()
+    annotation_dir.mkdir()
+    Image.new("RGB", (2, 2)).save(image_dir / "sample.png")
+    Image.fromarray(np.array([[0, 34], [255, 7]], dtype=np.uint8)).save(
+        annotation_dir / "sample.png"
+    )
+
+    with pytest.raises(ValueError, match="unsupported source IDs.*34"):
+        organizer._validate_staged_payloads(tmp_path, "cityscapes")
+
+
 def _create_ade20k_source(tmp_path: Path) -> Path:
     """Create a compact extracted ADE20K validation source."""
 
@@ -1002,6 +1046,23 @@ def test_construct_ade20k_requires_metadata_before_replacing_cache(
         organizer.construct_ade20k(str(dataset_dir), str(output_dir))
 
     assert (output_dir / "valid-cache-marker").read_bytes() == b"existing"
+
+
+def test_construct_ade20k_rejects_duplicate_source_stems(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Reject flat ADE20K source names that would overwrite during staging."""
+
+    monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    dataset_dir = _create_ade20k_source(tmp_path)
+    image_path = dataset_dir / "images" / "ADE_val_00000001.jpg"
+    shutil.copy2(image_path, image_path.with_suffix(".JPG"))
+
+    with pytest.raises(
+        ValueError, match="ADE20K images contain duplicate filename stem"
+    ):
+        organizer.construct_ade20k(str(dataset_dir), str(tmp_path / "organized"))
 
 
 @pytest.mark.parametrize(

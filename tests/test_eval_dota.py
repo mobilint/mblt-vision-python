@@ -317,3 +317,12 @@ def test_difficult_regions_do_not_count_as_positive_or_false_positive() -> None:
     baseline = evaluate_dota_predictions(ground_truths, predictions[1:])
 
     assert result == baseline
+
+
+def test_dota_ap_interpolation_uses_terminal_recall_sentinel() -> None:
+    """Preserve the reference AP curve after the final observed recall point."""
+
+    ap, _, recall_curve = eval_dota_module._compute_ap(np.array([0.5]), np.array([1.0]))
+
+    assert recall_curve.tolist() == [0.0, 0.5, 1.0]
+    assert ap == pytest.approx(0.75)

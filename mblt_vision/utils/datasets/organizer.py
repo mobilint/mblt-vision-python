@@ -238,6 +238,14 @@ def _validate_staged_semantic_masks(staged_root: Path, dataset: str) -> None:
             raise ValueError(
                 f"Staged ADE20K annotation must be an 8-bit mask with values in [0, 150]: {annotation_path}."
             )
+        if dataset == "cityscapes":
+            valid_ids = (annotation <= 33) | (annotation == 255)
+            if not np.all(valid_ids):
+                invalid_ids = np.unique(annotation[~valid_ids])
+                raise ValueError(
+                    "Staged Cityscapes annotation contains unsupported source IDs "
+                    f"{invalid_ids.tolist()}; expected IDs in [0, 33] or 255: {annotation_path}."
+                )
 
 
 def _validate_staged_dotav1_labels(staged_root: Path) -> None:
@@ -784,7 +792,7 @@ def construct_coco(image_dir: str, annotation_dir: str, output_dir: str) -> None
         _validate_staged_dataset(
             staged_output_dir,
             "coco",
-            ("object_detection", "pose_estimation"),
+            ("object_detection", "instance_segmentation", "pose_estimation"),
         )
         _replace_staged_directories(
             ((staged_output_dir, output_dir),),
@@ -960,6 +968,32 @@ def _validate_dense_source_file(source_path: str, dataset_root: Path) -> str:
     return str(resolved_source)
 
 
+def _collect_unique_dense_sources(
+    source_paths: Iterable[str],
+    dataset_root: Path,
+    source_description: str,
+) -> dict[str, str]:
+    """Return validated dense sources keyed by unique filename stem.
+
+    Dense organizers flatten source files into a single output directory. Reject
+    repeated stems up front instead of silently retaining whichever recursive
+    traversal entry happened to be processed last.
+    """
+
+    sources: dict[str, str] = {}
+    for source_path in sorted(source_paths):
+        sample_id = Path(source_path).stem
+        validated_path = _validate_dense_source_file(source_path, dataset_root)
+        previous_path = sources.get(sample_id)
+        if previous_path is not None:
+            raise ValueError(
+                f"{source_description} contain duplicate filename stem {sample_id!r}: "
+                f"{previous_path} and {validated_path}."
+            )
+        sources[sample_id] = validated_path
+    return sources
+
+
 def _validate_dense_output_root(
     output_dir: str,
     dataset_name: str,
@@ -1004,18 +1038,16 @@ def _collect_nyu_depth_validation_files(
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Validates and returns matching NYU Depth validation image/depth pairs."""
 
-    images = {
-        os.path.splitext(os.path.basename(path))[0]: _validate_dense_source_file(
-            path, dataset_root
-        )
-        for path in _iter_files(image_dir, [".jpg", ".jpeg", ".png"])
-    }
-    depths = {
-        os.path.splitext(os.path.basename(path))[0]: _validate_dense_source_file(
-            path, dataset_root
-        )
-        for path in _iter_files(depth_dir, [".npy"])
-    }
+    images = _collect_unique_dense_sources(
+        _iter_files(image_dir, [".jpg", ".jpeg", ".png"]),
+        dataset_root,
+        "NYU Depth images",
+    )
+    depths = _collect_unique_dense_sources(
+        _iter_files(depth_dir, [".npy"]),
+        dataset_root,
+        "NYU Depth depth maps",
+    )
     missing_depths = sorted(set(images) - set(depths))
     missing_images = sorted(set(depths) - set(images))
     if missing_depths or missing_images:
@@ -1209,22 +1241,24 @@ def construct_ade20k(dataset_dir: str, output_dir: str) -> None:
         raise ValueError(
             f"Unable to resolve ADE20K dataset root {dataset_root}: {exc}."
         ) from exc
-    images = {
-        os.path.splitext(file_name)[0]: _validate_dense_source_file(
-            os.path.join(image_dir, file_name),
-            resolved_dataset_root,
-        )
-        for file_name in os.listdir(image_dir)
-        if file_name.startswith("ADE_val_") and file_name.lower().endswith(".jpg")
-    }
-    annotations = {
-        os.path.splitext(file_name)[0]: _validate_dense_source_file(
-            os.path.join(annotation_dir, file_name),
-            resolved_dataset_root,
-        )
-        for file_name in os.listdir(annotation_dir)
-        if file_name.startswith("ADE_val_") and file_name.lower().endswith(".png")
-    }
+    images = _collect_unique_dense_sources(
+        (
+            os.path.join(image_dir, file_name)
+            for file_name in os.listdir(image_dir)
+            if file_name.startswith("ADE_val_") and file_name.lower().endswith(".jpg")
+        ),
+        resolved_dataset_root,
+        "ADE20K images",
+    )
+    annotations = _collect_unique_dense_sources(
+        (
+            os.path.join(annotation_dir, file_name)
+            for file_name in os.listdir(annotation_dir)
+            if file_name.startswith("ADE_val_") and file_name.lower().endswith(".png")
+        ),
+        resolved_dataset_root,
+        "ADE20K annotations",
+    )
     if set(images) != set(annotations):
         raise ValueError(
             "ADE20K validation images and annotations must have matching file stems."

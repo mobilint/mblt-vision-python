@@ -278,8 +278,8 @@ def _compute_ap(
     recall: np.ndarray, precision: np.ndarray
 ) -> tuple[float, np.ndarray, np.ndarray]:
     """Compute AP from recall and precision curves with Ultralytics interpolation."""
-    mrec = np.concatenate(([0.0], recall, [recall[-1] if len(recall) else 1.0], [1.0]))
-    mpre = np.concatenate(([1.0], precision, [0.0], [0.0]))
+    mrec = np.concatenate(([0.0], recall, [1.0]))
+    mpre = np.concatenate(([1.0], precision, [0.0]))
     mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
     grid = np.linspace(0, 1, 101)
     integrate = getattr(np, "trapezoid", None)
