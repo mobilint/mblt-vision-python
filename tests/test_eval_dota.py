@@ -39,7 +39,7 @@ def test_eval_dota_rejects_truncated_postprocess_batches(
             return None
 
     class _FakeModel:
-        post_cfg = {"task": "obb"}
+        post_cfg = {"task": "obb", "dataset": "dotav1"}
         preprocess_with_metadata = object()
 
         def set_postprocess_thresholds(self, **kwargs) -> None:
@@ -72,6 +72,35 @@ def test_eval_dota_rejects_truncated_postprocess_batches(
         match=r"DOTAv1 evaluation batch length mismatch: model outputs=1, input batch=2",
     ):
         eval_dota_module.eval_dota(_FakeModel(), str(tmp_path), batch_size=2)
+
+
+def test_eval_dota_rejects_wrong_model_taxonomy(tmp_path) -> None:
+    """Do not score another OBB taxonomy against DOTAv1 ground truth."""
+
+    with pytest.raises(ValueError, match="post_cfg.dataset to be 'dotav1'"):
+        eval_dota_module.eval_dota(
+            SimpleNamespace(post_cfg={"task": "obb", "dataset": "coco"}),
+            str(tmp_path),
+            batch_size=1,
+        )
+
+
+def test_dota_ground_truth_requires_annotation_for_every_image(tmp_path) -> None:
+    """Do not silently manufacture empty ground truth for unlabeled DOTAv1 samples."""
+
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(
+        FileNotFoundError, match="annotation not found for image 'image'"
+    ):
+        _load_ground_truths(str(tmp_path), dataset)
 
 
 def test_normalized_difficult_flag_loads_as_an_ignored_region(tmp_path) -> None:

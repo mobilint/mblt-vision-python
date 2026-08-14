@@ -103,6 +103,12 @@ def eval_widerface(
         raise NotImplementedError(
             f"Task {model.post_cfg['task']} is not supported for WiderFace evaluation."
         )
+    dataset_name = model.post_cfg.get("dataset")
+    if not isinstance(dataset_name, str) or dataset_name.lower() != "widerface":
+        raise ValueError(
+            "WiderFace evaluation requires model post_cfg.dataset to be 'widerface', "
+            f"got {dataset_name!r}."
+        )
 
     dataset = CustomWiderface(os.path.join(data_path, "images"))
     dataloader = get_widerface_loader(
@@ -132,9 +138,23 @@ def eval_widerface(
             img0_shapes,
             ratio_pad=ratio_pad,
         )
+        batch_lengths = {
+            "input batch": int(input_npu.shape[0]),
+            "original shapes": len(org_shape),
+            "ratio pads": len(ratio_pad),
+            "target classes": len(target_classes),
+            "file names": len(fnames),
+            "boxes": len(boxes_list),
+            "scores": len(scores_list),
+        }
+        if len(set(batch_lengths.values())) != 1:
+            details = ", ".join(
+                f"{name}={length}" for name, length in batch_lengths.items()
+            )
+            raise ValueError(f"WiderFace evaluation batch length mismatch: {details}.")
 
         for event_name, file_name, boxes, scores in zip(
-            target_classes, fnames, boxes_list, scores_list
+            target_classes, fnames, boxes_list, scores_list, strict=True
         ):
             predictions[event_name][os.path.splitext(file_name)[0]] = (
                 _boxes_scores_to_prediction(boxes, scores)

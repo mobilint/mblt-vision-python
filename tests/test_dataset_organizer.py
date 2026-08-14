@@ -16,6 +16,7 @@ from zipfile import ZipFile
 
 import pytest
 import requests
+import numpy as np
 from PIL import Image
 
 import mblt_vision.utils.datasets.organizer as organizer
@@ -755,6 +756,7 @@ def test_organize_nyu_depth_extracts_only_validation_layout(
     """Install only NYU Depth validation image/depth pairs from an archive."""
 
     monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(organizer, "_validate_staged_nyu_depth", lambda _: None)
     archive_path = tmp_path / "nyu-depth.zip"
     with ZipFile(archive_path, "w") as archive:
         archive.writestr("nyu-depth/images/train/nyu_train.jpg", b"training image")
@@ -831,6 +833,7 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     """Leave recoverable NYU backups outside staging when rollback fails."""
 
     monkeypatch.setattr(organizer, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(organizer, "_validate_staged_nyu_depth", lambda _: None)
     dataset_dir = tmp_path / "source"
     (dataset_dir / "images").mkdir(parents=True)
     (dataset_dir / "depth").mkdir()
@@ -871,6 +874,26 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
     assert len(backup_dirs) == 1
     assert (backup_dirs[0] / "images" / "keep.jpg").read_bytes() == b"old image"
     assert (backup_dirs[0] / "depth" / "keep.npy").read_bytes() == b"old depth"
+
+
+@pytest.mark.parametrize(
+    "depth",
+    [np.array([[np.nan]], dtype=np.float32), np.array([[1]], dtype=np.complex64)],
+)
+def test_staged_nyu_depth_validation_rejects_malformed_payloads(
+    tmp_path: Path, depth: np.ndarray
+) -> None:
+    """Reject corrupt staged NYU targets before cache replacement can begin."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    np.save(depth_dir / "sample.npy", depth)
+
+    with pytest.raises(ValueError, match="real numeric dtype|finite values"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
 
 
 def _create_ade20k_source(tmp_path: Path) -> Path:

@@ -20,6 +20,7 @@ def test_nyu_depth_evaluation_rejects_surplus_output_batch(
     """Do not silently discard depth maps from a malformed backend batch."""
 
     class _Model:
+        post_cfg = {"dataset": "nyu-depth"}
         pre_cfg = {"LetterBox": {"img_size": [4, 4]}}
 
         def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
@@ -65,3 +66,12 @@ def test_nyu_depth_metrics_reject_nonreal_or_nonnumeric_inputs(dtype: np.dtype) 
 
     with pytest.raises(ValueError, match="real numeric dtype"):
         eval_nyu_depth_module.calculate_nyu_depth_metrics(values, values)
+
+
+def test_nyu_depth_evaluation_rejects_wrong_model_taxonomy() -> None:
+    """Require the model's declared depth taxonomy before loading a dataset."""
+
+    with pytest.raises(ValueError, match="post_cfg.dataset to be 'nyu-depth'"):
+        eval_nyu_depth_module.eval_nyu_depth(
+            SimpleNamespace(post_cfg={"dataset": "ade20k"}), "/dataset", batch_size=1
+        )

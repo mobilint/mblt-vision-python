@@ -37,6 +37,8 @@ def test_imagenet_evaluation_rejects_truncated_classification_batches(
             return None
 
     class _FakeModel:
+        post_cfg = {"dataset": "imagenet"}
+
         def preprocess(self, value: object) -> object:
             return value
 
@@ -62,4 +64,13 @@ def test_imagenet_evaluation_rejects_truncated_classification_batches(
     ):
         eval_imagenet_module.eval_imagenet_metrics(
             _FakeModel(), "/dataset", batch_size=2
+        )
+
+
+def test_imagenet_evaluation_rejects_wrong_model_taxonomy() -> None:
+    """Do not score another classification taxonomy against ImageNet labels."""
+
+    with pytest.raises(ValueError, match="post_cfg.dataset to be 'imagenet'"):
+        eval_imagenet_module.eval_imagenet_metrics(
+            SimpleNamespace(post_cfg={"dataset": "coco"}), "/dataset", batch_size=1
         )

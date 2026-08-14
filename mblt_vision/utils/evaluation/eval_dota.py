@@ -189,6 +189,12 @@ def _load_ground_truths(
                     classes.append(cls)
                     polygons.append(coords)
 
+        else:
+            raise FileNotFoundError(
+                "DOTAv1 annotation not found for image "
+                f"{image_id!r}; expected {label_path} or {original_label_path}."
+            )
+
         polygon_tensor = (
             torch.stack(polygons).to(torch.float32)
             if polygons
@@ -692,6 +698,12 @@ def eval_dota(
     if normalize_vision_task(model.post_cfg["task"]) != "obb":
         raise NotImplementedError(
             f"Task {model.post_cfg['task']} is not supported for DOTAv1 evaluation."
+        )
+    dataset_name = model.post_cfg.get("dataset")
+    if not isinstance(dataset_name, str) or dataset_name.lower() != "dotav1":
+        raise ValueError(
+            "DOTAv1 evaluation requires model post_cfg.dataset to be 'dotav1', "
+            f"got {dataset_name!r}."
         )
 
     dataset = CustomDOTAv1(data_path)

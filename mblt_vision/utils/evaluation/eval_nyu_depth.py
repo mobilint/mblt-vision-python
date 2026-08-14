@@ -126,6 +126,12 @@ def eval_nyu_depth(
 ) -> NYUDepthResult:
     """Evaluate a depth model on paired NYU validation images and depth maps."""
 
+    dataset_name = model.post_cfg.get("dataset")
+    if not isinstance(dataset_name, str) or dataset_name.lower() != "nyu-depth":
+        raise ValueError(
+            "NYU Depth evaluation requires model post_cfg.dataset to be 'nyu-depth', "
+            f"got {dataset_name!r}."
+        )
     dataset = CustomNYUDepth(data_path)
     letterbox_cfg = model.pre_cfg.get("LetterBox")
     if not isinstance(letterbox_cfg, dict) or "img_size" not in letterbox_cfg:

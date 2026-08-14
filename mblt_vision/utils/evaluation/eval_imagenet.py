@@ -50,6 +50,12 @@ def eval_imagenet_metrics(
     Returns:
         ImageNetResult: Top-1 primary accuracy and Top-5 secondary accuracy.
     """
+    dataset_name = model.post_cfg.get("dataset")
+    if not isinstance(dataset_name, str) or dataset_name.lower() != "imagenet":
+        raise ValueError(
+            "ImageNet evaluation requires model post_cfg.dataset to be 'imagenet', "
+            f"got {dataset_name!r}."
+        )
     dataset = CustomImageFolder(data_path)
     dataloader = get_imagenet_loader(dataset, batch_size, model.preprocess)
     num_data = len(dataset)

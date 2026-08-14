@@ -5,6 +5,7 @@ Utilities for organizing datasets.
 from __future__ import annotations
 
 import concurrent.futures
+import cv2
 import hashlib
 import math
 import os
@@ -22,6 +23,7 @@ from typing import Protocol, TypeGuard
 from urllib.parse import urlparse
 
 import requests
+import numpy as np
 from gdown.download import download
 from gdown.download_folder import download_folder
 from PIL import Image
@@ -926,6 +928,8 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
                 os.path.join(staged_depth_dir, os.path.basename(depths[sample_id])),
             )
 
+        _validate_staged_nyu_depth(staging_dir)
+
         replacements = (
             (staged_image_dir, os.path.join(output_dir, "images")),
             (staged_depth_dir, os.path.join(output_dir, "depth")),
@@ -936,6 +940,43 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
     print(
         f"Constructed NYU Depth validation dataset with {len(images)} image/depth pairs"
     )
+
+
+def _validate_staged_nyu_depth(staging_dir: str) -> None:
+    """Decode staged NYU pairs before they can replace an existing cache."""
+
+    image_dir = Path(staging_dir) / "images"
+    depth_dir = Path(staging_dir) / "depth"
+    for image_path in sorted(image_dir.iterdir()):
+        if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+            continue
+        depth_path = depth_dir / f"{image_path.stem}.npy"
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"Staged NYU Depth image is unreadable: {image_path}.")
+        try:
+            raw_depth = np.load(depth_path, allow_pickle=False)
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"Unable to load staged NYU Depth target {depth_path}: {exc}."
+            ) from exc
+        if not np.issubdtype(raw_depth.dtype, np.number) or np.issubdtype(
+            raw_depth.dtype, np.complexfloating
+        ):
+            raise ValueError(
+                "Staged NYU Depth target must use a real numeric dtype, "
+                f"got {raw_depth.dtype}: {depth_path}."
+            )
+        depth = np.asarray(raw_depth, dtype=np.float32)
+        if depth.ndim != 2 or depth.shape != image.shape[:2]:
+            raise ValueError(
+                "Staged NYU Depth image and target shapes must match: "
+                f"image {image.shape[:2]}, depth {depth.shape}: {image_path}."
+            )
+        if not bool(np.isfinite(depth).all()):
+            raise ValueError(
+                f"Staged NYU Depth target must contain only finite values: {depth_path}."
+            )
 
 
 def organize_nyu_depth(
