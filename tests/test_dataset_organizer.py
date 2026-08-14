@@ -1186,6 +1186,7 @@ def test_organize_cityscapes_materializes_lossless_validation_pairs(
     """Copy only exactly paired validation images and label-ID masks without transcoding."""
 
     monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 2)
+    monkeypatch.setattr(organizer, "dataset_ready", lambda *_: True)
     sample_ids = ["frankfurt_000000_000294", "munster_000001_000019"]
     image_archive, annotation_archive = _write_cityscapes_archives(tmp_path, sample_ids)
     output_dir = tmp_path / "cityscapes"
@@ -1321,6 +1322,7 @@ def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
     """Restore both previous directories if the staged installation fails."""
 
     monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(organizer, "dataset_ready", lambda *_: True)
     image_archive, annotation_archive = _write_cityscapes_archives(
         tmp_path, ["lindau_000000_000019"]
     )
@@ -1348,6 +1350,32 @@ def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
     )
 
     with pytest.raises(OSError, match="simulated"):
+        organizer.organize_cityscapes(
+            str(image_archive), str(annotation_archive), str(output_dir)
+        )
+
+    assert (output_dir / "images" / "keep.png").read_bytes() == b"old image"
+    assert (output_dir / "annotations" / "keep.png").read_bytes() == b"old annotation"
+
+
+def test_organize_cityscapes_preserves_cache_when_staging_fails_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Validate the staged tree before it can replace a usable Cityscapes cache."""
+
+    monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(organizer, "dataset_ready", lambda *_: False)
+    image_archive, annotation_archive = _write_cityscapes_archives(
+        tmp_path, ["lindau_000000_000019"]
+    )
+    output_dir = tmp_path / "cityscapes"
+    (output_dir / "images").mkdir(parents=True)
+    (output_dir / "annotations").mkdir()
+    (output_dir / "images" / "keep.png").write_bytes(b"old image")
+    (output_dir / "annotations" / "keep.png").write_bytes(b"old annotation")
+
+    with pytest.raises(ValueError, match="failed identity and completeness checks"):
         organizer.organize_cityscapes(
             str(image_archive), str(annotation_archive), str(output_dir)
         )

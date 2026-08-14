@@ -31,7 +31,7 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
             return len(self.ids)
 
     class _Model:
-        post_cfg = {"task": "pose_estimation"}
+        post_cfg = {"task": "pose_estimation", "dataset": "coco"}
 
         def set_postprocess_thresholds(
             self, *, conf_thres: float | None, iou_thres: float | None
@@ -65,3 +65,32 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
     )
     assert evaluated_image_ids == [1, 2]
     assert result.map5095 == result.map50 == 0.1
+
+
+def test_coco_evaluation_rejects_non_coco_model_taxonomy() -> None:
+    """Do not evaluate another taxonomy using the hard-coded COCO ID mapping."""
+
+    model = SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "dotav1"})
+
+    with pytest.raises(ValueError, match="post_cfg.dataset to be 'coco'"):
+        eval_coco_module.eval_coco_metrics(model, "/dataset", batch_size=1)
+
+
+def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:
+    """Require one decoded result for every submitted COCO image."""
+
+    postprocess = SimpleNamespace(
+        nmsout2eval=lambda *_args, **_kwargs: ([[1]], [[[0, 0, 1, 1]]], [[0.9]])
+    )
+
+    with pytest.raises(ValueError, match="batch cardinality mismatch"):
+        eval_coco_module.format_coco_results(
+            "object_detection",
+            SimpleNamespace(output=[]),
+            (640, 640),
+            [(640, 640), (640, 640)],
+            [None, None],
+            [0, 1],
+            [101, 102],
+            postprocess,
+        )

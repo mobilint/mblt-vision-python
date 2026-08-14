@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -51,6 +52,9 @@ COCO_CATEGORY_COUNTS = {
 }
 COCO_CATEGORY_IDS = frozenset(get_dataset_category_ids("coco"))
 COCO_PERSON_KEYPOINT_CATEGORY_IDS = frozenset({1})
+COCO_VALIDATION_IMAGE_IDENTITIES_SHA256 = (
+    "f57f71ba25171a0fd99be8c425a91d4a6fdd43d25aadc7e5be51dd37a73281a7"
+)
 
 
 def _path_has_symlink_component(path: Path) -> bool:
@@ -163,6 +167,16 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
         or len(image_ids) != len(set(image_ids))
     ):
         return None
+    if len(image_records) == 5000:
+        identity_payload = "".join(
+            f"{image_id}:{file_name}\n"
+            for image_id, file_name in sorted(zip(image_ids, names, strict=True))
+        ).encode()
+        if (
+            hashlib.sha256(identity_payload).hexdigest()
+            != COCO_VALIDATION_IMAGE_IDENTITIES_SHA256
+        ):
+            return None
     annotation_records = annotation.get("annotations")
     categories = annotation.get("categories")
     expected_annotations = COCO_ANNOTATION_COUNTS.get(annotation_path.name)
@@ -209,6 +223,21 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
             or category_id not in category_ids
         ):
             return None
+        if annotation_path.name == "instances_val2017.json":
+            bbox = record.get("bbox")
+            if (
+                not isinstance(bbox, list)
+                or len(bbox) != 4
+                or any(
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or not np.isfinite(value)
+                    for value in bbox
+                )
+                or bbox[2] <= 0
+                or bbox[3] <= 0
+            ):
+                return None
         annotation_ids.append(annotation_id)
     if len(annotation_ids) != len(set(annotation_ids)):
         return None

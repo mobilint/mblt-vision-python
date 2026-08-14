@@ -40,6 +40,20 @@ class COCOResult(NamedTuple):
         return self.map50
 
 
+def _require_batch_cardinality(expected: int, **values: Any) -> None:
+    """Reject postprocessing metadata that cannot represent every input image."""
+
+    invalid = {
+        name: len(value) for name, value in values.items() if len(value) != expected
+    }
+    if invalid:
+        details = ", ".join(f"{name}={length}" for name, length in invalid.items())
+        raise ValueError(
+            "COCO evaluation batch cardinality mismatch: "
+            f"expected {expected}, got {details}."
+        )
+
+
 def format_coco_results(
     task: str,
     nms_outs: Results,
@@ -71,7 +85,17 @@ def format_coco_results(
             org_shape,
             ratio_pad=ratio_pad,
         )
-        for i, labels, boxes, scores in zip(idx, labels_list, boxes_list, scores_list):
+        _require_batch_cardinality(
+            len(idx),
+            org_shape=org_shape,
+            ratio_pad=ratio_pad,
+            labels=labels_list,
+            boxes=boxes_list,
+            scores=scores_list,
+        )
+        for i, labels, boxes, scores in zip(
+            idx, labels_list, boxes_list, scores_list, strict=True
+        ):
             results.extend(
                 [
                     {
@@ -80,7 +104,7 @@ def format_coco_results(
                         "bbox": box,
                         "score": score,
                     }
-                    for box, score, label in zip(boxes, scores, labels)
+                    for box, score, label in zip(boxes, scores, labels, strict=True)
                 ]
             )
     elif task == "instance_segmentation":
@@ -90,8 +114,17 @@ def format_coco_results(
             org_shape,
             ratio_pad=ratio_pad,
         )
+        _require_batch_cardinality(
+            len(idx),
+            org_shape=org_shape,
+            ratio_pad=ratio_pad,
+            labels=labels_list,
+            boxes=boxes_list,
+            scores=scores_list,
+            extra=extra_list,
+        )
         for i, labels, boxes, scores, extra in zip(
-            idx, labels_list, boxes_list, scores_list, extra_list
+            idx, labels_list, boxes_list, scores_list, extra_list, strict=True
         ):
             results.extend(
                 [
@@ -102,7 +135,9 @@ def format_coco_results(
                         "score": score,
                         "segmentation": extra,
                     }
-                    for box, score, label, extra in zip(boxes, scores, labels, extra)
+                    for box, score, label, extra in zip(
+                        boxes, scores, labels, extra, strict=True
+                    )
                 ]
             )
     elif task == "pose_estimation":
@@ -112,8 +147,17 @@ def format_coco_results(
             org_shape,
             ratio_pad=ratio_pad,
         )
+        _require_batch_cardinality(
+            len(idx),
+            org_shape=org_shape,
+            ratio_pad=ratio_pad,
+            labels=labels_list,
+            boxes=boxes_list,
+            scores=scores_list,
+            extra=extra_list,
+        )
         for i, labels, boxes, scores, extra in zip(
-            idx, labels_list, boxes_list, scores_list, extra_list
+            idx, labels_list, boxes_list, scores_list, extra_list, strict=True
         ):
             results.extend(
                 [
@@ -124,7 +168,9 @@ def format_coco_results(
                         "score": score,
                         "keypoints": extra,
                     }
-                    for box, score, label, extra in zip(boxes, scores, labels, extra)
+                    for box, score, label, extra in zip(
+                        boxes, scores, labels, extra, strict=True
+                    )
                 ]
             )
     else:
@@ -171,6 +217,12 @@ def eval_coco_metrics(
         model.post_cfg["task"],
         supported=("object_detection", "instance_segmentation", "pose_estimation"),
     )
+    dataset_name = model.post_cfg.get("dataset")
+    if not isinstance(dataset_name, str) or dataset_name.lower() != "coco":
+        raise ValueError(
+            "COCO evaluation requires model post_cfg.dataset to be 'coco', "
+            f"got {dataset_name!r}."
+        )
     if task in {"object_detection", "instance_segmentation"}:
         dataset = CustomCOCODataset(
             os.path.join(data_path, "val2017"),

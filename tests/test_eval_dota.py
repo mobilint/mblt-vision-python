@@ -149,6 +149,34 @@ def test_original_truncated_annotation_raises_with_file_and_line(tmp_path) -> No
 @pytest.mark.parametrize(
     ("label_path", "annotation"),
     [
+        ("labels/val/image.txt", "0 0 0 1 0 2 0 3 0"),
+        ("labels/val_original/image.txt", "0 0 1 0 2 0 3 0 plane 0"),
+    ],
+)
+def test_dota_annotations_reject_degenerate_polygons(
+    tmp_path, label_path: str, annotation: str
+) -> None:
+    """Reject line-like quadrilaterals before deriving rotated boxes."""
+
+    path = tmp_path / label_path
+    path.parent.mkdir(parents=True)
+    path.write_text(annotation, encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="polygon must have positive area"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
+@pytest.mark.parametrize(
+    ("label_path", "annotation"),
+    [
         ("labels/val/image.txt", "-1 0 0 0.2 0 0.2 0.2 0 0.2"),
         ("labels/val_original/image.txt", "0 0 20 0 20 20 0 20 -1 0"),
     ],

@@ -1262,6 +1262,11 @@ def organize_cityscapes(
                 os.path.join(staged_annotation_dir, f"{sample_id}.png"),
             )
 
+        if not dataset_ready(staging_dir, "semantic_segmentation", "cityscapes"):
+            raise ValueError(
+                "Staged Cityscapes validation data failed identity and completeness checks."
+            )
+
         replacements = (
             (staged_image_dir, os.path.join(output_dir, "images")),
             (staged_annotation_dir, os.path.join(output_dir, "annotations")),

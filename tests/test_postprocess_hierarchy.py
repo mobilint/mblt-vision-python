@@ -190,6 +190,59 @@ def test_already_decoded_detections_reject_nonpositive_box_area(
         postprocessor._final_detection_batches(detections)
 
 
+def test_already_decoded_detections_ignore_degenerate_padding_rows() -> None:
+    """Validate geometry only after low-confidence fixed-size padding is removed."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    detections = torch.tensor([[[0.0, 0.0, 0.0, 0.0, 0.1, 1.0]]], dtype=torch.float32)
+
+    assert postprocessor._final_detection_batches(detections)[0].shape == (0, 6)
+
+
+def test_already_decoded_obb_uses_width_height_geometry() -> None:
+    """Do not interpret OBB center/size fields as XYXY corners."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    postprocessor.task = "obb"
+    detections = torch.tensor(
+        [[[500.0, 20.0, 100.0, 10.0, 0.9, 1.0]]], dtype=torch.float32
+    )
+
+    assert postprocessor._final_detection_batches(detections)[0].shape == (1, 6)
+
+
+def test_decoded_segmentation_propagates_invalid_mask_prototypes() -> None:
+    """Do not discard malformed required prototype tensors as unrelated outputs."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    postprocessor.n_extra = 2
+    postprocessor.task = "instance_segmentation"
+    detections = torch.tensor(
+        [[[0.0, 0.0, 1.0, 1.0, 0.9, 1.0, 0.0, 0.0]]], dtype=torch.float32
+    )
+    invalid_proto = torch.full((1, 2, 2, 2), float("nan"))
+
+    with pytest.raises(
+        ValueError, match="Mask prototype tensor must contain only finite"
+    ):
+        postprocessor.extract_final_outputs([detections, invalid_proto])
+
+
 @pytest.mark.parametrize("invalid_value", [float("nan"), float("inf")])
 def test_detection_postprocessor_rejects_nonfinite_raw_heads(
     invalid_value: float,

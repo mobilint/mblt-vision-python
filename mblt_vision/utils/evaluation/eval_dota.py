@@ -62,6 +62,22 @@ def _label_to_index(label: str) -> int:
         return DOTAV1_CLASS_TO_IDX[label]
 
 
+def _validate_polygon_area(
+    coords: torch.Tensor, annotation_path: Path, line_number: int
+) -> None:
+    """Require a non-degenerate quadrilateral before converting it to an OBB."""
+
+    shifted = torch.roll(coords, shifts=-1, dims=0)
+    area = 0.5 * torch.abs(
+        torch.sum(coords[:, 0] * shifted[:, 1] - coords[:, 1] * shifted[:, 0])
+    )
+    if not bool(area > 0):
+        raise ValueError(
+            "DOTAv1 annotation polygon must have positive area at "
+            f"{annotation_path}:{line_number}."
+        )
+
+
 def _load_ground_truths(
     data_path: str, dataset: CustomDOTAv1
 ) -> dict[str, dict[str, torch.Tensor]]:
@@ -120,6 +136,7 @@ def _load_ground_truths(
                 if coords.numel() and float(coords.max()) <= 1.5:
                     coords[:, 0] *= width
                     coords[:, 1] *= height
+                _validate_polygon_area(coords, label_path, line_number)
                 if len(parts) >= 10 and parts[9] not in {"0", "1", "2"}:
                     raise ValueError(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
@@ -159,6 +176,7 @@ def _load_ground_truths(
                         "DOTAv1 annotation coordinates must be finite at "
                         f"{original_label_path}:{line_number}."
                     )
+                _validate_polygon_area(coords, original_label_path, line_number)
                 if parts[9] not in {"0", "1", "2"}:
                     raise ValueError(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "

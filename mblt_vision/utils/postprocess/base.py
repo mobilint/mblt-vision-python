@@ -323,6 +323,12 @@ class YOLODetectionPostBase(PostBase):
                     try:
                         normalized_proto = self._normalize_proto_batch(output)
                     except ValueError:
+                        if (
+                            normalized_detections is not None
+                            and self.task == "instance_segmentation"
+                            and output.ndim == 4
+                        ):
+                            raise
                         continue
 
             if normalized_detections is not None:
@@ -394,12 +400,6 @@ class YOLODetectionPostBase(PostBase):
                     "Decoded detection confidence values must be in [0, 1]; "
                     f"got {invalid_scores}."
                 )
-            if not bool(
-                ((batch[:, 2] > batch[:, 0]) & (batch[:, 3] > batch[:, 1])).all()
-            ):
-                raise ValueError(
-                    "Decoded detection boxes must have positive xyxy area."
-                )
             valid_labels = (
                 torch.isfinite(labels)
                 & (labels == labels.round())
@@ -412,7 +412,21 @@ class YOLODetectionPostBase(PostBase):
                     "Decoded detection class IDs must be finite integral values in "
                     f"[0, {self.nc}); got {invalid_labels}."
                 )
-            batches.append(batch[batch[:, 4] > self.conf_thres])
+            retained = batch[batch[:, 4] > self.conf_thres]
+            if getattr(self, "task", "object_detection") == "obb":
+                valid_geometry = (retained[:, 2] > 0) & (retained[:, 3] > 0)
+                geometry_description = "positive width and height"
+            else:
+                valid_geometry = (retained[:, 2] > retained[:, 0]) & (
+                    retained[:, 3] > retained[:, 1]
+                )
+                geometry_description = "positive xyxy area"
+            if not bool(valid_geometry.all()):
+                raise ValueError(
+                    "Decoded detection boxes must have "
+                    f"{geometry_description} after confidence filtering."
+                )
+            batches.append(retained)
         return batches
 
     def _normalize_proto_batch(

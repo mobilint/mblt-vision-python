@@ -55,3 +55,13 @@ def test_nyu_depth_metrics_reject_nonfinite_targets(invalid_value: float) -> Non
     target = np.array([[1.0, invalid_value]], dtype=np.float32)
     with pytest.raises(ValueError, match="target contains non-finite"):
         eval_nyu_depth_module.calculate_nyu_depth_metrics(np.ones((1, 2)), target)
+
+
+@pytest.mark.parametrize("dtype", [np.complex64, np.dtype("U4")])
+def test_nyu_depth_metrics_reject_nonreal_or_nonnumeric_inputs(dtype: np.dtype) -> None:
+    """Direct metric callers must not lose source-dtype corruption during casting."""
+
+    values = np.ones((1, 2), dtype=dtype)
+
+    with pytest.raises(ValueError, match="real numeric dtype"):
+        eval_nyu_depth_module.calculate_nyu_depth_metrics(values, values)

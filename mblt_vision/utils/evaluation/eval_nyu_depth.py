@@ -53,8 +53,8 @@ class NYUDepthMetricAccumulator:
     def update(self, prediction: np.ndarray, target: np.ndarray) -> None:
         """Median-align one prediction and add its valid-pixel statistics."""
 
-        prediction = np.asarray(prediction, dtype=np.float32)
-        target = np.asarray(target, dtype=np.float32)
+        prediction = _as_real_float32(prediction, "prediction")
+        target = _as_real_float32(target, "target")
         if prediction.shape != target.shape:
             raise ValueError(
                 f"NYU Depth prediction and target shapes must match, got {prediction.shape} and {target.shape}."
@@ -96,6 +96,19 @@ class NYUDepthMetricAccumulator:
             abs_rel=self.abs_rel_sum / self.valid_pixel_count,
             rmse=float(np.sqrt(self.squared_error_sum / self.valid_pixel_count)),
         )
+
+
+def _as_real_float32(values: np.ndarray, name: str) -> np.ndarray:
+    """Validate metric input dtype before converting it to float32."""
+
+    array = np.asarray(values)
+    if not np.issubdtype(array.dtype, np.number) or np.issubdtype(
+        array.dtype, np.complexfloating
+    ):
+        raise ValueError(
+            f"NYU Depth {name} must use a real numeric dtype, got {array.dtype}."
+        )
+    return np.asarray(array, dtype=np.float32)
 
 
 def calculate_nyu_depth_metrics(

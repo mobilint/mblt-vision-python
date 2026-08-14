@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -96,7 +97,12 @@ def test_coco_readiness_matches_images_to_task_annotations(
                 ],
                 "categories": [{"id": 1}],
                 "annotations": [
-                    {"id": index, "image_id": index, "category_id": 1}
+                    {
+                        "id": index,
+                        "image_id": index,
+                        "category_id": 1,
+                        "bbox": [0, 0, 1, 1],
+                    }
                     for index in range(1, 3)
                 ],
             }
@@ -131,6 +137,66 @@ def test_coco_readiness_rejects_noncanonical_category_ids(
     )
 
     assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+
+@pytest.mark.parametrize("bbox", [[0, 0, 0, 1], [0, 0, 1, float("nan")]])
+def test_coco_readiness_rejects_invalid_instance_box_geometry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bbox: list[float]
+) -> None:
+    """Reject invalid instance boxes before a malformed cache reaches COCOeval."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    _write_file(tmp_path / "val2017" / "000000000001.jpg")
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [{"id": 1, "file_name": "000000000001.jpg"}],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {"id": 1, "image_id": 1, "category_id": 1, "bbox": bbox}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+
+def test_coco_annotation_identity_digest_rejects_wrong_validation_split(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bind a complete COCO annotation table to its canonical image identities."""
+
+    images = [
+        {"id": index, "file_name": f"{index:012d}.jpg"} for index in range(1, 5001)
+    ]
+    payload = "".join(f"{item['id']}:{item['file_name']}\n" for item in images).encode()
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 5000)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 0)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    monkeypatch.setattr(
+        readiness,
+        "COCO_VALIDATION_IMAGE_IDENTITIES_SHA256",
+        hashlib.sha256(payload).hexdigest(),
+    )
+    annotation_path = tmp_path / "instances_val2017.json"
+    annotation_path.write_text(
+        json.dumps({"images": images, "categories": [{"id": 1}], "annotations": []}),
+        encoding="utf-8",
+    )
+
+    assert readiness._load_coco_image_names(annotation_path) is not None
+    images[0]["file_name"] = "999999999999.jpg"
+    annotation_path.write_text(
+        json.dumps({"images": images, "categories": [{"id": 1}], "annotations": []}),
+        encoding="utf-8",
+    )
+    assert readiness._load_coco_image_names(annotation_path) is None
 
 
 def test_coco_readiness_rejects_duplicate_image_ids(
