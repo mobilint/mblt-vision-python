@@ -80,7 +80,7 @@ def test_normalized_difficult_flag_loads_as_an_ignored_region(tmp_path) -> None:
     label_dir = tmp_path / "labels" / "val"
     label_dir.mkdir(parents=True)
     (label_dir / "image.txt").write_text(
-        "0 0 0 0.2 0 0.2 0.2 0 0.2 0\n" "0 0.4 0.4 0.6 0.4 0.6 0.6 0.4 0.6 1\n",
+        "0 0 0 0.2 0 0.2 0.2 0 0.2 0\n0 0.4 0.4 0.6 0.4 0.6 0.6 0.4 0.6 1\n",
         encoding="utf-8",
     )
     dataset = cast(
@@ -121,11 +121,36 @@ def test_normalized_truncated_annotation_raises_with_file_and_line(tmp_path) -> 
         _load_ground_truths(str(tmp_path), dataset)
 
 
+def test_original_truncated_annotation_raises_with_file_and_line(tmp_path) -> None:
+    """Require a difficulty flag when loading original DOTAv1 labels directly."""
+
+    original_label_dir = tmp_path / "labels" / "val_original"
+    original_label_dir.mkdir(parents=True)
+    label_path = original_label_dir / "image.txt"
+    label_path.write_text(
+        "imagesource:GoogleEarth\n0 0 20 0 20 20 0 20 plane\n", encoding="utf-8"
+    )
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"image\.txt:2: expected at least 10 fields, got 9",
+    ):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
 @pytest.mark.parametrize(
     ("label_path", "annotation"),
     [
         ("labels/val/image.txt", "-1 0 0 0.2 0 0.2 0.2 0 0.2"),
-        ("labels/val_original/image.txt", "0 0 20 0 20 20 0 20 -1"),
+        ("labels/val_original/image.txt", "0 0 20 0 20 20 0 20 -1 0"),
     ],
 )
 def test_dota_annotations_reject_negative_class_indices(

@@ -79,8 +79,7 @@ def _validate_calibration_output_dir(output_dir: str | Path) -> Path:
     destination = Path(output_dir).expanduser()
     if _path_has_symlink_component(destination):
         raise ValueError(
-            "Calibration output_dir must not be or contain a symlink: "
-            f"{destination}."
+            f"Calibration output_dir must not be or contain a symlink: {destination}."
         )
     return destination
 
@@ -941,7 +940,7 @@ def compile_vision_model(
         raise ValueError(
             "Resolved vision model configuration requires a non-empty `post_cfg.dataset` value."
         )
-    selected_local_path = model_path if model_path is not None else onnx_path
+    selected_local_path = model_path or onnx_path
     if calib_data_path is not None:
         resolved_onnx = _resolve_compile_onnx_path(file_cfg, selected_local_path)
         output_path = _resolve_compile_output_path(save_path, resolved_onnx)

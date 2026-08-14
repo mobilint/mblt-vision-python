@@ -86,6 +86,8 @@ class ClsPost(PostBase):
                 f"Classification output has {x.shape[1]} classes, but dataset "
                 f"'{self.dataset}' requires {self.num_classes}."
             )
+        if not torch.isfinite(x).all():
+            raise ValueError("Classification output scores must all be finite.")
         if self.softmax:
             return x
         return x.softmax(dim=-1)

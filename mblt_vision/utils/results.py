@@ -35,6 +35,7 @@ from mblt_vision.utils.postprocess.common import (
     scale_rboxes,
     xywhr2xyxyxyxy,
 )
+from .preprocess._validation import normalize_uint8_rgb_array
 from .types import ListTensorLike, NestedListTensorLike, TensorLike
 
 LW = 2  # line width
@@ -99,6 +100,7 @@ class Results:
                 raise ValueError(
                     f"Image arrays must have HWC shape with three channels, got {source_img.shape}."
                 )
+            source_img = normalize_uint8_rgb_array(source_img, operation="Results.plot")
             source_img = cv2.cvtColor(source_img, cv2.COLOR_RGB2BGR)
         elif isinstance(source_path, (str, Path)):
             image_path = Path(source_path)

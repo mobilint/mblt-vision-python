@@ -368,7 +368,23 @@ class YOLODetectionPostBase(PostBase):
             tensor = torch.from_numpy(x).to(self.device)
         else:
             tensor = x.to(self.device)
-        return [batch[batch[:, 4] > self.conf_thres] for batch in tensor]
+        batches: list[torch.Tensor] = []
+        for batch in tensor:
+            labels = batch[:, 5]
+            valid_labels = (
+                torch.isfinite(labels)
+                & (labels == labels.round())
+                & (labels >= 0)
+                & (labels < self.nc)
+            )
+            if not bool(valid_labels.all()):
+                invalid_labels = labels[~valid_labels].detach().cpu().tolist()
+                raise ValueError(
+                    "Decoded detection class IDs must be finite integral values in "
+                    f"[0, {self.nc}); got {invalid_labels}."
+                )
+            batches.append(batch[batch[:, 4] > self.conf_thres])
+        return batches
 
     def _normalize_proto_batch(
         self, proto_outs: np.ndarray | torch.Tensor

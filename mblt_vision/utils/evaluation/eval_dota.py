@@ -119,10 +119,20 @@ def _load_ground_truths(
                     classes.append(cls)
                     polygons.append(coords)
         elif original_label_path.is_file():
-            for line in original_label_path.read_text(encoding="utf-8").splitlines():
+            for line_number, line in enumerate(
+                original_label_path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
                 parts = line.split()
-                if len(parts) < 9:
+                if parts and (
+                    parts[0].startswith("imagesource:") or parts[0].startswith("gsd:")
+                ):
                     continue
+                if len(parts) < 10:
+                    raise ValueError(
+                        "Malformed original DOTAv1 annotation at "
+                        f"{original_label_path}:{line_number}: expected at least 10 fields, "
+                        f"got {len(parts)}."
+                    )
                 cls = _label_to_index(parts[8])
                 if not 0 <= cls < get_dotav1_class_num():
                     raise ValueError(
@@ -131,7 +141,7 @@ def _load_ground_truths(
                 coords = torch.tensor(
                     [float(value) for value in parts[:8]], dtype=torch.float32
                 ).reshape(4, 2)
-                if len(parts) >= 10 and parts[9] in {"1", "2"}:
+                if parts[9] in {"1", "2"}:
                     ignore_classes.append(cls)
                     ignore_polygons.append(coords)
                 else:

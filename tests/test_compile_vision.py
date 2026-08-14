@@ -607,7 +607,8 @@ def _run_fake_compile(
     tmp_path: Path,
     *,
     task: str,
-    model_path: Path | None,
+    model_path: str | Path | None,
+    onnx_path: str | Path | None = None,
     entry_level: str = "data",
     dataset: str | None = None,
     target_device: str = "aries-rb",
@@ -733,6 +734,7 @@ def _run_fake_compile(
         target_device=target_device,
         model_type="VARIANT",
         model_path=model_path,
+        onnx_path=onnx_path,
         data_path=original_data_path,
         subset_path=subset_path,
         calib_data_path=calib_data_path,
@@ -827,6 +829,27 @@ def test_compile_rejects_non_onnx_local_model_with_ready_calibration_data(
             model_path=mxq_path,
             entry_level="calibration",
         )
+
+
+@pytest.mark.parametrize("entry_level", ["data", "calibration"])
+def test_compile_uses_onnx_path_when_model_path_is_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entry_level: str
+) -> None:
+    """Treat an adapter-provided empty model path as absent, not preferred."""
+
+    local_onnx = tmp_path / "alias.onnx"
+    local_onnx.write_bytes(b"onnx")
+
+    calls, _ = _run_fake_compile(
+        monkeypatch,
+        tmp_path,
+        task="image_classification",
+        model_path="",
+        onnx_path=local_onnx,
+        entry_level=entry_level,
+    )
+
+    assert calls["compile_kwargs"]["model"] == str(local_onnx)
 
 
 @pytest.mark.parametrize("entry_level", ["data", "calibration"])

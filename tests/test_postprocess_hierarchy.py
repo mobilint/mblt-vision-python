@@ -68,6 +68,39 @@ def test_classification_postprocessor_rejects_wrong_taxonomy_width() -> None:
         postprocessor(torch.zeros((1, 999), dtype=torch.float32))
 
 
+@pytest.mark.parametrize("invalid_score", [float("nan"), float("inf")])
+def test_classification_postprocessor_rejects_nonfinite_scores(
+    invalid_score: float,
+) -> None:
+    """Do not convert malformed classification logits into plausible predictions."""
+
+    scores = torch.zeros((1, 1000), dtype=torch.float32)
+    scores[0, 0] = invalid_score
+
+    with pytest.raises(ValueError, match="scores must all be finite"):
+        ClsPost({}, {"task": "image_classification", "dataset": "imagenet"})(scores)
+
+
+@pytest.mark.parametrize("invalid_class", [-1.0, 1.5, 2.0, float("nan")])
+def test_already_decoded_detections_reject_invalid_task_class_ids(
+    invalid_class: float,
+) -> None:
+    """Validate local decoded detection outputs against the configured taxonomy."""
+
+    postprocessor = cast(
+        Any, YOLOAnchorlessDetectionPost.__new__(YOLOAnchorlessDetectionPost)
+    )
+    postprocessor.device = torch.device("cpu")
+    postprocessor.conf_thres = 0.25
+    postprocessor.nc = 2
+    detections = torch.tensor(
+        [[[0.0, 0.0, 1.0, 1.0, 0.9, invalid_class]]], dtype=torch.float32
+    )
+
+    with pytest.raises(ValueError, match="Decoded detection class IDs"):
+        postprocessor._final_detection_batches(detections)
+
+
 @pytest.mark.parametrize(
     ("post_cfg", "expected_type"),
     [

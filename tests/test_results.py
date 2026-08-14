@@ -119,6 +119,23 @@ def test_plot_converts_rgb_array_source_to_bgr() -> None:
     assert np.array_equal(rgb, np.array([[[255, 0, 0]]], dtype=np.uint8))
 
 
+def test_plot_normalizes_float_rgb_array_source_to_uint8_bgr() -> None:
+    """Plot normalized RGB arrays without rendering a near-black background."""
+
+    result = Results(
+        {"LetterBox": {"img_size": (1, 1)}},
+        {"task": "object_detection"},
+        [torch.zeros((0, 6), dtype=torch.float32)],
+    )
+    rgb = np.array([[[0.5, 0.0, 0.0]]], dtype=np.float32)
+
+    plotted = result.plot(rgb)
+
+    assert plotted is not None
+    assert np.array_equal(plotted, np.array([[[0, 0, 128]]], dtype=np.uint8))
+    assert np.array_equal(rgb, np.array([[[0.5, 0.0, 0.0]]], dtype=np.float32))
+
+
 def test_pose_plot_hides_low_visibility_keypoints_and_limbs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
