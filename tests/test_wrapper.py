@@ -1348,8 +1348,8 @@ def test_prepare_onnx_inputs_keeps_batched_nchw_layout() -> None:
     assert inputs["input"].dtype == np.float32
 
 
-def test_prepare_onnx_inputs_transposes_hwc_images() -> None:
-    """Convert single HWC images to batched NCHW arrays for ONNX runtime."""
+def test_prepare_onnx_inputs_transposes_static_square_hwc_images() -> None:
+    """Use the static ONNX channel axis to convert square HWC images to NCHW."""
 
     class _FakeInput:
         name = "input"
@@ -1367,10 +1367,14 @@ def test_prepare_onnx_inputs_transposes_hwc_images() -> None:
     engine.input_name = "input"
 
     image = np.zeros((224, 224, 3), dtype=np.float32)
+    image[..., 0] = 1.0
+    image[..., 1] = 2.0
+    image[..., 2] = 3.0
 
     inputs = engine._prepare_onnx_inputs(image)
 
     assert inputs["input"].shape == (1, 3, 224, 224)
+    assert inputs["input"][0, :, 0, 0].tolist() == [1.0, 2.0, 3.0]
 
 
 def test_final_onnx_detections_apply_confidence_threshold() -> None:

@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 import torch
 from mblt_vision.utils.postprocess import build_postprocess
+from mblt_vision.utils.postprocess import common as common_module
 from mblt_vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
 from mblt_vision.utils.postprocess.cls_post import ClsPost
 from mblt_vision.utils.postprocess.depth_post import DepthPost
@@ -29,6 +30,30 @@ from mblt_vision.utils.postprocess.yolo_dflfree_post import (
     YOLODFLFreeSegPost,
 )
 from mblt_vision.utils.postprocess.yolo_nmsfree_post import YOLONMSFreeDetectionPost
+
+
+def test_segmentation_rle_encoding_thresholds_resized_masks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep fractional bilinear boundaries from being truncated during RLE export."""
+
+    resized_mask = common_module.scale_masks(
+        torch.tensor([[[1.0, 0.0], [1.0, 0.0]]]), (3, 4)
+    )
+    captured_pixels: list[torch.Tensor] = []
+
+    def _capture_encode(pixels: torch.Tensor) -> list[list[int]]:
+        captured_pixels.append(pixels.clone())
+        return [[pixels.numel()]]
+
+    monkeypatch.setattr(common_module, "multi_encode", _capture_encode)
+
+    common_module._encode_segmentation_masks(resized_mask)
+
+    assert 0.5 < resized_mask[0, 0, 1] < 1.0
+    assert captured_pixels[0].view(1, 4, 3).permute(0, 2, 1).tolist() == [
+        [[1, 1, 0, 0]] * 3
+    ]
 
 
 @pytest.mark.parametrize(

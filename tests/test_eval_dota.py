@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
 from typing import cast
 
@@ -14,6 +15,63 @@ from mblt_vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     evaluate_dota_predictions,
 )
+
+eval_dota_module = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
+
+
+def test_eval_dota_rejects_truncated_postprocess_batches(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Do not silently omit ground truths when a batched model output is short."""
+
+    class _FakeProgress:
+        def __init__(self, iterable, **kwargs) -> None:
+            del kwargs
+            self._iterable = iterable
+
+        def __iter__(self):
+            return iter(self._iterable)
+
+        def set_postfix_str(self, value: str) -> None:
+            del value
+
+        def close(self) -> None:
+            return None
+
+    class _FakeModel:
+        post_cfg = {"task": "obb"}
+        preprocess_with_metadata = object()
+
+        def set_postprocess_thresholds(self, **kwargs) -> None:
+            del kwargs
+
+        def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
+            return inputs
+
+        def postprocess(self, outputs: torch.Tensor) -> SimpleNamespace:
+            del outputs
+            return SimpleNamespace(output=[torch.zeros((0, 7), dtype=torch.float32)])
+
+    class _FakeDataset:
+        def __len__(self) -> int:
+            return 2
+
+    batch = (
+        torch.zeros((2, 8, 8, 3), dtype=torch.float32),
+        [(8, 8), (8, 8)],
+        [None, None],
+        ("first", "second"),
+    )
+    monkeypatch.setattr(eval_dota_module, "CustomDOTAv1", lambda _: _FakeDataset())
+    monkeypatch.setattr(eval_dota_module, "get_dota_loader", lambda *args: [batch])
+    monkeypatch.setattr(eval_dota_module, "_load_ground_truths", lambda *args: {})
+    monkeypatch.setattr(eval_dota_module, "tqdm", _FakeProgress)
+
+    with pytest.raises(
+        ValueError,
+        match=r"DOTAv1 evaluation batch length mismatch: model outputs=1, input batch=2",
+    ):
+        eval_dota_module.eval_dota(_FakeModel(), str(tmp_path), batch_size=2)
 
 
 def test_normalized_difficult_flag_loads_as_an_ignored_region(tmp_path) -> None:

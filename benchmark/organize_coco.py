@@ -15,12 +15,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from mblt_vision.datasets import get_dataset_config
 from mblt_vision.utils.datasets import organize_coco
 
-DEFAULT_COCO_IMAGE_SOURCE = "http://images.cocodataset.org/zips/val2017.zip"
-DEFAULT_COCO_ANNOTATION_SOURCE = (
-    "http://images.cocodataset.org/annotations/annotations_trainval2017.zip"
-)
+COCO_DOWNLOAD_CONFIG = get_dataset_config("coco")["download"]
+DEFAULT_COCO_IMAGE_SOURCE = COCO_DOWNLOAD_CONFIG["images"]
+DEFAULT_COCO_ANNOTATION_SOURCE = COCO_DOWNLOAD_CONFIG["annotations"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Organize COCO dataset")

@@ -4,17 +4,32 @@ from __future__ import annotations
 
 import argparse
 import csv
+import runpy
 from pathlib import Path
 
 import pytest
 
 from benchmark import benchmark_vision_models, compare_benchmark_results
+from mblt_vision.datasets import get_dataset_config
 from mblt_vision.utils.evaluation import (
     DOTAResult,
     ImageNetResult,
     NYUDepthResult,
     SemanticSegmentationResult,
 )
+
+
+def test_direct_coco_organizer_uses_registry_download_defaults() -> None:
+    """Keep documented COCO organizer defaults aligned with accepted registry URLs."""
+
+    script = Path(__file__).parents[1] / "benchmark" / "organize_coco.py"
+    namespace = runpy.run_path(str(script))
+    download_config = get_dataset_config("coco")["download"]
+
+    assert namespace["DEFAULT_COCO_IMAGE_SOURCE"] == download_config["images"]
+    assert namespace["DEFAULT_COCO_ANNOTATION_SOURCE"] == download_config["annotations"]
+    assert namespace["DEFAULT_COCO_IMAGE_SOURCE"].startswith("https://")
+    assert namespace["DEFAULT_COCO_ANNOTATION_SOURCE"].startswith("https://")
 
 
 def test_benchmark_records_imagenet_metrics_in_primary_order(

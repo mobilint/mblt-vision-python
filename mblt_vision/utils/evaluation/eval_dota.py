@@ -594,6 +594,29 @@ def _nms_output_list(nms_output: Any) -> list[torch.Tensor]:
     raise TypeError(f"Unsupported OBB NMS output type: {type(nms_output).__name__}.")
 
 
+def _validate_evaluation_batch_lengths(
+    nms_outputs: list[torch.Tensor],
+    input_batch_size: int,
+    org_shape: Any,
+    ratio_pad: Any,
+    image_ids: Any,
+) -> None:
+    """Reject batches whose output or loader metadata omits an image."""
+
+    batch_lengths = {
+        "model outputs": len(nms_outputs),
+        "input batch": input_batch_size,
+        "original shapes": len(org_shape),
+        "ratio pads": len(ratio_pad),
+        "image IDs": len(image_ids),
+    }
+    if len(set(batch_lengths.values())) != 1:
+        details = ", ".join(
+            f"{name}={length}" for name, length in batch_lengths.items()
+        )
+        raise ValueError(f"DOTAv1 evaluation batch length mismatch: {details}.")
+
+
 def eval_dota(
     model: MBLT_Engine,
     data_path: str,
@@ -641,11 +664,20 @@ def eval_dota(
         inference_time += time() - tic
         nms_outs = model.postprocess(out_npu)
         input_shape = tuple(int(value) for value in input_npu.shape[1:-1])
+        nms_outputs = _nms_output_list(nms_outs.output)
+        _validate_evaluation_batch_lengths(
+            nms_outputs,
+            int(input_npu.shape[0]),
+            org_shape,
+            ratio_pad,
+            image_ids,
+        )
         for nms_out, image_id, image_shape, image_ratio_pad in zip(
-            _nms_output_list(nms_outs.output),
+            nms_outputs,
             image_ids,
             org_shape,
             ratio_pad,
+            strict=True,
         ):
             target = _ground_truth_to_input_space(
                 ground_truths[image_id],

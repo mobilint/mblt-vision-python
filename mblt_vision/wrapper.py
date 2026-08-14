@@ -747,36 +747,14 @@ class MBLT_Engine:
 
         expected_shape = self._require_onnx_session().get_inputs()[0].shape
         if len(expected_shape) == 4:
-            if x_np.ndim == 3:
-                first_channel_count = x_np.shape[0]
-                last_channel_count = x_np.shape[-1]
-            elif x_np.ndim == 4:
-                first_channel_count = x_np.shape[1]
-                last_channel_count = x_np.shape[-1]
-            else:
-                first_channel_count = None
-                last_channel_count = None
-
             expected_second_dim = expected_shape[1]
             expected_last_dim = expected_shape[-1]
-            second_matches_channels = isinstance(expected_second_dim, int) and (
-                expected_second_dim == first_channel_count
-                or expected_second_dim == last_channel_count
-            )
-            last_matches_channels = isinstance(expected_last_dim, int) and (
-                expected_last_dim == first_channel_count
-                or expected_last_dim == last_channel_count
-            )
-
             expected_layout = None
             expected_channels = None
-            if second_matches_channels and not last_matches_channels:
-                expected_layout = "nchw"
-                expected_channels = expected_second_dim
-            elif last_matches_channels and not second_matches_channels:
-                expected_layout = "nhwc"
-                expected_channels = expected_last_dim
-            elif isinstance(expected_second_dim, int) and expected_second_dim in {
+            # ONNX layout is encoded by the channel axis, not by a spatial
+            # dimension that happens to equal a channel count. This is crucial
+            # for square static inputs such as [1, 3, 224, 224].
+            if isinstance(expected_second_dim, int) and expected_second_dim in {
                 1,
                 2,
                 3,

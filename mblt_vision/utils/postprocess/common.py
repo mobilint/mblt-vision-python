@@ -1225,6 +1225,25 @@ def multi_encode(pixels: torch.Tensor) -> list[list[int]]:
     return counts
 
 
+def _encode_segmentation_masks(seg_result: torch.Tensor) -> list[dict[str, Any]]:
+    """Threshold resized instance masks and encode them as COCO RLE objects."""
+
+    h, w = seg_result.shape[1:3]
+    binary_masks = seg_result > 0.5
+    encoded_pixels = (
+        binary_masks.permute(0, 2, 1)
+        .contiguous()
+        .view(binary_masks.shape[0], h * w)
+        .to(torch.uint8)
+    )
+    counts = multi_encode(encoded_pixels)
+    if len(counts) != encoded_pixels.shape[0]:
+        raise RuntimeError(
+            f"Encoded {len(counts)} masks for a mask tensor batch of {encoded_pixels.shape[0]}."
+        )
+    return [{"size": [h, w], "counts": to_string(count)} for count in counts]
+
+
 def nmsout2eval(
     nms_outs: list[torch.Tensor] | torch.Tensor,
     img1_shape: tuple[int, int],
@@ -1337,25 +1356,9 @@ def nmsout2eval_seg(
         )
     ]
 
-    def mask_encode(seg_result: torch.Tensor) -> list[dict[str, Any]]:
-        extra = []
-        h, w = seg_result.shape[1:3]
-        seg_result = (
-            seg_result.permute(0, 2, 1)
-            .contiguous()
-            .view(seg_result.shape[0], h * w)
-            .byte()
-        )
-        counts = multi_encode(seg_result)
-        if len(counts) != seg_result.shape[0]:
-            raise RuntimeError(
-                f"Encoded {len(counts)} masks for a mask tensor batch of {seg_result.shape[0]}."
-            )
-        for c in counts:
-            extra.append({"size": [h, w], "counts": to_string(c)})
-        return extra
-
-    extra_list = [mask_encode(seg_result) for seg_result in scaled_seg_results]
+    extra_list = [
+        _encode_segmentation_masks(seg_result) for seg_result in scaled_seg_results
+    ]
     for labels, boxes, scores, extra in zip(
         labels_list, boxes_list, scores_list, extra_list
     ):
