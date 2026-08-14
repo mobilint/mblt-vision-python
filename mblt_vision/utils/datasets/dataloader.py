@@ -246,6 +246,10 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
             raise ValueError(
                 f"NYU Depth target must contain only finite values: {depth_path}"
             )
+        if bool((depth < 0).any()):
+            raise ValueError(
+                f"NYU Depth target must not contain negative values: {depth_path}"
+            )
         return (
             cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
             depth,

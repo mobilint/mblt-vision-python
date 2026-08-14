@@ -193,7 +193,13 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         return [process_conversion(xi) for xi in x_list]
 
     def _nms_single(
-        self, xi: torch.Tensor, max_det: int, max_nms: int, max_wh: int
+        self,
+        xi: torch.Tensor,
+        max_det: int,
+        max_nms: int,
+        max_wh: int,
+        *,
+        multi_label: bool,
     ) -> torch.Tensor:
         """Apply anchor-based NMS to a single decoded image tensor."""
         mi = 5 + self.nc  # mask index
@@ -201,13 +207,19 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
             return xi.new_zeros((0, 6 + self.n_extra))
 
         scores = xi[:, 5:mi] * xi[:, 4:5]
-        match_index = (scores > self.conf_thres).nonzero(as_tuple=False)
-        if match_index.numel() == 0:
-            return xi.new_zeros((0, 6 + self.n_extra))
-
-        i = match_index[:, 0]
-        j = match_index[:, 1]
-        rows = xi[i]
+        if multi_label:
+            match_index = (scores > self.conf_thres).nonzero(as_tuple=False)
+            if match_index.numel() == 0:
+                return xi.new_zeros((0, 6 + self.n_extra))
+            i, j = match_index[:, 0], match_index[:, 1]
+            rows = xi[i]
+            row_scores = scores[i, j]
+        else:
+            row_scores, j = scores.max(dim=1)
+            keep = row_scores > self.conf_thres
+            if not bool(keep.any()):
+                return xi.new_zeros((0, 6 + self.n_extra))
+            rows, row_scores, j = xi[keep], row_scores[keep], j[keep]
         boxes_xywh = rows[:, :4]
         out = torch.empty(
             (rows.shape[0], 6 + self.n_extra), dtype=rows.dtype, device=rows.device
@@ -216,7 +228,7 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         out[:, 1] = boxes_xywh[:, 1] - boxes_xywh[:, 3] / 2
         out[:, 2] = boxes_xywh[:, 0] + boxes_xywh[:, 2] / 2
         out[:, 3] = boxes_xywh[:, 1] + boxes_xywh[:, 3] / 2
-        out[:, 4] = scores[i, j]
+        out[:, 4] = row_scores
         out[:, 5] = j.to(rows.dtype)
         if self.n_extra > 0:
             out[:, 6:] = rows[:, mi:]
@@ -232,6 +244,7 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         max_det: int = 300,
         max_nms: int = 30000,
         max_wh: int = 7680,
+        multi_label: bool = False,
     ) -> list[torch.Tensor]:
         """
         Perform Non-Maximum Suppression (NMS) on the decoded detections.
@@ -247,13 +260,32 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         """
         if isinstance(x, list):
             return [
-                self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh)
+                self._nms_single(
+                    xi,
+                    max_det=max_det,
+                    max_nms=max_nms,
+                    max_wh=max_wh,
+                    multi_label=multi_label,
+                )
                 for xi in x
             ]
         return [
-            self._nms_single(xi, max_det=max_det, max_nms=max_nms, max_wh=max_wh)
+            self._nms_single(
+                xi,
+                max_det=max_det,
+                max_nms=max_nms,
+                max_wh=max_wh,
+                multi_label=multi_label,
+            )
             for xi in x
         ]
+
+    def nms_multilabel(
+        self, x: torch.Tensor | list[torch.Tensor]
+    ) -> list[torch.Tensor]:
+        """Perform Ultralytics-compatible multi-label NMS for validation."""
+
+        return self.nms(x, multi_label=True)
 
     def make_anchor_grid(self) -> None:
         """

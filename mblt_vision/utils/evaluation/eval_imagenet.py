@@ -13,6 +13,7 @@ import torch
 from tqdm import tqdm
 
 from ..datasets import CustomImageFolder, get_imagenet_loader
+from ..datasets.readiness import IMAGENET_SYNSET_ORDER, IMAGENET_SYNSETS
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -57,6 +58,18 @@ def eval_imagenet_metrics(
             f"got {dataset_name!r}."
         )
     dataset = CustomImageFolder(data_path)
+    unknown_synsets = set(dataset.classes) - IMAGENET_SYNSETS
+    if unknown_synsets:
+        raise ValueError(
+            "ImageNet evaluation found non-canonical synset directories: "
+            f"{', '.join(sorted(unknown_synsets)[:5])}."
+        )
+    dataset.class_to_idx = {
+        synset: index
+        for index, synset in enumerate(IMAGENET_SYNSET_ORDER)
+        if synset in dataset.class_to_idx
+    }
+    dataset.make_dataset()
     dataloader = get_imagenet_loader(dataset, batch_size, model.preprocess)
     num_data = len(dataset)
     total_iter = math.ceil(num_data / batch_size)

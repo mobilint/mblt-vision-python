@@ -19,6 +19,12 @@ def test_imagenet_evaluation_rejects_truncated_classification_batches(
     """Do not broadcast one classification row across a multi-image label batch."""
 
     class _FakeDataset:
+        classes = ["n00000000", "n00000001"]
+        class_to_idx = {"n00000000": 0, "n00000001": 1}
+
+        def make_dataset(self) -> None:
+            return None
+
         def __len__(self) -> int:
             return 2
 
@@ -57,6 +63,12 @@ def test_imagenet_evaluation_rejects_truncated_classification_batches(
         eval_imagenet_module, "get_imagenet_loader", lambda *args: [batch]
     )
     monkeypatch.setattr(eval_imagenet_module, "tqdm", _FakeProgress)
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSET_ORDER", ("n00000000", "n00000001")
+    )
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSETS", frozenset({"n00000000", "n00000001"})
+    )
 
     with pytest.raises(
         ValueError,
@@ -65,6 +77,45 @@ def test_imagenet_evaluation_rejects_truncated_classification_batches(
         eval_imagenet_module.eval_imagenet_metrics(
             _FakeModel(), "/dataset", batch_size=2
         )
+
+
+def test_imagenet_evaluation_preserves_canonical_synset_indices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not renumber a partial ImageNet directory tree by local sort order."""
+
+    dataset = SimpleNamespace(
+        classes=["n00000001"],
+        class_to_idx={"n00000001": 0},
+        make_dataset=lambda: None,
+    )
+    monkeypatch.setattr(eval_imagenet_module, "CustomImageFolder", lambda _: dataset)
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSET_ORDER", ("n00000000", "n00000001")
+    )
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSETS", frozenset({"n00000000", "n00000001"})
+    )
+
+    class _StopAfterClassMapping(Exception):
+        pass
+
+    def _stop_after_mapping(*args: object) -> object:
+        del args
+        raise _StopAfterClassMapping
+
+    monkeypatch.setattr(
+        eval_imagenet_module, "get_imagenet_loader", _stop_after_mapping
+    )
+
+    with pytest.raises(_StopAfterClassMapping):
+        eval_imagenet_module.eval_imagenet_metrics(
+            SimpleNamespace(post_cfg={"dataset": "imagenet"}, preprocess=object()),
+            "/dataset",
+            batch_size=1,
+        )
+
+    assert dataset.class_to_idx == {"n00000001": 1}
 
 
 def test_imagenet_evaluation_rejects_wrong_model_taxonomy() -> None:

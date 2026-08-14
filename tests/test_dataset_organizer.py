@@ -72,7 +72,7 @@ def test_dotav1_organizer_rejects_truncated_raw_annotation_rows(
     Image.new("RGB", (100, 50)).save(image_path)
     source_path = tmp_path / "source.txt"
     source_path.write_text(
-        "imagesource:GoogleEarth\n" "gsd:0.5\n" "0 0 20 0 20 20 0 plane 0\n",
+        "imagesource:GoogleEarth\ngsd:0.5\n0 0 20 0 20 20 0 plane 0\n",
         encoding="utf-8",
     )
 
@@ -530,6 +530,7 @@ def test_construct_imagenet_replaces_stale_output(
         return True
 
     monkeypatch.setattr(organizer, "dataset_ready", _dataset_ready)
+    monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
 
     output_dir = tmp_path / "imagenet"
     (output_dir / "stale-class").mkdir(parents=True)
@@ -577,6 +578,7 @@ def test_construct_coco_replaces_stale_output(
         return True
 
     monkeypatch.setattr(organizer, "dataset_ready", _dataset_ready)
+    monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
 
     output_dir = tmp_path / "coco"
     (output_dir / "val2017").mkdir(parents=True)
@@ -612,6 +614,7 @@ def test_construct_widerface_replaces_stale_output(
         return True
 
     monkeypatch.setattr(organizer, "dataset_ready", _dataset_ready)
+    monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
 
     output_dir = tmp_path / "widerface"
     (output_dir / "images" / "stale-event").mkdir(parents=True)
@@ -878,7 +881,11 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
 
 @pytest.mark.parametrize(
     "depth",
-    [np.array([[np.nan]], dtype=np.float32), np.array([[1]], dtype=np.complex64)],
+    [
+        np.array([[np.nan]], dtype=np.float32),
+        np.array([[1]], dtype=np.complex64),
+        np.array([[-1]], dtype=np.float32),
+    ],
 )
 def test_staged_nyu_depth_validation_rejects_malformed_payloads(
     tmp_path: Path, depth: np.ndarray
@@ -892,8 +899,36 @@ def test_staged_nyu_depth_validation_rejects_malformed_payloads(
     Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
     np.save(depth_dir / "sample.npy", depth)
 
-    with pytest.raises(ValueError, match="real numeric dtype|finite values"):
+    with pytest.raises(
+        ValueError, match="real numeric dtype|finite values|negative values"
+    ):
         organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+@pytest.mark.parametrize("dataset", ["ade20k", "dotav1"])
+def test_staged_payload_validation_rejects_corrupt_files(
+    tmp_path: Path, dataset: str
+) -> None:
+    """Do not replace a valid cache with structurally complete corrupt data."""
+
+    image_dir = tmp_path / "images"
+    image_dir.mkdir()
+    if dataset == "ade20k":
+        annotation_dir = tmp_path / "annotations"
+        annotation_dir.mkdir()
+        (image_dir / "ADE_val_00000001.jpg").write_bytes(b"not an image")
+        (annotation_dir / "ADE_val_00000001.png").write_bytes(b"not a PNG")
+    else:
+        Image.new("RGB", (1, 1)).save(image_dir / "P0001.png")
+        label_dir = tmp_path / "labels" / "val"
+        original_label_dir = tmp_path / "labels" / "val_original"
+        label_dir.mkdir(parents=True)
+        original_label_dir.mkdir()
+        (label_dir / "P0001.txt").write_text("bad label", encoding="utf-8")
+        (original_label_dir / "P0001.txt").write_text("bad label", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unreadable|Malformed staged DOTAv1"):
+        organizer._validate_staged_payloads(tmp_path, dataset)
 
 
 def _create_ade20k_source(tmp_path: Path) -> Path:
@@ -916,6 +951,7 @@ def test_organize_ade20k_extracts_flat_validation_layout(
 
     monkeypatch.setattr(organizer, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
     archive_path = tmp_path / "ADEChallengeData2016.zip"
     with ZipFile(archive_path, "w") as archive:
         archive.writestr(
@@ -1210,6 +1246,7 @@ def test_organize_cityscapes_materializes_lossless_validation_pairs(
 
     monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 2)
     monkeypatch.setattr(organizer, "dataset_ready", lambda *_: True)
+    monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
     sample_ids = ["frankfurt_000000_000294", "munster_000001_000019"]
     image_archive, annotation_archive = _write_cityscapes_archives(tmp_path, sample_ids)
     output_dir = tmp_path / "cityscapes"
@@ -1346,6 +1383,7 @@ def test_organize_cityscapes_rolls_back_failed_atomic_replacement(
 
     monkeypatch.setattr(organizer, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
     monkeypatch.setattr(organizer, "dataset_ready", lambda *_: True)
+    monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
     image_archive, annotation_archive = _write_cityscapes_archives(
         tmp_path, ["lindau_000000_000019"]
     )

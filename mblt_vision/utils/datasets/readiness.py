@@ -36,12 +36,13 @@ CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(
     r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$"
 )
 CITYSCAPES_VALIDATION_CITY_COUNTS = {"frankfurt": 267, "lindau": 59, "munster": 174}
-IMAGENET_SYNSETS = frozenset(
+IMAGENET_SYNSET_ORDER = tuple(
     files("mblt_vision.datasets")
     .joinpath("imagenet_synsets.txt")
     .read_text(encoding="utf-8")
     .splitlines()
 )
+IMAGENET_SYNSETS = frozenset(IMAGENET_SYNSET_ORDER)
 COCO_ANNOTATION_COUNTS = {
     "instances_val2017.json": 36781,
     "person_keypoints_val2017.json": 11004,
@@ -103,6 +104,16 @@ def _files_by_stem(
     ]
     files = {path.stem: path for path in paths}
     return files if len(files) == len(paths) else None
+
+
+def _has_positive_polygon_area(polygon: list[int | float]) -> bool:
+    """Return whether a finite flat polygon encloses non-zero signed area."""
+
+    points = np.asarray(polygon, dtype=np.float64).reshape(-1, 2)
+    signed_double_area = np.dot(points[:, 0], np.roll(points[:, 1], -1)) - np.dot(
+        points[:, 1], np.roll(points[:, 0], -1)
+    )
+    return bool(abs(signed_double_area) > 0)
 
 
 def _imagenet_ready(root: Path) -> bool:
@@ -243,6 +254,18 @@ def _load_coco_image_names(
                 or bbox[3] <= 0
             ):
                 return None
+        area = record.get("area")
+        iscrowd = record.get("iscrowd")
+        if (
+            not isinstance(area, (int, float))
+            or isinstance(area, bool)
+            or not np.isfinite(area)
+            or area <= 0
+            or not isinstance(iscrowd, int)
+            or isinstance(iscrowd, bool)
+            or iscrowd not in {0, 1}
+        ):
+            return None
         if task == "instance_segmentation":
             segmentation = record.get("segmentation")
             if isinstance(segmentation, list):
@@ -256,6 +279,7 @@ def _load_coco_image_names(
                         or not np.isfinite(value)
                         for value in polygon
                     )
+                    or not _has_positive_polygon_area(polygon)
                     for polygon in segmentation
                 ):
                     return None
@@ -464,6 +488,8 @@ def _widerface_difficulty_metadata_ready(
                 if keep_indices.size and (
                     int(keep_indices.min()) < 1 or int(keep_indices.max()) > face_count
                 ):
+                    return False
+                if len(np.unique(keep_indices)) != keep_indices.size:
                     return False
     return True
 

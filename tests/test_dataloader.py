@@ -128,6 +128,20 @@ def test_dense_datasets_reject_duplicate_target_stems(
         dataset_class(str(tmp_path))
 
 
+def test_nyu_dataset_rejects_negative_depth_targets(tmp_path: Path) -> None:
+    """Do not silently exclude corrupted negative depths during evaluation."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    assert cv2.imwrite(str(image_dir / "sample.jpg"), np.zeros((1, 1, 3), np.uint8))
+    np.save(depth_dir / "sample.npy", np.array([[-1]], dtype=np.float32))
+
+    with pytest.raises(ValueError, match="must not contain negative values"):
+        CustomNYUDepth(str(tmp_path))[0]
+
+
 def test_cityscapes_dataset_rejects_unknown_source_ids(tmp_path: Path) -> None:
     """Reject corrupted Cityscapes labels instead of remapping them to ignore."""
 

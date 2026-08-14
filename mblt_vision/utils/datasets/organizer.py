@@ -150,12 +150,169 @@ def _validate_staged_dataset(
         ValueError: If the staged dataset is incomplete or has mismatched identity.
     """
 
-    if all(dataset_ready(staged_output_dir, task, dataset) for task in tasks):
-        return
-    raise ValueError(
-        f"Staged {dataset} validation dataset is incomplete or has mismatched metadata; "
-        "the existing dataset cache was not replaced."
-    )
+    if not all(dataset_ready(staged_output_dir, task, dataset) for task in tasks):
+        raise ValueError(
+            f"Staged {dataset} validation dataset is incomplete or has mismatched metadata; "
+            "the existing dataset cache was not replaced."
+        )
+    _validate_staged_payloads(Path(staged_output_dir), dataset)
+
+
+def _validate_staged_payloads(staged_root: Path, dataset: str) -> None:
+    """Decode staged data files before a structurally valid cache is replaced."""
+
+    image_roots = {
+        "imagenet": (staged_root,),
+        "coco": (staged_root / "val2017",),
+        "widerface": (staged_root / "images",),
+        "dotav1": (staged_root / "images",),
+        "ade20k": (staged_root / "images",),
+        "cityscapes": (staged_root / "images",),
+    }
+    for image_root in image_roots.get(dataset, ()):
+        for image_path in image_root.rglob("*"):
+            if image_path.is_file() and image_path.suffix.lower() in {
+                ".bmp",
+                ".jpeg",
+                ".jpg",
+                ".png",
+                ".tif",
+                ".tiff",
+                ".webp",
+            }:
+                if cv2.imread(str(image_path), cv2.IMREAD_COLOR) is None:
+                    raise ValueError(
+                        f"Staged {dataset} image is unreadable: {image_path}."
+                    )
+
+    if dataset in {"ade20k", "cityscapes"}:
+        _validate_staged_semantic_masks(staged_root, dataset)
+    elif dataset == "dotav1":
+        _validate_staged_dotav1_labels(staged_root)
+
+
+def _validate_staged_semantic_masks(staged_root: Path, dataset: str) -> None:
+    """Validate decoded semantic targets against their paired staged images."""
+
+    image_dir = staged_root / "images"
+    annotation_dir = staged_root / "annotations"
+    for annotation_path in sorted(annotation_dir.glob("*.png")):
+        image_path = next(
+            (
+                candidate
+                for candidate in image_dir.glob(f"{annotation_path.stem}.*")
+                if candidate.suffix.lower() in {".jpg", ".jpeg", ".png"}
+            ),
+            None,
+        )
+        if image_path is None:
+            raise ValueError(
+                f"Staged {dataset} target has no paired image: {annotation_path}."
+            )
+        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        try:
+            with Image.open(annotation_path) as annotation_image:
+                annotation = np.asarray(annotation_image)
+        except OSError as exc:
+            raise ValueError(
+                f"Staged {dataset} annotation is unreadable: {annotation_path}."
+            ) from exc
+        if dataset == "cityscapes" and annotation.ndim == 3:
+            if (
+                annotation.shape[2] not in {3, 4}
+                or not np.array_equal(annotation[..., 0], annotation[..., 1])
+                or not np.array_equal(annotation[..., 0], annotation[..., 2])
+            ):
+                raise ValueError(
+                    f"Staged Cityscapes annotation must be grayscale or RGB-grayscale: {annotation_path}."
+                )
+            annotation = annotation[..., 0]
+        if image is None or annotation.ndim != 2 or annotation.shape != image.shape[:2]:
+            raise ValueError(
+                f"Staged {dataset} image and annotation geometry is invalid: {annotation_path}."
+            )
+        if dataset == "ade20k" and (
+            annotation.dtype != np.uint8
+            or (annotation.size and int(annotation.max()) > 150)
+        ):
+            raise ValueError(
+                f"Staged ADE20K annotation must be an 8-bit mask with values in [0, 150]: {annotation_path}."
+            )
+
+
+def _validate_staged_dotav1_labels(staged_root: Path) -> None:
+    """Validate both DOTAv1 label representations before cache replacement."""
+
+    label_dirs = {
+        "normalized": staged_root / "labels" / "val",
+        "original": staged_root / "labels" / "val_original",
+    }
+    valid_indices = set(DOTAV1_CLASS_TO_IDX.values())
+    for kind, label_dir in label_dirs.items():
+        for label_path in sorted(label_dir.glob("*.txt")):
+            for line_number, line in enumerate(
+                label_path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                fields = line.split()
+                if not fields or (
+                    kind == "original"
+                    and (
+                        fields[0].startswith("imagesource:")
+                        or fields[0].startswith("gsd:")
+                    )
+                ):
+                    continue
+                min_fields = 9 if kind == "normalized" else 10
+                if len(fields) < min_fields:
+                    raise ValueError(
+                        f"Malformed staged DOTAv1 {kind} annotation at "
+                        f"{label_path}:{line_number}: expected at least {min_fields} fields."
+                    )
+                try:
+                    coordinates = [
+                        float(value)
+                        for value in (
+                            fields[1:9] if kind == "normalized" else fields[:8]
+                        )
+                    ]
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Malformed staged DOTAv1 coordinates at {label_path}:{line_number}."
+                    ) from exc
+                if not all(math.isfinite(value) for value in coordinates):
+                    raise ValueError(
+                        f"Staged DOTAv1 coordinates must be finite at {label_path}:{line_number}."
+                    )
+                points = np.asarray(coordinates, dtype=np.float64).reshape(4, 2)
+                signed_double_area = np.dot(
+                    points[:, 0], np.roll(points[:, 1], -1)
+                ) - np.dot(points[:, 1], np.roll(points[:, 0], -1))
+                if abs(signed_double_area) <= 0:
+                    raise ValueError(
+                        f"Staged DOTAv1 polygon must have positive area at {label_path}:{line_number}."
+                    )
+                if kind == "normalized":
+                    try:
+                        class_index = int(fields[0])
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Malformed staged DOTAv1 class index at {label_path}:{line_number}."
+                        ) from exc
+                    difficulty = fields[9] if len(fields) >= 10 else "0"
+                    if class_index not in valid_indices:
+                        raise ValueError(
+                            f"Unsupported staged DOTAv1 class index at {label_path}:{line_number}."
+                        )
+                else:
+                    difficulty = fields[9]
+                    if fields[8] not in DOTAV1_CLASS_TO_IDX:
+                        raise ValueError(
+                            f"Unsupported staged DOTAv1 class at {label_path}:{line_number}."
+                        )
+                if difficulty not in {"0", "1", "2"}:
+                    raise ValueError(
+                        f"Unsupported staged DOTAv1 difficulty flag at {label_path}:{line_number}."
+                    )
 
 
 class _GoogleDriveDownloadEntry(Protocol):
@@ -977,6 +1134,10 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
             raise ValueError(
                 f"Staged NYU Depth target must contain only finite values: {depth_path}."
             )
+        if bool((depth < 0).any()):
+            raise ValueError(
+                f"Staged NYU Depth target must not contain negative values: {depth_path}."
+            )
 
 
 def organize_nyu_depth(
@@ -1307,6 +1468,7 @@ def organize_cityscapes(
             raise ValueError(
                 "Staged Cityscapes validation data failed identity and completeness checks."
             )
+        _validate_staged_payloads(Path(staging_dir), "cityscapes")
 
         replacements = (
             (staged_image_dir, os.path.join(output_dir, "images")),

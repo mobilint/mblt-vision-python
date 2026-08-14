@@ -2646,6 +2646,34 @@ def test_anchorless_prediction_nms_keeps_best_class_per_box() -> None:
     assert torch.equal(result[0][:, 5], torch.tensor([0.0, 1.0]))
 
 
+def test_anchor_prediction_nms_keeps_best_class_per_box() -> None:
+    """Keep ordinary anchor-model prediction output single-label per box."""
+
+    postprocessor = cast(
+        YOLODetectionPostBase,
+        build_postprocess(
+            {"LetterBox": {"img_size": [640, 640]}},
+            {
+                "task": "object_detection",
+                "anchors": [[10, 13, 16, 30, 33, 23]],
+                "nl": 1,
+                "nc": 2,
+                "conf_thres": 0.25,
+                "iou_thres": 0.7,
+            },
+        ),
+    )
+    decoded = torch.tensor(
+        [[50.0, 50.0, 20.0, 20.0, 1.0, 0.9, 0.8]], dtype=torch.float32
+    )
+
+    prediction = postprocessor.nms([decoded])
+    validation = postprocessor.nms_multilabel([decoded])
+
+    assert prediction[0].shape == (1, 6)
+    assert validation[0].shape == (2, 6)
+
+
 @pytest.mark.parametrize(
     ("layout", "candidate_count"),
     [

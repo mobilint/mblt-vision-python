@@ -61,6 +61,8 @@ class NYUDepthMetricAccumulator:
             )
         if not np.isfinite(target).all():
             raise ValueError("NYU Depth target contains non-finite values.")
+        if (target < 0).any():
+            raise ValueError("NYU Depth target contains negative values.")
         valid = (
             np.isfinite(target) & (target > self.MIN_DEPTH) & (target < self.MAX_DEPTH)
         )
