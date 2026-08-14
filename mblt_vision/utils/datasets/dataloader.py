@@ -19,6 +19,21 @@ from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 from .readiness import IMAGE_SUFFIXES
 
 
+def _unique_paths_by_stem(
+    directory: str, suffixes: tuple[str, ...], description: str
+) -> dict[str, str]:
+    """Return supported direct-child files keyed by unique case-preserving stems."""
+
+    names = [name for name in os.listdir(directory) if name.lower().endswith(suffixes)]
+    stems = [os.path.splitext(name)[0] for name in names]
+    if len(stems) != len(set(stems)):
+        raise ValueError(f"{description} contain duplicate filename stems.")
+    return {
+        stem: os.path.join(directory, name)
+        for stem, name in zip(stems, names, strict=True)
+    }
+
+
 class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
     """Custom COCO dataset class for loading images and metadata.
 
@@ -179,23 +194,10 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
             raise FileNotFoundError(
                 f"NYU Depth requires images/ and depth/ directories under: {root}"
             )
-        image_names = [
-            name
-            for name in os.listdir(image_root)
-            if name.lower().endswith(self.IMG_EXTENSIONS)
-        ]
-        image_stems = [os.path.splitext(name)[0] for name in image_names]
-        if len(image_stems) != len(set(image_stems)):
-            raise ValueError("NYU Depth images contain duplicate filename stems.")
-        images = {
-            stem: os.path.join(image_root, name)
-            for stem, name in zip(image_stems, image_names, strict=True)
-        }
-        depths = {
-            os.path.splitext(name)[0]: os.path.join(depth_root, name)
-            for name in os.listdir(depth_root)
-            if name.lower().endswith(".npy")
-        }
+        images = _unique_paths_by_stem(
+            image_root, self.IMG_EXTENSIONS, "NYU Depth images"
+        )
+        depths = _unique_paths_by_stem(depth_root, (".npy",), "NYU Depth depth maps")
         missing_depths, missing_images = (
             sorted(set(images) - set(depths)),
             sorted(set(depths) - set(images)),
@@ -329,23 +331,10 @@ class CustomADE20K(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]])
             raise FileNotFoundError(
                 f"ADE20K requires images/ and annotations/ directories under: {root}"
             )
-        image_names = [
-            name
-            for name in os.listdir(image_root)
-            if name.lower().endswith(self.IMG_EXTENSIONS)
-        ]
-        image_stems = [os.path.splitext(name)[0] for name in image_names]
-        if len(image_stems) != len(set(image_stems)):
-            raise ValueError("ADE20K images contain duplicate filename stems.")
-        images = {
-            stem: os.path.join(image_root, name)
-            for stem, name in zip(image_stems, image_names, strict=True)
-        }
-        annotations = {
-            os.path.splitext(name)[0]: os.path.join(annotation_root, name)
-            for name in os.listdir(annotation_root)
-            if name.lower().endswith(".png")
-        }
+        images = _unique_paths_by_stem(image_root, self.IMG_EXTENSIONS, "ADE20K images")
+        annotations = _unique_paths_by_stem(
+            annotation_root, (".png",), "ADE20K annotations"
+        )
         missing_annotations = sorted(set(images) - set(annotations))
         missing_images = sorted(set(annotations) - set(images))
         if missing_annotations or missing_images:
@@ -487,23 +476,12 @@ class CustomCityscapes(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, st
             raise FileNotFoundError(
                 f"Cityscapes requires images/ and annotations/ directories under: {root}"
             )
-        image_names = [
-            name
-            for name in os.listdir(image_root)
-            if name.lower().endswith(self.IMG_EXTENSIONS)
-        ]
-        image_stems = [os.path.splitext(name)[0] for name in image_names]
-        if len(image_stems) != len(set(image_stems)):
-            raise ValueError("Cityscapes images contain duplicate filename stems.")
-        images = {
-            stem: os.path.join(image_root, name)
-            for stem, name in zip(image_stems, image_names, strict=True)
-        }
-        annotations = {
-            os.path.splitext(name)[0]: os.path.join(annotation_root, name)
-            for name in os.listdir(annotation_root)
-            if name.lower().endswith(".png")
-        }
+        images = _unique_paths_by_stem(
+            image_root, self.IMG_EXTENSIONS, "Cityscapes images"
+        )
+        annotations = _unique_paths_by_stem(
+            annotation_root, (".png",), "Cityscapes annotations"
+        )
         missing_annotations = sorted(set(images) - set(annotations))
         missing_images = sorted(set(annotations) - set(images))
         if missing_annotations or missing_images:

@@ -132,7 +132,9 @@ def _imagenet_ready(root: Path) -> bool:
     return len(image_names) == IMAGENET_CLASS_COUNT * IMAGENET_IMAGES_PER_CLASS
 
 
-def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
+def _load_coco_image_names(
+    annotation_path: Path, task: str = "object_detection"
+) -> set[str] | None:
     """Load unique validation image filenames from a COCO annotation file."""
 
     try:
@@ -223,7 +225,10 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
             or category_id not in category_ids
         ):
             return None
-        if annotation_path.name == "instances_val2017.json":
+        if annotation_path.name in {
+            "instances_val2017.json",
+            "person_keypoints_val2017.json",
+        }:
             bbox = record.get("bbox")
             if (
                 not isinstance(bbox, list)
@@ -236,6 +241,71 @@ def _load_coco_image_names(annotation_path: Path) -> set[str] | None:
                 )
                 or bbox[2] <= 0
                 or bbox[3] <= 0
+            ):
+                return None
+        if task == "instance_segmentation":
+            segmentation = record.get("segmentation")
+            if isinstance(segmentation, list):
+                if not segmentation or any(
+                    not isinstance(polygon, list)
+                    or len(polygon) < 6
+                    or len(polygon) % 2
+                    or any(
+                        not isinstance(value, (int, float))
+                        or isinstance(value, bool)
+                        or not np.isfinite(value)
+                        for value in polygon
+                    )
+                    for polygon in segmentation
+                ):
+                    return None
+            elif isinstance(segmentation, dict):
+                counts = segmentation.get("counts")
+                size = segmentation.get("size")
+                if (
+                    not isinstance(size, list)
+                    or len(size) != 2
+                    or any(
+                        not isinstance(value, int)
+                        or isinstance(value, bool)
+                        or value <= 0
+                        for value in size
+                    )
+                    or not isinstance(counts, (str, list))
+                    or (
+                        isinstance(counts, list)
+                        and any(
+                            not isinstance(value, int)
+                            or isinstance(value, bool)
+                            or value < 0
+                            for value in counts
+                        )
+                    )
+                ):
+                    return None
+            else:
+                return None
+        if task == "pose_estimation":
+            keypoints = record.get("keypoints")
+            num_keypoints = record.get("num_keypoints")
+            if (
+                not isinstance(keypoints, list)
+                or len(keypoints) != 51
+                or any(
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or not np.isfinite(value)
+                    for value in keypoints
+                )
+                or not isinstance(num_keypoints, int)
+                or isinstance(num_keypoints, bool)
+                or not 0 <= num_keypoints <= 17
+                or any(
+                    keypoints[index] not in {0, 1, 2}
+                    for index in range(2, len(keypoints), 3)
+                )
+                or num_keypoints
+                != sum(keypoints[index] > 0 for index in range(2, len(keypoints), 3))
             ):
                 return None
         annotation_ids.append(annotation_id)
@@ -252,7 +322,7 @@ def _coco_ready(root: Path, task: str) -> bool:
         if task == "pose_estimation"
         else "instances_val2017.json"
     )
-    annotation_names = _load_coco_image_names(root / annotation_name)
+    annotation_names = _load_coco_image_names(root / annotation_name, task)
     if annotation_names is None:
         return False
     image_dir = root / "val2017"
@@ -373,6 +443,7 @@ def _widerface_difficulty_metadata_ready(
                     if (
                         face_array.ndim != 2
                         or face_array.shape[1] != 4
+                        or len(face_array) == 0
                         or not np.isfinite(face_array).all()
                         or (face_array[:, 2:] <= 0).any()
                     ):

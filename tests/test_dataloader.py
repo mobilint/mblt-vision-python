@@ -17,6 +17,7 @@ from mblt_vision.utils.datasets.dataloader import (
     CustomCityscapes,
     CustomDOTAv1,
     CustomImageFolder,
+    CustomNYUDepth,
     CustomWiderFaceDataset,
 )
 
@@ -99,6 +100,32 @@ def test_dota_dataset_rejects_duplicate_image_stems(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="duplicate filename stems"):
         CustomDOTAv1(str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("dataset_class", "target_dir", "target_names"),
+    [
+        (CustomNYUDepth, "depth", ("sample.npy", "sample.NPY")),
+        (CustomADE20K, "annotations", ("sample.png", "sample.PNG")),
+        (CustomCityscapes, "annotations", ("sample.png", "sample.PNG")),
+    ],
+)
+def test_dense_datasets_reject_duplicate_target_stems(
+    tmp_path: Path,
+    dataset_class: type[CustomNYUDepth] | type[CustomADE20K] | type[CustomCityscapes],
+    target_dir: str,
+    target_names: tuple[str, str],
+) -> None:
+    """Do not let case variants silently overwrite a dense target mapping."""
+
+    (tmp_path / "images").mkdir()
+    (tmp_path / target_dir).mkdir()
+    (tmp_path / "images" / "sample.jpg").write_bytes(b"image")
+    for target_name in target_names:
+        (tmp_path / target_dir / target_name).write_bytes(b"target")
+
+    with pytest.raises(ValueError, match="duplicate filename stems"):
+        dataset_class(str(tmp_path))
 
 
 def test_cityscapes_dataset_rejects_unknown_source_ids(tmp_path: Path) -> None:

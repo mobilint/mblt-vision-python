@@ -601,7 +601,14 @@ class MBLT_Engine:
                 onnx_model.create()
                 self._onnx_session = onnx_model.session
                 self.model = self._onnx_session
-                self.input_name = self._onnx_session.get_inputs()[0].name
+                onnx_inputs = self._onnx_session.get_inputs()
+                if len(onnx_inputs) != 1:
+                    raise ValueError(
+                        "ONNX models must declare exactly one input because "
+                        "MBLT_Engine accepts one preprocessed tensor; got "
+                        f"{len(onnx_inputs)} inputs."
+                    )
+                self.input_name = onnx_inputs[0].name
                 self.output_names = [o.name for o in self._onnx_session.get_outputs()]
             else:
                 mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())

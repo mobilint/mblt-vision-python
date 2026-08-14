@@ -426,6 +426,14 @@ class YOLODetectionPostBase(PostBase):
                     "Decoded detection boxes must have "
                     f"{geometry_description} after confidence filtering."
                 )
+            if getattr(self, "task", "object_detection") == "pose_estimation":
+                keypoint_confidences = retained[:, 8::3]
+                if not bool(
+                    ((keypoint_confidences >= 0) & (keypoint_confidences <= 1)).all()
+                ):
+                    raise ValueError(
+                        "Decoded pose keypoint confidence values must be in [0, 1]."
+                    )
             batches.append(retained)
         return batches
 

@@ -1193,6 +1193,52 @@ def test_engine_init_rejects_framework_conflicting_with_onnx_path_alias(
         )
 
 
+@pytest.mark.parametrize("input_count", [0, 2])
+def test_engine_init_rejects_onnx_models_without_exactly_one_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, input_count: int
+) -> None:
+    """The public tensor-only engine API cannot satisfy multi-input ONNX graphs."""
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"onnx")
+
+    class _Input:
+        def __init__(self, index: int) -> None:
+            self.name = f"input-{index}"
+
+    class _Session:
+        def get_inputs(self) -> list[_Input]:
+            return [_Input(index) for index in range(input_count)]
+
+        def get_outputs(self) -> list[object]:
+            return []
+
+    class _Backend:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+            self.session = _Session()
+
+        def create(self) -> None:
+            return None
+
+        def dispose(self) -> None:
+            return None
+
+    class _Ort:
+        @staticmethod
+        def get_available_providers() -> list[str]:
+            return ["CPUExecutionProvider"]
+
+    monkeypatch.setattr(wrapper, "ONNXBackend", _Backend)
+    monkeypatch.setattr(wrapper, "_load_onnxruntime", _Ort)
+
+    with pytest.raises(ValueError, match=rf"got {input_count} inputs"):
+        MBLT_Engine(
+            {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}},
+            onnx_path=str(onnx_path),
+        )
+
+
 def test_engine_init_rejects_conflicting_framework_and_model_path(
     tmp_path: Path,
 ) -> None:
@@ -1751,6 +1797,33 @@ def test_final_onnx_pose_normalizes_detections() -> None:
     assert len(result) == 1
     assert result[0].shape == (1, 57)
     assert torch.equal(result[0], final_output[0, :1])
+
+
+def test_final_onnx_pose_rejects_invalid_keypoint_confidence() -> None:
+    """Reject decoded pose confidences that normal decoding would sigmoid."""
+
+    postprocessor = cast(
+        YOLODetectionPostBase,
+        build_postprocess(
+            {"LetterBox": {"img_size": [640, 640]}},
+            {
+                "task": "pose_estimation",
+                "nl": 3,
+                "n_extra": 51,
+                "reg_max": 16,
+                "conf_thres": 0.5,
+                "iou_thres": 0.7,
+            },
+        ),
+    )
+    final_output = torch.zeros((1, 1, 57), dtype=torch.float32)
+    final_output[0, 0, :6] = torch.tensor([10.0, 20.0, 30.0, 40.0, 0.9, 0.0])
+    final_output[0, 0, 8] = 1.1
+
+    with pytest.raises(
+        ValueError, match="keypoint confidence values must be in \\[0, 1\\]"
+    ):
+        postprocessor(final_output)
 
 
 @pytest.mark.parametrize(

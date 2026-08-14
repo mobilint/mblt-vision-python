@@ -102,6 +102,16 @@ def test_coco_readiness_matches_images_to_task_annotations(
                         "image_id": index,
                         "category_id": 1,
                         "bbox": [0, 0, 1, 1],
+                        **(
+                            {"segmentation": [[0, 0, 1, 0, 1, 1]]}
+                            if task == "instance_segmentation"
+                            else {}
+                        ),
+                        **(
+                            {"keypoints": [0, 0, 0] * 17, "num_keypoints": 0}
+                            if task == "pose_estimation"
+                            else {}
+                        ),
                     }
                     for index in range(1, 3)
                 ],
@@ -112,6 +122,56 @@ def test_coco_readiness_matches_images_to_task_annotations(
 
     assert readiness.dataset_ready(tmp_path, task, "coco")
     assert not readiness.dataset_ready(tmp_path, task, "imagenet")
+
+
+@pytest.mark.parametrize(
+    ("task", "invalid_field"),
+    [
+        ("instance_segmentation", "segmentation"),
+        ("pose_estimation", "keypoints"),
+        ("pose_estimation", "num_keypoints"),
+    ],
+)
+def test_coco_readiness_rejects_missing_task_specific_ground_truth(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    task: str,
+    invalid_field: str,
+) -> None:
+    """Reject COCO metadata missing the payload required by its evaluation task."""
+
+    annotation_name = (
+        "person_keypoints_val2017.json"
+        if task == "pose_estimation"
+        else "instances_val2017.json"
+    )
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, annotation_name, 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, annotation_name, 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    _write_file(tmp_path / "val2017" / "000000000001.jpg")
+    annotation = {
+        "id": 1,
+        "image_id": 1,
+        "category_id": 1,
+        "bbox": [0, 0, 1, 1],
+        "segmentation": [[0, 0, 1, 0, 1, 1]],
+        "keypoints": [0, 0, 0] * 17,
+        "num_keypoints": 0,
+    }
+    del annotation[invalid_field]
+    (tmp_path / annotation_name).write_text(
+        json.dumps(
+            {
+                "images": [{"id": 1, "file_name": "000000000001.jpg"}],
+                "categories": [{"id": 1}],
+                "annotations": [annotation],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, task, "coco")
 
 
 def test_coco_readiness_rejects_noncanonical_category_ids(
@@ -279,6 +339,32 @@ def test_widerface_readiness_rejects_invalid_difficulty_metadata(
     _write_file(tmp_path / "images" / "0--Parade" / "sample.jpg")
 
     assert not readiness.dataset_ready(tmp_path, "face_detection", "widerface")
+
+
+def test_widerface_readiness_rejects_empty_face_ground_truth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not accept empty face arrays that evaluation would silently skip."""
+
+    face_boxes = np.empty((1, 1), dtype=object)
+    event_faces = np.empty((1, 1), dtype=object)
+    event_faces[0, 0] = np.empty((0, 4), dtype=np.float64)
+    face_boxes[0, 0] = event_faces
+    difficulty = np.empty((1, 1), dtype=object)
+    event_indices = np.empty((1, 1), dtype=object)
+    event_indices[0, 0] = np.empty((0,), dtype=np.int64)
+    difficulty[0, 0] = event_indices
+
+    def _loadmat(path: Path) -> dict[str, np.ndarray]:
+        if path.name == "wider_face_val.mat":
+            return {"face_bbx_list": face_boxes}
+        return {"gt_list": difficulty}
+
+    monkeypatch.setattr(readiness, "loadmat", _loadmat)
+
+    assert not readiness._widerface_difficulty_metadata_ready(
+        tmp_path, {"0--Parade": {"sample.jpg"}}
+    )
 
 
 @pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])
