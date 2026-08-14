@@ -56,6 +56,18 @@ def test_segmentation_rle_encoding_thresholds_resized_masks(
     ]
 
 
+def test_classification_postprocessor_rejects_wrong_taxonomy_width() -> None:
+    """Reject local classification artifacts whose heads do not match ImageNet."""
+
+    postprocessor = ClsPost({}, {"task": "image_classification", "dataset": "imagenet"})
+
+    with pytest.raises(
+        ValueError,
+        match="Classification output has 999 classes, but dataset 'imagenet' requires 1000",
+    ):
+        postprocessor(torch.zeros((1, 999), dtype=torch.float32))
+
+
 @pytest.mark.parametrize(
     ("post_cfg", "expected_type"),
     [

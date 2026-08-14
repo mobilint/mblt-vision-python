@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import gc
 from pathlib import Path
 from typing import Any, cast
 
@@ -411,6 +412,87 @@ def test_engine_init_disposes_onnx_backend_after_preprocess_setup_failure(
         )
 
     assert disposed
+
+
+def test_engine_context_manager_closes_backend_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Context exit releases an MXQ backend and close/dispose remain idempotent."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+    dispose_calls = 0
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            nonlocal dispose_calls
+            dispose_calls += 1
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda *args, **kwargs: object())
+
+    with MBLT_Engine(
+        {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}}, model_path=str(mxq_path)
+    ) as engine:
+        assert engine is not None
+
+    engine.close()
+    engine.dispose()
+    assert dispose_calls == 1
+    with pytest.raises(RuntimeError, match="closed"):
+        engine(torch.zeros((1, 3, 8, 8)))
+
+
+def test_engine_finalizer_closes_unmanaged_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Best-effort finalization prevents leaked backends for unmanaged engines."""
+
+    mxq_path = tmp_path / "model.mxq"
+    mxq_path.write_bytes(b"mxq")
+    dispose_calls = 0
+
+    class _FakeBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            del kwargs
+
+        def create(self) -> None:
+            return None
+
+        def launch(self) -> None:
+            return None
+
+        def get_dtype(self) -> str:
+            return "DataType.Float32"
+
+        def dispose(self) -> None:
+            nonlocal dispose_calls
+            dispose_calls += 1
+
+    monkeypatch.setattr(wrapper, "MobilintNPUBackend", _FakeBackend)
+    monkeypatch.setattr(wrapper, "build_preprocess", lambda config: config)
+    monkeypatch.setattr(wrapper, "build_postprocess", lambda *args, **kwargs: object())
+
+    engine = MBLT_Engine(
+        {"file_cfg": {}, "pre_cfg": {}, "post_cfg": {}}, model_path=str(mxq_path)
+    )
+    del engine
+    gc.collect()
+
+    assert dispose_calls == 1
 
 
 def test_engine_init_accepts_local_mxq_model_path(

@@ -92,3 +92,21 @@ def test_depth_post_normalizes_full_resolution_channel_last_mxq_output() -> None
     normalized_single_image = post(single_image)
     assert isinstance(normalized_single_image, torch.Tensor)
     assert torch.equal(normalized_single_image, full_resolution[..., 0])
+
+
+def test_depth_post_normalizes_quarter_resolution_channel_last_output() -> None:
+    """Remove a single-image channel-last axis before checking quarter resolution."""
+
+    post = DepthPost({"LetterBox": {"img_size": [8, 8]}}, {})
+    channel_last_depth = torch.arange(4, dtype=torch.float32).reshape(2, 2, 1)
+    expected = torch.nn.functional.interpolate(
+        channel_last_depth[..., 0][None, None],
+        scale_factor=4.0,
+        mode="bilinear",
+        align_corners=False,
+    )[:, 0]
+
+    normalized = post(channel_last_depth)
+
+    assert isinstance(normalized, torch.Tensor)
+    assert torch.equal(normalized, expected)

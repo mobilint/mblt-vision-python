@@ -70,11 +70,7 @@ class DepthPost(PostBase):
                 raise ValueError(
                     f"Depth estimation expects [B, 1, H, W] or [B, H, W, 1], got {tuple(depth.shape)}."
                 )
-        elif (
-            depth.ndim == 3
-            and depth.shape[-1] == 1
-            and tuple(depth.shape[:2]) == self.input_shape
-        ):
+        elif depth.ndim == 3 and depth.shape[-1] == 1:
             depth = depth[..., 0].unsqueeze(0)
         elif depth.ndim != 3:
             raise ValueError(

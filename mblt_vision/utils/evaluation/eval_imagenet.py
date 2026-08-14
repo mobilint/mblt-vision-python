@@ -68,20 +68,31 @@ def eval_imagenet_metrics(
         inference_time += time() - tic
         result = model.postprocess(out_npu)
         output = result.output
-        if isinstance(output, np.ndarray):
-            prediction = output.argmax(-1)
-        elif isinstance(output, torch.Tensor):
-            prediction = output.argmax(-1).cpu().numpy()
-        else:
+        label_array = np.asarray(label)
+        if not isinstance(output, (np.ndarray, torch.Tensor)):
             raise TypeError(
                 f"Expected classification output to be a tensor or ndarray, got {type(output)}."
             )
+        if output.ndim != 2:
+            raise ValueError(
+                f"ImageNet classification output must have shape [B, C], got {tuple(output.shape)}."
+            )
+
+        output_batch_size = output.shape[0]
+        if output_batch_size != len(label_array):
+            raise ValueError(
+                "ImageNet classification output batch size does not match labels: "
+                f"got {output_batch_size} outputs for {len(label_array)} labels."
+            )
+        if isinstance(output, np.ndarray):
+            prediction = output.argmax(-1)
+        else:
+            prediction = output.argmax(-1).cpu().numpy()
         top_k = min(5, output.shape[-1])
         if isinstance(output, torch.Tensor):
             top5_prediction = output.topk(top_k, dim=-1).indices.cpu().numpy()
         else:
             top5_prediction = np.argpartition(output, -top_k, axis=-1)[:, -top_k:]
-        label_array = np.asarray(label)
         cum_top1_correct += (prediction == label_array).sum().item()
         cum_top5_correct += (
             np.any(top5_prediction == label_array[:, np.newaxis], axis=-1).sum().item()

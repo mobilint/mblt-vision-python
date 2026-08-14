@@ -11,6 +11,7 @@ import stat
 import sys
 import tempfile
 from pathlib import Path
+from types import TracebackType
 from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import numpy as np
@@ -547,6 +548,7 @@ class MBLT_Engine:
         self._mxq_model: MobilintNPUBackend | None = None
         self._onnx_model: ONNXBackend | None = None
         self._onnx_session: Any = None
+        self._closed = False
 
         try:
             if self.framework == "onnx":
@@ -587,13 +589,7 @@ class MBLT_Engine:
             )
             self.device = torch.device("cpu")
         except Exception:
-            for backend in (self._mxq_model, self._onnx_model):
-                if backend is None:
-                    continue
-                try:
-                    backend.dispose()
-                except Exception:
-                    pass
+            self._close(suppress_errors=True)
             raise
 
     def _mxq_backend_kwargs(self) -> dict[str, Any]:
@@ -857,6 +853,7 @@ class MBLT_Engine:
         Returns:
                 Raw model output.
         """
+        self._ensure_open()
         if self.framework == "onnx":
             outputs = self._require_onnx_session().run(
                 self.output_names, self._prepare_onnx_inputs(x)
@@ -994,15 +991,73 @@ class MBLT_Engine:
 
     def launch(self) -> None:
         """Launches the underlying model."""
+        self._ensure_open()
         if self.framework == "mxq":
             self._require_mxq_model().launch()
 
     def dispose(self) -> None:
-        """Disposes the underlying model."""
-        if self.framework == "mxq":
-            self._require_mxq_model().dispose()
-        elif self._onnx_model is not None:
-            self._onnx_model.dispose()
+        """Compatibility alias for :meth:`close`."""
+
+        self.close()
+
+    def close(self) -> None:
+        """Release backend resources. Safe to call more than once."""
+
+        self._close(suppress_errors=False)
+
+    def __enter__(self) -> MBLT_Engine:
+        """Return this engine for use in a context manager."""
+
+        self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        """Release resources when leaving a context manager block."""
+
+        del exc_value, traceback
+        self._close(suppress_errors=exc_type is not None)
+        return False
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for engines not explicitly closed by callers."""
+
+        try:
+            self._close(suppress_errors=True)
+        except Exception:
+            pass
+
+    def _ensure_open(self) -> None:
+        """Raise when inference is attempted after backend disposal."""
+
+        if getattr(self, "_closed", False):
+            raise RuntimeError("MBLT_Engine is closed.")
+
+    def _close(self, *, suppress_errors: bool) -> None:
+        """Dispose acquired backends once, optionally suppressing cleanup failures."""
+
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        first_error: Exception | None = None
+        for backend in (
+            getattr(self, "_mxq_model", None),
+            getattr(self, "_onnx_model", None),
+        ):
+            if backend is None:
+                continue
+            try:
+                backend.dispose()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        self._onnx_session = None
+        if first_error is not None and not suppress_errors:
+            raise first_error
 
     def model_name_aliasing(self, model_name: str) -> str:
         """Finds the YAML config filename that matches the given model name.

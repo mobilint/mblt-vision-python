@@ -611,6 +611,7 @@ def _run_fake_compile(
     entry_level: str = "data",
     dataset: str | None = None,
     target_device: str = "aries-rb",
+    save_path: Path | None = None,
     fail: bool = False,
     calls: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Path]:
@@ -735,6 +736,7 @@ def _run_fake_compile(
         data_path=original_data_path,
         subset_path=subset_path,
         calib_data_path=calib_data_path,
+        save_path=save_path,
         subset_size=1,
     )
     return calls, hosted_onnx
@@ -824,6 +826,45 @@ def test_compile_rejects_non_onnx_local_model_with_ready_calibration_data(
             task="image_classification",
             model_path=mxq_path,
             entry_level="calibration",
+        )
+
+
+@pytest.mark.parametrize("entry_level", ["data", "calibration"])
+def test_compile_requires_an_mxq_output_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entry_level: str
+) -> None:
+    """Reject mislabeled compiler output paths in both compilation branches."""
+
+    with pytest.raises(ValueError, match=r"output path must end with `.mxq`"):
+        _run_fake_compile(
+            monkeypatch,
+            tmp_path,
+            task="image_classification",
+            model_path=None,
+            entry_level=entry_level,
+            save_path=tmp_path / "compiled.onnx",
+        )
+
+
+@pytest.mark.parametrize("entry_level", ["data", "calibration"])
+def test_compile_rejects_output_path_resolving_to_source_onnx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, entry_level: str
+) -> None:
+    """Do not let an MXQ-named symlink overwrite the input ONNX model."""
+
+    source_onnx = tmp_path / "source.onnx"
+    source_onnx.write_bytes(b"onnx")
+    output_alias = tmp_path / "compiled.mxq"
+    output_alias.symlink_to(source_onnx)
+
+    with pytest.raises(ValueError, match="must not be the same as the input ONNX path"):
+        _run_fake_compile(
+            monkeypatch,
+            tmp_path,
+            task="image_classification",
+            model_path=source_onnx,
+            entry_level=entry_level,
+            save_path=output_alias,
         )
 
 

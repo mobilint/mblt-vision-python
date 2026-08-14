@@ -845,6 +845,35 @@ def _resolve_compile_onnx_path(
     raise FileNotFoundError(f"Unable to resolve {configured_name} for compilation.")
 
 
+def _resolve_compile_output_path(
+    save_path: str | Path | None, resolved_onnx: Path
+) -> Path:
+    """Resolve and validate an MXQ compilation output path."""
+
+    requested_output_path = (
+        Path(save_path).expanduser()
+        if save_path is not None
+        else _default_model_dir() / f"{resolved_onnx.stem}.mxq"
+    )
+    if requested_output_path.suffix.lower() != ".mxq":
+        raise ValueError(
+            "Compilation output path must end with `.mxq`, "
+            f"got {requested_output_path}."
+        )
+    output_path = requested_output_path.resolve()
+    if output_path == resolved_onnx.resolve():
+        raise ValueError(
+            "Compilation output path must not be the same as the input ONNX path: "
+            f"{output_path}."
+        )
+    if output_path.suffix.lower() != ".mxq":
+        raise ValueError(
+            "Compilation output path must resolve to a path ending with `.mxq`, "
+            f"got {output_path}."
+        )
+    return output_path
+
+
 def compile_vision_model(
     model_cls: str,
     *,
@@ -915,11 +944,7 @@ def compile_vision_model(
     selected_local_path = model_path if model_path is not None else onnx_path
     if calib_data_path is not None:
         resolved_onnx = _resolve_compile_onnx_path(file_cfg, selected_local_path)
-        output_path = (
-            Path(save_path).expanduser()
-            if save_path is not None
-            else _default_model_dir() / f"{resolved_onnx.stem}.mxq"
-        ).resolve()
+        output_path = _resolve_compile_output_path(save_path, resolved_onnx)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         resolved_percentile, resolved_topk = resolve_quantization_values(
             file_cfg, percentile, topk_ratio
@@ -968,12 +993,7 @@ def compile_vision_model(
                 f"Unable to resolve {configured_name} for model `{model_cls}`."
             )
 
-        output_path = (
-            Path(save_path).expanduser()
-            if save_path is not None
-            else _default_model_dir() / f"{resolved_onnx.stem}.mxq"
-        )
-        output_path = output_path.resolve()
+        output_path = _resolve_compile_output_path(save_path, resolved_onnx)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         resolved_percentile, resolved_topk = resolve_quantization_values(
             file_cfg, percentile, topk_ratio

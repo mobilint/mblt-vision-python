@@ -102,6 +102,31 @@ def test_preprocessors_accept_grad_tracking_tensors(
     assert isinstance(operation(image), output_type)  # type: ignore[operator]
 
 
+def test_reader_pil_scales_normalized_float_arrays() -> None:
+    """Convert normalized float RGB inputs deliberately instead of truncating them."""
+
+    image = np.full((2, 3, 3), 0.5, dtype=np.float32)
+
+    converted = np.asarray(Reader("pil")(image))
+
+    np.testing.assert_array_equal(converted, np.full((2, 3, 3), 128, dtype=np.uint8))
+
+
+@pytest.mark.parametrize(
+    "image",
+    [
+        np.full((2, 3, 3), -0.1, dtype=np.float32),
+        np.full((2, 3, 3), 256.0, dtype=np.float32),
+        np.full((2, 3, 3), np.nan, dtype=np.float32),
+    ],
+)
+def test_reader_pil_rejects_invalid_float_image_arrays(image: np.ndarray) -> None:
+    """Do not silently cast invalid float RGB values to byte images."""
+
+    with pytest.raises(ValueError, match=r"finite RGB values|\[0, 1\] or \[0, 255\]"):
+        Reader("pil")(image)
+
+
 @pytest.mark.parametrize(
     ("factory", "expected"),
     [

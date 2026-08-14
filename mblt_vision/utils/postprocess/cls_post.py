@@ -9,6 +9,7 @@ from collections.abc import Sequence
 import numpy as np
 import torch
 
+from ...datasets import get_dataset_class_names, get_dataset_config
 from ..types import ListTensorLike, TensorLike
 from .base import PostBase
 
@@ -28,6 +29,22 @@ class ClsPost(PostBase):
         """
         super().__init__()
         self.softmax = post_cfg.get("softmax", False)
+        self.dataset: str | None = None
+        self.num_classes: int | None = None
+        dataset = post_cfg.get("dataset")
+        if dataset is not None:
+            if not isinstance(dataset, str) or not dataset:
+                raise ValueError(
+                    "Classification postprocessing requires post_cfg.dataset to be a non-empty string."
+                )
+            dataset = dataset.lower()
+            dataset_config = get_dataset_config(dataset)
+            if "image_classification" not in dataset_config["tasks"]:
+                raise ValueError(
+                    f"Dataset '{dataset}' does not support image classification."
+                )
+            self.dataset = dataset
+            self.num_classes = len(get_dataset_class_names(dataset))
 
     def __call__(self, x: TensorLike | ListTensorLike) -> torch.Tensor:
         """Executes classification post-processing.
@@ -64,6 +81,11 @@ class ClsPost(PostBase):
         x = x.flatten(
             1
         )  # Classification heads may retain singleton spatial dimensions.
+        if self.num_classes is not None and x.shape[1] != self.num_classes:
+            raise ValueError(
+                f"Classification output has {x.shape[1]} classes, but dataset "
+                f"'{self.dataset}' requires {self.num_classes}."
+            )
         if self.softmax:
             return x
         return x.softmax(dim=-1)
