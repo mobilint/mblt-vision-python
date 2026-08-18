@@ -208,9 +208,11 @@ def ensure_calibration_dataset(
     normalized_task = _normalize_task(task)
     config = get_dataset_config_for_task(normalized_task, dataset)
     dataset_name = str(config["name"])
-    resolved_path = Path(
-        data_path if data_path is not None else config["path"]
-    ).expanduser()
+    resolved_path = (
+        Path(data_path).expanduser()
+        if data_path is not None
+        else _resolve_default_dataset_path(config["path"])
+    )
     if not _dataset_ready(normalized_task, resolved_path, dataset_name):
         _organize_dataset(normalized_task, resolved_path, dataset)
     if not _dataset_ready(normalized_task, resolved_path, dataset_name):
@@ -219,6 +221,18 @@ def ensure_calibration_dataset(
             f"the expected {dataset_name} dataset."
         )
     return resolved_path
+
+
+def _resolve_default_dataset_path(configured_path: str | Path) -> Path:
+    """Translate registry cache paths to the active writable artifact cache."""
+
+    path = Path(configured_path).expanduser()
+    default_cache_root = Path.home() / ".mblt_model_zoo"
+    try:
+        relative_path = path.relative_to(default_cache_root)
+    except ValueError:
+        return path
+    return Path(get_mobilint_cache_dir()) / relative_path
 
 
 def _validate_subset_size(subset_size: int) -> None:

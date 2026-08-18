@@ -1242,6 +1242,11 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
             raise ValueError(
                 f"Staged NYU Depth target must not contain negative values: {depth_path}."
             )
+        if not bool(((depth > 0.001) & (depth < 100.0)).any()):
+            raise ValueError(
+                "Staged NYU Depth target must contain at least one valid metric depth "
+                f"in the (0.001, 100.0) range: {depth_path}."
+            )
 
 
 def organize_nyu_depth(

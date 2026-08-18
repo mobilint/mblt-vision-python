@@ -102,6 +102,28 @@ def test_obb_selects_calibration_images(tmp_path: Path) -> None:
     assert set(select_calibration_images("obb", tmp_path, subset_size=2)) == set(images)
 
 
+def test_calibration_default_dataset_path_uses_resolved_cache_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep implicit compilation datasets alongside the active artifact cache."""
+
+    configured_path = Path.home() / ".mblt_model_zoo" / "datasets" / "coco"
+    fallback_cache = tmp_path / "cache"
+    monkeypatch.setattr(
+        compile_module,
+        "get_dataset_config_for_task",
+        lambda *_: {"name": "coco", "path": str(configured_path)},
+    )
+    monkeypatch.setattr(
+        compile_module, "get_mobilint_cache_dir", lambda: str(fallback_cache)
+    )
+    monkeypatch.setattr(compile_module, "_dataset_ready", lambda *_: True)
+
+    assert compile_module.ensure_calibration_dataset("object_detection") == (
+        fallback_cache / "datasets" / "coco"
+    )
+
+
 @pytest.mark.parametrize(
     ("task", "relative_dir"),
     [

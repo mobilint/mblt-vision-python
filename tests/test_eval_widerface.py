@@ -116,3 +116,31 @@ def test_widerface_evaluation_rejects_malformed_difficulty_metadata(
 
     with pytest.raises(ValueError, match="metadata is malformed"):
         eval_widerface_module.eval_widerface(model, "/dataset", batch_size=1)
+
+
+def test_widerface_evaluation_rejects_image_tree_mismatching_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Require exact event and filename identities before direct inference."""
+
+    class _Dataset:
+        samples = [("unused", "0--Parade", "sample.png")]
+
+    model = SimpleNamespace(post_cfg={"task": "face_detection", "dataset": "widerface"})
+    monkeypatch.setattr(
+        eval_widerface_module,
+        "_load_widerface_image_names",
+        lambda _: {"0--Parade": {"sample.jpg"}},
+    )
+    monkeypatch.setattr(
+        eval_widerface_module, "_widerface_difficulty_metadata_ready", lambda *_: True
+    )
+    monkeypatch.setattr(eval_widerface_module, "CustomWiderface", lambda _: _Dataset())
+    monkeypatch.setattr(
+        eval_widerface_module,
+        "get_widerface_loader",
+        lambda *_: pytest.fail("mismatched image trees must not create a loader"),
+    )
+
+    with pytest.raises(ValueError, match="does not match the validation metadata"):
+        eval_widerface_module.eval_widerface(model, "/dataset", batch_size=1)

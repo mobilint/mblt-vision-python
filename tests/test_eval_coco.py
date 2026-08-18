@@ -25,7 +25,7 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
                 root=root, annotation_path=annotation_path, **kwargs
             )
             self.ids = [1, 2]
-            self.coco = SimpleNamespace(cats={1: {}})
+            self.coco = SimpleNamespace(cats={1: {}}, anns={})
 
         def __len__(self) -> int:
             return len(self.ids)
@@ -81,10 +81,28 @@ def test_coco_evaluation_rejects_noncanonical_artifact_categories(
 ) -> None:
     """Do not score direct COCO artifacts with an incompatible category taxonomy."""
 
-    dataset = SimpleNamespace(coco=SimpleNamespace(cats={999: {}}))
+    dataset = SimpleNamespace(coco=SimpleNamespace(cats={999: {}}, anns={}))
     monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
 
     with pytest.raises(ValueError, match=r"unsupported category IDs: \[999\]"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
+
+
+def test_coco_evaluation_rejects_undeclared_annotation_categories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not let malformed annotation categories be omitted from direct AP."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(cats={1: {}}, anns={7: {"category_id": 999}})
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="undeclared or unsupported"):
         eval_coco_module.eval_coco_metrics(
             SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
             "/dataset",

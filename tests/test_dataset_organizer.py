@@ -912,6 +912,8 @@ def test_nyu_depth_install_preserves_backups_when_rollback_fails(
         np.array([[np.nan]], dtype=np.float32),
         np.array([[1]], dtype=np.complex64),
         np.array([[-1]], dtype=np.float32),
+        np.array([[0]], dtype=np.float32),
+        np.array([[100]], dtype=np.float32),
     ],
 )
 def test_staged_nyu_depth_validation_rejects_malformed_payloads(
@@ -927,7 +929,8 @@ def test_staged_nyu_depth_validation_rejects_malformed_payloads(
     np.save(depth_dir / "sample.npy", depth)
 
     with pytest.raises(
-        ValueError, match="real numeric dtype|finite values|negative values"
+        ValueError,
+        match="real numeric dtype|finite values|negative values|valid metric depth",
     ):
         organizer._validate_staged_nyu_depth(str(tmp_path))
 

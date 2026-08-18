@@ -493,6 +493,32 @@ def test_widerface_readiness_rejects_duplicate_difficulty_indices(
     )
 
 
+def test_widerface_readiness_rejects_row_vector_difficulty_indices(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject row vectors that the evaluator would count as one eligible face."""
+
+    face_boxes = np.empty((1, 1), dtype=object)
+    event_faces = np.empty((1, 1), dtype=object)
+    event_faces[0, 0] = np.array([[0, 0, 1, 1], [1, 1, 1, 1]], dtype=np.float64)
+    face_boxes[0, 0] = event_faces
+    difficulty = np.empty((1, 1), dtype=object)
+    event_indices = np.empty((1, 1), dtype=object)
+    event_indices[0, 0] = np.array([[1, 2]], dtype=np.int64)
+    difficulty[0, 0] = event_indices
+
+    def _loadmat(path: Path) -> dict[str, np.ndarray]:
+        if path.name == "wider_face_val.mat":
+            return {"face_bbx_list": face_boxes}
+        return {"gt_list": difficulty}
+
+    monkeypatch.setattr(readiness, "loadmat", _loadmat)
+
+    assert not readiness._widerface_difficulty_metadata_ready(
+        tmp_path, {"0--Parade": {"sample.jpg"}}
+    )
+
+
 @pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])
 def test_dotav1_readiness_requires_complete_image_label_pairs(
     monkeypatch: pytest.MonkeyPatch,

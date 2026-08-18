@@ -14,6 +14,7 @@ from mblt_vision.utils.datasets import CustomDOTAv1
 from mblt_vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
     evaluate_dota_predictions,
+    format_dota_results,
 )
 
 eval_dota_module = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
@@ -326,3 +327,39 @@ def test_dota_ap_interpolation_uses_terminal_recall_sentinel() -> None:
 
     assert recall_curve.tolist() == [0.0, 0.5, 1.0]
     assert ap == pytest.approx(0.75)
+
+
+def test_dota_export_rejects_truncated_converted_batches() -> None:
+    """Do not silently omit Task1 files when converted output batches are short."""
+
+    postprocess = SimpleNamespace(
+        nmsout2eval=lambda *_args, **_kwargs: ([[]], [[]], [[]], [[]])
+    )
+
+    with pytest.raises(ValueError, match="export batch length mismatch"):
+        format_dota_results(
+            SimpleNamespace(output=[]),
+            (640, 640),
+            [(640, 640), (640, 640)],
+            [None, None],
+            ("first", "second"),
+            postprocess,
+        )
+
+
+def test_dota_export_rejects_mismatched_detection_fields() -> None:
+    """Require a polygon, score, and rotated box for every exported label."""
+
+    postprocess = SimpleNamespace(
+        nmsout2eval=lambda *_args, **_kwargs: ([["plane"]], [[]], [[0.9]], [[]])
+    )
+
+    with pytest.raises(ValueError, match="export detection length mismatch"):
+        format_dota_results(
+            SimpleNamespace(output=[]),
+            (640, 640),
+            [(640, 640)],
+            [None],
+            ("first",),
+            postprocess,
+        )

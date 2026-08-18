@@ -256,11 +256,38 @@ def format_dota_results(
         ratio_pad=ratio_pad,
         include_xywhr=True,
     )
+    outer_lengths = {
+        "image IDs": len(image_ids),
+        "labels": len(labels_list),
+        "polygons": len(polygons_list),
+        "scores": len(scores_list),
+        "rotated boxes": len(xywhr_list),
+    }
+    if len(set(outer_lengths.values())) != 1:
+        details = ", ".join(
+            f"{name}={length}" for name, length in outer_lengths.items()
+        )
+        raise ValueError(f"DOTAv1 export batch length mismatch: {details}.")
     results = []
     for image_id, labels, polygons, scores, xywhrs in zip(
-        image_ids, labels_list, polygons_list, scores_list, xywhr_list
+        image_ids, labels_list, polygons_list, scores_list, xywhr_list, strict=True
     ):
-        for label, polygon, score, xywhr in zip(labels, polygons, scores, xywhrs):
+        detection_lengths = {
+            "labels": len(labels),
+            "polygons": len(polygons),
+            "scores": len(scores),
+            "rotated boxes": len(xywhrs),
+        }
+        if len(set(detection_lengths.values())) != 1:
+            details = ", ".join(
+                f"{name}={length}" for name, length in detection_lengths.items()
+            )
+            raise ValueError(
+                f"DOTAv1 export detection length mismatch for {image_id}: {details}."
+            )
+        for label, polygon, score, xywhr in zip(
+            labels, polygons, scores, xywhrs, strict=True
+        ):
             results.append(
                 {
                     "image_id": image_id,

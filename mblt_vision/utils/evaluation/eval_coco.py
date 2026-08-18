@@ -76,6 +76,24 @@ def _validate_coco_dataset_taxonomy(dataset: CustomCOCODataset, task: str) -> No
             "COCO evaluation dataset contains unsupported category IDs: "
             f"{sorted(unsupported_ids)}."
         )
+    annotations = getattr(dataset.coco, "anns", None)
+    if not isinstance(annotations, dict):
+        raise ValueError("COCO evaluation dataset must define an annotation table.")
+    for annotation_id, annotation in annotations.items():
+        if not isinstance(annotation, dict):
+            raise ValueError(
+                f"COCO evaluation dataset has an invalid annotation {annotation_id!r}."
+            )
+        category_id = annotation.get("category_id")
+        if (
+            not isinstance(category_id, int)
+            or isinstance(category_id, bool)
+            or category_id not in category_ids
+        ):
+            raise ValueError(
+                "COCO evaluation annotation references an undeclared or unsupported "
+                f"category ID {category_id!r}: annotation {annotation_id!r}."
+            )
 
 
 def format_coco_results(

@@ -125,6 +125,15 @@ def eval_widerface(
         )
 
     dataset = CustomWiderface(os.path.join(data_path, "images"))
+    actual_images: dict[str, set[str]] = {}
+    for _, event_name, file_name in dataset.samples:
+        actual_images.setdefault(event_name, set()).add(file_name)
+    if actual_images != expected_images or sum(
+        len(file_names) for file_names in actual_images.values()
+    ) != len(dataset.samples):
+        raise ValueError(
+            "WiderFace image tree does not match the validation metadata identities."
+        )
     dataloader = get_widerface_loader(
         dataset, batch_size, model.preprocess_with_metadata
     )

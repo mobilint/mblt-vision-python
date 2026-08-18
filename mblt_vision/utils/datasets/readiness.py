@@ -545,6 +545,12 @@ def _widerface_difficulty_metadata_ready(
                     keep_indices = np.asarray(event_indices[image_index][0])
                 except (IndexError, TypeError):
                     return False
+                if keep_indices.ndim == 0:
+                    keep_indices = keep_indices.reshape(1)
+                elif keep_indices.ndim == 2 and keep_indices.shape[1] == 1:
+                    keep_indices = keep_indices[:, 0]
+                elif keep_indices.ndim != 1:
+                    return False
                 try:
                     valid_indices = (
                         np.isfinite(keep_indices).all()
