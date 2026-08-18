@@ -14,6 +14,7 @@ from tqdm import tqdm
 from ..._tasks import normalize_vision_task
 from ...datasets import get_dataset_category_ids
 from ..datasets import CustomCOCODataset, get_coco_loader
+from ..datasets.readiness import _coco_task_annotations_valid
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -79,21 +80,38 @@ def _validate_coco_dataset_taxonomy(dataset: CustomCOCODataset, task: str) -> No
     annotations = getattr(dataset.coco, "anns", None)
     if not isinstance(annotations, dict):
         raise ValueError("COCO evaluation dataset must define an annotation table.")
-    for annotation_id, annotation in annotations.items():
-        if not isinstance(annotation, dict):
-            raise ValueError(
-                f"COCO evaluation dataset has an invalid annotation {annotation_id!r}."
-            )
-        category_id = annotation.get("category_id")
+    images = getattr(dataset.coco, "imgs", None)
+    if not isinstance(images, dict):
+        raise ValueError("COCO evaluation dataset must define an image table.")
+    image_shapes: dict[int, tuple[int, int] | None] = {}
+    for image_id, image in images.items():
         if (
-            not isinstance(category_id, int)
-            or isinstance(category_id, bool)
-            or category_id not in category_ids
+            not isinstance(image_id, int)
+            or isinstance(image_id, bool)
+            or not isinstance(image, dict)
         ):
-            raise ValueError(
-                "COCO evaluation annotation references an undeclared or unsupported "
-                f"category ID {category_id!r}: annotation {annotation_id!r}."
-            )
+            raise ValueError("COCO evaluation dataset contains invalid image metadata.")
+        height, width = image.get("height"), image.get("width")
+        image_shapes[image_id] = (
+            (height, width)
+            if isinstance(height, int)
+            and not isinstance(height, bool)
+            and height > 0
+            and isinstance(width, int)
+            and not isinstance(width, bool)
+            and width > 0
+            else None
+        )
+    if not _coco_task_annotations_valid(
+        list(annotations.values()),
+        image_ids=set(images),
+        category_ids=category_ids,
+        image_shapes=image_shapes,
+        task=task,
+    ):
+        raise ValueError(
+            "COCO evaluation dataset contains invalid task-specific annotations."
+        )
 
 
 def format_coco_results(

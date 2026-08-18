@@ -25,7 +25,11 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
                 root=root, annotation_path=annotation_path, **kwargs
             )
             self.ids = [1, 2]
-            self.coco = SimpleNamespace(cats={1: {}}, anns={})
+            self.coco = SimpleNamespace(
+                cats={1: {}},
+                anns={},
+                imgs={1: {"height": 1, "width": 1}, 2: {"height": 1, "width": 1}},
+            )
 
         def __len__(self) -> int:
             return len(self.ids)
@@ -98,13 +102,51 @@ def test_coco_evaluation_rejects_undeclared_annotation_categories(
     """Do not let malformed annotation categories be omitted from direct AP."""
 
     dataset = SimpleNamespace(
-        coco=SimpleNamespace(cats={1: {}}, anns={7: {"category_id": 999}})
+        coco=SimpleNamespace(
+            cats={1: {}},
+            anns={7: {"category_id": 999}},
+            imgs={1: {"height": 1, "width": 1}},
+        )
     )
     monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
 
-    with pytest.raises(ValueError, match="undeclared or unsupported"):
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
         eval_coco_module.eval_coco_metrics(
             SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
+
+
+def test_coco_evaluation_rejects_invalid_task_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use readiness-equivalent checks before direct COCO evaluation starts."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 2, "width": 2}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 1, 1],
+                    "area": -1,
+                    "iscrowd": 0,
+                    "segmentation": [[0, 0, 1, 0, 1, 1]],
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(
+                post_cfg={"task": "instance_segmentation", "dataset": "coco"}
+            ),
             "/dataset",
             batch_size=1,
         )

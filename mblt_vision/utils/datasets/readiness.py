@@ -216,17 +216,15 @@ def _load_coco_image_names(
         or len(categories) != expected_categories
     ):
         return None
-    category_ids = [
-        category.get("id") for category in categories if isinstance(category, dict)
-    ]
-    if (
-        len(category_ids) != len(categories)
-        or any(
-            not isinstance(category_id, int) or isinstance(category_id, bool)
-            for category_id in category_ids
-        )
-        or len(category_ids) != len(set(category_ids))
-    ):
+    category_ids: list[int] = []
+    for category in categories:
+        if not isinstance(category, dict):
+            return None
+        category_id = category.get("id")
+        if not isinstance(category_id, int) or isinstance(category_id, bool):
+            return None
+        category_ids.append(category_id)
+    if len(category_ids) != len(set(category_ids)):
         return None
     expected_category_ids = (
         COCO_PERSON_KEYPOINT_CATEGORY_IDS
@@ -235,10 +233,31 @@ def _load_coco_image_names(
     )
     if set(category_ids) != expected_category_ids:
         return None
+    if not _coco_task_annotations_valid(
+        annotation_records,
+        image_ids=set(image_ids),
+        category_ids=set(category_ids),
+        image_shapes=image_shapes,
+        task=task,
+    ):
+        return None
+    return set(names)
+
+
+def _coco_task_annotations_valid(
+    annotation_records: list[Any],
+    *,
+    image_ids: set[int],
+    category_ids: set[int],
+    image_shapes: dict[int, tuple[int, int] | None],
+    task: str,
+) -> bool:
+    """Validate task-specific COCO annotation payloads for readiness and APIs."""
+
     annotation_ids: list[int] = []
     for record in annotation_records:
         if not isinstance(record, dict):
-            return None
+            return False
         annotation_id = record.get("id")
         image_id = record.get("image_id")
         category_id = record.get("category_id")
@@ -248,27 +267,25 @@ def _load_coco_image_names(
             or not isinstance(image_id, int)
             or isinstance(image_id, bool)
             or image_id not in image_ids
+            or not isinstance(category_id, int)
+            or isinstance(category_id, bool)
             or category_id not in category_ids
         ):
-            return None
-        if annotation_path.name in {
-            "instances_val2017.json",
-            "person_keypoints_val2017.json",
-        }:
-            bbox = record.get("bbox")
-            if (
-                not isinstance(bbox, list)
-                or len(bbox) != 4
-                or any(
-                    not isinstance(value, (int, float))
-                    or isinstance(value, bool)
-                    or not np.isfinite(value)
-                    for value in bbox
-                )
-                or bbox[2] <= 0
-                or bbox[3] <= 0
-            ):
-                return None
+            return False
+        bbox = record.get("bbox")
+        if (
+            not isinstance(bbox, list)
+            or len(bbox) != 4
+            or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not np.isfinite(value)
+                for value in bbox
+            )
+            or bbox[2] <= 0
+            or bbox[3] <= 0
+        ):
+            return False
         area = record.get("area")
         iscrowd = record.get("iscrowd")
         if (
@@ -280,7 +297,7 @@ def _load_coco_image_names(
             or isinstance(iscrowd, bool)
             or iscrowd not in {0, 1}
         ):
-            return None
+            return False
         if task == "instance_segmentation":
             segmentation = record.get("segmentation")
             if isinstance(segmentation, list):
@@ -297,12 +314,12 @@ def _load_coco_image_names(
                     or not _has_positive_polygon_area(polygon)
                     for polygon in segmentation
                 ):
-                    return None
+                    return False
             elif isinstance(segmentation, dict):
                 if not _valid_coco_rle(segmentation, image_shapes.get(image_id)):
-                    return None
+                    return False
             else:
-                return None
+                return False
         if task == "pose_estimation":
             keypoints = record.get("keypoints")
             num_keypoints = record.get("num_keypoints")
@@ -325,11 +342,9 @@ def _load_coco_image_names(
                 or num_keypoints
                 != sum(keypoints[index] > 0 for index in range(2, len(keypoints), 3))
             ):
-                return None
+                return False
         annotation_ids.append(annotation_id)
-    if len(annotation_ids) != len(set(annotation_ids)):
-        return None
-    return set(names)
+    return len(annotation_ids) == len(set(annotation_ids))
 
 
 def _decode_coco_rle_counts(counts: str) -> list[int] | None:
@@ -547,8 +562,13 @@ def _widerface_difficulty_metadata_ready(
                     return False
                 if keep_indices.ndim == 0:
                     keep_indices = keep_indices.reshape(1)
-                elif keep_indices.ndim == 2 and keep_indices.shape[1] == 1:
-                    keep_indices = keep_indices[:, 0]
+                elif keep_indices.ndim == 2:
+                    if keep_indices.size == 0:
+                        keep_indices = keep_indices.reshape(0)
+                    elif keep_indices.shape[1] == 1:
+                        keep_indices = keep_indices[:, 0]
+                    else:
+                        return False
                 elif keep_indices.ndim != 1:
                     return False
                 try:
