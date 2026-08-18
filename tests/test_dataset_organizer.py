@@ -100,6 +100,21 @@ def test_dotav1_organizer_rejects_repeated_polygon_vertices(tmp_path: Path) -> N
         )
 
 
+def test_dotav1_organizer_rejects_duplicate_targets(tmp_path: Path) -> None:
+    """Reject duplicate raw targets before creating normalized labels."""
+
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (100, 50)).save(image_path)
+    source_path = tmp_path / "source.txt"
+    target = "0 0 20 0 20 20 0 20 plane 0\n"
+    source_path.write_text(target * 2, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Duplicate DOTAv1 annotation target"):
+        organizer._write_dotav1_yolo_labels(
+            str(image_path), str(source_path), str(tmp_path / "normalized.txt")
+        )
+
+
 def test_dotav1_stage_requires_a_non_difficult_target(tmp_path: Path) -> None:
     """Do not replace a usable DOTAv1 cache with an unscorable staged split."""
 
@@ -1079,6 +1094,10 @@ def test_organize_ade20k_extracts_flat_validation_layout(
     monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     monkeypatch.setattr(organizer, "_validate_staged_payloads", lambda *_: None)
     archive_path = tmp_path / "ADEChallengeData2016.zip"
+    image_buffer = io.BytesIO()
+    Image.new("RGB", (1, 1)).save(image_buffer, format="JPEG")
+    annotation_buffer = io.BytesIO()
+    Image.new("L", (1, 1), color=1).save(annotation_buffer, format="PNG")
     with ZipFile(archive_path, "w") as archive:
         archive.writestr(
             "ADEChallengeData2016/images/training/ADE_train_00000001.jpg", b"training"
@@ -1088,11 +1107,12 @@ def test_organize_ade20k_extracts_flat_validation_layout(
             b"training",
         )
         archive.writestr(
-            "ADEChallengeData2016/images/validation/ADE_val_00000001.jpg", b"validation"
+            "ADEChallengeData2016/images/validation/ADE_val_00000001.jpg",
+            image_buffer.getvalue(),
         )
         archive.writestr(
             "ADEChallengeData2016/annotations/validation/ADE_val_00000001.png",
-            b"validation",
+            annotation_buffer.getvalue(),
         )
         archive.writestr("ADEChallengeData2016/objectInfo150.txt", b"labels")
         archive.writestr("ADEChallengeData2016/sceneCategories.txt", b"scenes")
@@ -1102,10 +1122,10 @@ def test_organize_ade20k_extracts_flat_validation_layout(
 
     assert (
         output_dir / "images" / "ADE_val_00000001.jpg"
-    ).read_bytes() == b"validation"
+    ).read_bytes() == image_buffer.getvalue()
     assert (
         output_dir / "annotations" / "ADE_val_00000001.png"
-    ).read_bytes() == b"validation"
+    ).read_bytes() == annotation_buffer.getvalue()
     assert (output_dir / "objectInfo150.txt").read_bytes() == b"labels"
     assert (output_dir / "sceneCategories.txt").read_bytes() == b"scenes"
     assert not (output_dir / "images" / "training").exists()

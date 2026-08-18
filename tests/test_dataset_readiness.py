@@ -794,8 +794,10 @@ def test_ade20k_readiness_requires_source_metadata(
     """Require both ADE20K metadata files before reusing an organized cache."""
 
     monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
-    _write_file(tmp_path / "images" / "ADE_val_00000001.jpg")
-    _write_file(tmp_path / "annotations" / "ADE_val_00000001.png")
+    _write_image(tmp_path / "images" / "ADE_val_00000001.jpg", (1, 1))
+    annotation_path = tmp_path / "annotations" / "ADE_val_00000001.png"
+    annotation_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("L", (1, 1), color=1).save(annotation_path)
 
     assert not readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
 

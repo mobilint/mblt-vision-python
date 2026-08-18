@@ -220,13 +220,14 @@ def test_coco_evaluation_rejects_polygons_without_rasterized_foreground(
         )
 
 
-def test_coco_evaluation_rejects_visible_keypoints_outside_images(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("visibility", [1, 2])
+def test_coco_evaluation_rejects_labeled_keypoints_outside_images(
+    monkeypatch: pytest.MonkeyPatch, visibility: int
 ) -> None:
-    """Visible pose coordinates must refer to pixels in the source image."""
+    """Both occluded and visible pose coordinates must be in the source image."""
 
     keypoints = [0.0, 0.0, 0.0] * 17
-    keypoints[:3] = [11.0, 1.0, 2.0]
+    keypoints[:3] = [11.0, 1.0, visibility]
     dataset = SimpleNamespace(
         coco=SimpleNamespace(
             cats={1: {}},

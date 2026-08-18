@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from mblt_vision.compile import vision as compile_module
 from mblt_vision.compile.vision import (
@@ -40,6 +41,13 @@ def _write_images(directory: Path, names: list[str]) -> list[Path]:
         path.write_bytes(name.encode())
         created.append(path)
     return created
+
+
+def _write_image(path: Path, size: tuple[int, int] = (2, 2)) -> None:
+    """Write a minimal valid RGB image for dataset-readiness tests."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size).save(path)
 
 
 def test_resolve_model_config_derives_onnx_filename() -> None:
@@ -324,11 +332,12 @@ def test_depth_dataset_readiness_requires_complete_pairs(
     """Require all paired NYU samples before sampling calibration images."""
 
     monkeypatch.setattr(readiness_module, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
-    _write_images(tmp_path / "images", ["image.png"])
+    image_path = tmp_path / "images" / "image.png"
+    _write_image(image_path)
     (tmp_path / "depth").mkdir()
     assert not compile_module._dataset_ready("depth_estimation", tmp_path, "nyu-depth")
 
-    (tmp_path / "depth" / "image.npy").write_bytes(b"depth")
+    np.save(tmp_path / "depth" / "image.npy", np.ones((2, 2), dtype=np.float32))
     assert compile_module._dataset_ready("depth_estimation", tmp_path, "nyu-depth")
 
 
@@ -350,11 +359,15 @@ def test_semantic_dataset_readiness_checks_taxonomy(
 
     monkeypatch.setattr(readiness_module, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     monkeypatch.setattr(readiness_module, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
-    image_path = _write_images(tmp_path / "images", [image_name])[0]
+    image_path = tmp_path / "images" / image_name
+    _write_image(image_path)
     (tmp_path / "annotations").mkdir()
     assert not compile_module._dataset_ready("semantic_segmentation", tmp_path, dataset)
 
-    (tmp_path / "annotations" / f"{image_path.stem}.png").write_bytes(b"annotation")
+    annotation_value = 1 if dataset == "ade20k" else 7
+    Image.new("L", (2, 2), color=annotation_value).save(
+        tmp_path / "annotations" / f"{image_path.stem}.png"
+    )
     if dataset == "ade20k":
         (tmp_path / "objectInfo150.txt").write_bytes(b"labels")
         (tmp_path / "sceneCategories.txt").write_bytes(b"scenes")

@@ -151,6 +151,34 @@ def test_normalized_truncated_annotation_raises_with_file_and_line(tmp_path) -> 
         _load_ground_truths(str(tmp_path), dataset)
 
 
+@pytest.mark.parametrize(
+    ("label_path", "annotation"),
+    [
+        ("labels/val/image.txt", "0 0 0 0.2 0 0.2 0.2 0 0.2"),
+        ("labels/val_original/image.txt", "0 0 20 0 20 20 0 20 plane 0"),
+    ],
+)
+def test_dota_annotations_reject_duplicate_targets(
+    tmp_path, label_path: str, annotation: str
+) -> None:
+    """A target may be represented only once within one source image."""
+
+    path = tmp_path / label_path
+    path.parent.mkdir(parents=True)
+    path.write_text(f"{annotation}\n{annotation}\n", encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Duplicate DOTAv1 annotation target"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
 def test_original_truncated_annotation_raises_with_file_and_line(tmp_path) -> None:
     """Require a difficulty flag when loading original DOTAv1 labels directly."""
 

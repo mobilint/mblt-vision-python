@@ -19,6 +19,7 @@ from scipy.io.matlab import MatReadError
 
 from ..._tasks import normalize_vision_task
 from ...datasets import get_dataset_category_ids
+from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
@@ -432,7 +433,7 @@ def _coco_task_annotations_valid(
             if image_shape is not None:
                 height, width = image_shape
                 if any(
-                    keypoints[index + 2] == 2
+                    keypoints[index + 2] > 0
                     and not (
                         0 <= keypoints[index] < width
                         and 0 <= keypoints[index + 1] < height
@@ -842,10 +843,11 @@ def _widerface_image_shapes(
             return None
         event_shapes: list[tuple[int, int]] = []
         for stem in image_stems:
+            image_path = root / "images" / event_names[0] / f"{stem}.jpg"
+            if image_path.is_symlink():
+                return None
             try:
-                with Image.open(
-                    root / "images" / event_names[0] / f"{stem}.jpg"
-                ) as image:
+                with Image.open(image_path) as image:
                     image.load()
                     width, height = image.size
             except OSError:
@@ -878,11 +880,31 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
         depths = _files_by_stem(root / "depth", {".npy"}, reject_symlinks=True)
         if images is None or depths is None:
             return False
-        return (
+        if not (
             len(images) == NYU_DEPTH_VALIDATION_SAMPLE_COUNT
             and len(depths) == NYU_DEPTH_VALIDATION_SAMPLE_COUNT
             and images.keys() == depths.keys()
-        )
+        ):
+            return False
+        for stem, image_path in images.items():
+            try:
+                with Image.open(image_path) as image:
+                    image.load()
+                    image_shape = (image.height, image.width)
+                depth = np.load(depths[stem], allow_pickle=False)
+            except (OSError, ValueError):
+                return False
+            if (
+                not np.issubdtype(depth.dtype, np.number)
+                or np.issubdtype(depth.dtype, np.complexfloating)
+                or depth.ndim != 2
+                or depth.shape != image_shape
+                or not np.isfinite(depth).all()
+                or bool((depth < 0).any())
+                or not bool(((depth >= 0.001) & (depth <= 100.0)).any())
+            ):
+                return False
+        return True
 
     images = _files_by_stem(
         root / "images", {".jpg", ".jpeg", ".png"}, reject_symlinks=True
@@ -890,6 +912,41 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     annotations = _files_by_stem(root / "annotations", {".png"}, reject_symlinks=True)
     if images is None or annotations is None or images.keys() != annotations.keys():
         return False
+
+    for stem, image_path in images.items():
+        try:
+            with Image.open(image_path) as image:
+                image.load()
+                image_shape = (image.height, image.width)
+            with Image.open(annotations[stem]) as annotation_image:
+                annotation = np.asarray(annotation_image)
+        except OSError:
+            return False
+        if normalized == "cityscapes" and annotation.ndim == 3:
+            if (
+                annotation.shape[2] not in {3, 4}
+                or not np.array_equal(annotation[..., 0], annotation[..., 1])
+                or not np.array_equal(annotation[..., 0], annotation[..., 2])
+            ):
+                return False
+            annotation = annotation[..., 0]
+        if annotation.ndim != 2 or annotation.shape != image_shape:
+            return False
+        if normalized == "ade20k":
+            if annotation.dtype != np.uint8 or (
+                annotation.size and int(annotation.max()) > 150
+            ):
+                return False
+            if not bool((annotation > 0).any()):
+                return False
+        elif normalized == "cityscapes":
+            if annotation.size and (
+                int(annotation.min()) < 0 or int(annotation.max()) > 255
+            ):
+                return False
+            train_ids = CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)]
+            if not bool((train_ids != 255).any()):
+                return False
 
     if normalized == "ade20k":
         return (

@@ -350,6 +350,7 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
                 raise ValueError(f"Unable to decode staged DOTAv1 image: {image_path}.")
             height, width = image.shape[:2]
             has_positive_target = False
+            seen_targets: set[tuple[int | str, tuple[float, ...]]] = set()
             for line_number, line in enumerate(
                 label_path.read_text(encoding="utf-8").splitlines(), start=1
             ):
@@ -417,16 +418,25 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
                         raise ValueError(
                             f"Unsupported staged DOTAv1 class index at {label_path}:{line_number}."
                         )
+                    target_class: int | str = class_index
                 else:
                     difficulty = fields[9]
                     if fields[8] not in DOTAV1_CLASS_TO_IDX:
                         raise ValueError(
                             f"Unsupported staged DOTAv1 class at {label_path}:{line_number}."
                         )
+                    target_class = fields[8]
                 if difficulty not in {"0", "1", "2"}:
                     raise ValueError(
                         f"Unsupported staged DOTAv1 difficulty flag at {label_path}:{line_number}."
                     )
+                target_key = (target_class, tuple(image_coordinates))
+                if target_key in seen_targets:
+                    raise ValueError(
+                        "Duplicate staged DOTAv1 annotation target at "
+                        f"{label_path}:{line_number}."
+                    )
+                seen_targets.add(target_key)
                 has_positive_target |= difficulty == "0"
             if has_positive_target:
                 positive_stems[kind].add(label_path.stem)
@@ -1859,6 +1869,7 @@ def _write_dotav1_yolo_labels(
     with Image.open(image_path) as image:
         width, height = image.size
     converted_lines: list[str] = []
+    seen_targets: set[tuple[str, tuple[float, ...]]] = set()
     with open(original_label_path, encoding="utf-8") as label_file:
         for line_number, line in enumerate(label_file, start=1):
             fields = line.split()
@@ -1896,6 +1907,13 @@ def _write_dotav1_yolo_labels(
                     f"Unsupported DOTAv1 difficulty flag {fields[9]!r} in "
                     f"{original_label_path} at line {line_number}."
                 )
+            target_key = (class_name, tuple(coordinates))
+            if target_key in seen_targets:
+                raise ValueError(
+                    "Duplicate DOTAv1 annotation target in "
+                    f"{original_label_path} at line {line_number}."
+                )
+            seen_targets.add(target_key)
             normalized = [
                 coordinate / (width if index % 2 == 0 else height)
                 for index, coordinate in enumerate(coordinates)

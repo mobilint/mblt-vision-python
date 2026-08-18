@@ -150,6 +150,7 @@ def _load_ground_truths(
         polygons = []
         ignore_classes = []
         ignore_polygons = []
+        seen_targets: set[tuple[int, tuple[float, ...]]] = set()
 
         # Organizer output keeps the official original annotation alongside the
         # normalized convenience label. Prefer the authoritative original when
@@ -192,6 +193,13 @@ def _load_ground_truths(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
                         f"{label_path}:{line_number}."
                     )
+                target_key = (cls, tuple(coords.flatten().tolist()))
+                if target_key in seen_targets:
+                    raise ValueError(
+                        "Duplicate DOTAv1 annotation target at "
+                        f"{label_path}:{line_number}."
+                    )
+                seen_targets.add(target_key)
                 if len(parts) >= 10 and parts[9] in {"1", "2"}:
                     ignore_classes.append(cls)
                     ignore_polygons.append(coords)
@@ -236,6 +244,13 @@ def _load_ground_truths(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
                         f"{original_label_path}:{line_number}."
                     )
+                target_key = (cls, tuple(coords.flatten().tolist()))
+                if target_key in seen_targets:
+                    raise ValueError(
+                        "Duplicate DOTAv1 annotation target at "
+                        f"{original_label_path}:{line_number}."
+                    )
+                seen_targets.add(target_key)
                 if parts[9] in {"1", "2"}:
                     ignore_classes.append(cls)
                     ignore_polygons.append(coords)
