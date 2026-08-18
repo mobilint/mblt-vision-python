@@ -1,0 +1,41 @@
+"""
+Script to organize the DOTAv1 validation dataset.
+
+This script takes a local archive, extracted directory, or downloadable source
+for DOTAv1 and organizes only the validation split into a structure suitable for
+the model zoo.
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+# ruff: noqa: E402
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from mblt_vision.datasets import get_dataset_config
+from mblt_vision.utils.datasets import organize_dotav1
+
+DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Organize DOTAv1 validation dataset")
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default=DEFAULT_DOTAV1_SOURCE,
+        help="Local path, archive URL, or Google Drive folder URL for DOTAv1",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Path to the directory to save the organized dataset (defaults to cache)",
+    )
+    args = parser.parse_args()
+
+    organize_dotav1(
+        dataset_path=args.dataset_path,
+        output_dir=args.output_dir,
+    )

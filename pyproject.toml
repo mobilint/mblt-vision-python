@@ -2,6 +2,85 @@
 requires = ["setuptools>=70.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "mblt-vision-python"
+dynamic = ["version"]
+description = "Mobilint NPU vision models: classification, detection, segmentation, pose"
+readme = "README.md"
+dependencies = [
+    "mblt-npu-python>=0.0.0",
+    "numpy>=1.26.0",
+    "torch>=2.4.1",
+    "opencv-python>=4.11.0.86",
+    "pillow>=11.1.0",
+    "faster-coco-eval",
+    "gdown>=5.2.0",
+    "huggingface-hub",
+    "matplotlib",
+    "requests>=2.32.0",
+    "scipy",
+    "tqdm",
+    "PyYAML",
+]
+requires-python = ">=3.10,<3.13"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Mobilint" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 [project.urls]
 Home = "https://www.mobilint.com/"
-Repository  = "https://github.com/mobilint/mblt-vision-python"
+Repository = "https://github.com/mobilint/mblt-vision-python"
+
+[project.scripts]
+mblt-vision = "mblt_vision.cli:main"
+
+[project.optional-dependencies]
+onnxruntime = [
+    "onnx",
+    "onnxruntime",
+]
+onnxruntime-gpu = [
+    "onnx; sys_platform != 'darwin'",
+    "onnxruntime-gpu; sys_platform != 'darwin'",
+]
+qbcompiler = [
+    "qbcompiler>=1.2.0",
+    "onnxruntime",
+]
+
+[tool.setuptools]
+packages = { find = { where = ["."], include = ["mblt_vision", "mblt_vision.*"] } }
+
+[tool.setuptools.dynamic]
+version = { attr = "mblt_vision.__version__" }
+
+[tool.setuptools.package-data]
+"mblt_vision" = [
+    "py.typed",
+    "models/*.yaml",
+    "datasets/*.yaml",
+    "datasets/*.txt",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "requires_network: test downloads model artifacts from Hugging Face Hub.",
+    "requires_npu: test requires a configured Mobilint NPU runtime and device.",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-timeout",
+]

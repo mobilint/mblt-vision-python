@@ -1,0 +1,1016 @@
+"""
+Custom dataloaders for vision datasets.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any, Callable
+
+import cv2
+import numpy as np
+import torch
+from faster_coco_eval import COCO
+from mblt_vision.utils.preprocess.letterbox import letterbox_semantic_mask
+from PIL import Image
+
+from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
+from .readiness import IMAGE_SUFFIXES
+
+
+def _unique_paths_by_stem(
+    directory: str, suffixes: tuple[str, ...], description: str
+) -> dict[str, str]:
+    """Return supported direct-child files keyed by unique case-preserving stems."""
+
+    names = [name for name in os.listdir(directory) if name.lower().endswith(suffixes)]
+    stems = [os.path.splitext(name)[0] for name in names]
+    if len(stems) != len(set(stems)):
+        raise ValueError(f"{description} contain duplicate filename stems.")
+    return {
+        stem: os.path.join(directory, name)
+        for stem, name in zip(stems, names, strict=True)
+    }
+
+
+class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int]]):
+    """Custom COCO dataset class for loading images and metadata.
+
+    This class provides a simple interface for accessing COCO formatted data
+    without requiring external library dependencies like torchvision.
+
+    Attributes:
+        root (str): Root directory path containing the images.
+        coco (COCO): COCO helper object from faster_coco_eval.
+        ids (list[int]): Sorted list of image IDs in the dataset.
+    """
+
+    def __init__(
+        self, root: str, annFile: str, min_keypoints: int | None = None
+    ) -> None:
+        """Initialize the custom COCO dataset.
+
+        Args:
+            root (str): Path to the directory containing images.
+            annFile (str): Path to the COCO annotation JSON file.
+            min_keypoints: If set, keep only images with at least one
+                annotation whose ``num_keypoints`` is greater than this value.
+        """
+        self.root = root
+        try:
+            raw_annotation = json.loads(Path(annFile).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Unable to read COCO annotation file {annFile}: {exc}."
+            ) from exc
+        if not isinstance(raw_annotation, dict):
+            raise ValueError(
+                f"COCO annotation file {annFile} must contain a JSON object."
+            )
+        self.raw_annotation = raw_annotation
+        self.coco = COCO(annFile)
+        if min_keypoints is None:
+            self.ids = list(sorted(self.coco.imgs.keys()))
+        else:
+            self.ids = list(
+                sorted(
+                    {
+                        ann["image_id"]
+                        for ann in self.coco.anns.values()
+                        if ann.get("num_keypoints", 0) > min_keypoints
+                    }
+                )
+            )
+
+    def _load_image(self, image_id: int) -> np.ndarray:
+        """Load image by ID"""
+        file_name = self.coco.loadImgs(image_id)[0]["file_name"]
+        if not isinstance(file_name, str) or not file_name:
+            raise ValueError(f"COCO image ID {image_id} has an invalid file_name.")
+        relative_path = Path(file_name)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise ValueError(
+                f"COCO image ID {image_id} has an unsafe file_name: {file_name!r}."
+            )
+        image_root = Path(self.root).resolve()
+        image_path = (image_root / relative_path).resolve()
+        try:
+            image_path.relative_to(image_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"COCO image ID {image_id} resolves outside the image root: {file_name!r}."
+            ) from exc
+        image = cv2.imread(str(image_path))  # Load image (BGR format)
+
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {image_path}")
+
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, int, int, int]:
+        """Get the image and target by index"""
+        image_id = self.ids[index]
+        image = self._load_image(image_id)
+        height = self.coco.imgs[image_id]["height"]
+        width = self.coco.imgs[image_id]["width"]
+        if (height, width) != image.shape[:2]:
+            raise ValueError(
+                "COCO annotation geometry does not match decoded image for "
+                f"image ID {image_id}: annotation {(height, width)}, "
+                f"image {image.shape[:2]}."
+            )
+        return image, index, height, width
+
+    def __len__(self) -> int:
+        """Return the total number of images"""
+        return len(self.ids)
+
+
+CustomCocodata = CustomCOCODataset
+
+
+def get_coco_loader(
+    dataset: CustomCOCODataset,
+    batch_size: int,
+    preprocess_fn: Callable,
+) -> torch.utils.data.DataLoader:
+    """Creates a DataLoader for the COCO dataset.
+
+    Args:
+        dataset (CustomCOCODataset): The dataset instance to load from.
+        batch_size (int): Number of samples per batch.
+        preprocess_fn (Callable): Function used to preprocess images.
+
+    Returns:
+        torch.utils.data.DataLoader: A configured DataLoader for the COCO dataset.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[np.ndarray, np.ndarray, list[Any], tuple[int, ...]]:
+        """Collate function for COCO DataLoader."""
+        batch = list(filter(lambda x: x is not None, batch))
+        images, idx, height, width = zip(*batch)
+
+        processed_images = []
+        ratio_pads = []
+        for img in images:
+            processed = preprocess_fn(img)
+            if (
+                isinstance(processed, tuple)
+                and len(processed) == 2
+                and isinstance(processed[1], dict)
+            ):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
+
+        height_arr = np.array(height)
+        width_arr = np.array(width)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.stack((height_arr, width_arr), axis=1),
+            ratio_pads,
+            idx,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )
+
+
+class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]]):
+    """NYU Depth V2 validation dataset with paired RGB images and ``.npy`` depth maps."""
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's ``images/`` and ``depth/`` validation-only layout."""
+
+        self.root = root
+        image_root, depth_root = (
+            os.path.join(root, "images"),
+            os.path.join(root, "depth"),
+        )
+        if not os.path.isdir(image_root) or not os.path.isdir(depth_root):
+            raise FileNotFoundError(
+                f"NYU Depth requires images/ and depth/ directories under: {root}"
+            )
+        images = _unique_paths_by_stem(
+            image_root, self.IMG_EXTENSIONS, "NYU Depth images"
+        )
+        depths = _unique_paths_by_stem(depth_root, (".npy",), "NYU Depth depth maps")
+        missing_depths, missing_images = (
+            sorted(set(images) - set(depths)),
+            sorted(set(depths) - set(images)),
+        )
+        if missing_depths or missing_images:
+            details = []
+            if missing_depths:
+                details.append(
+                    f"images without depth maps: {', '.join(missing_depths[:5])}"
+                )
+            if missing_images:
+                details.append(
+                    f"depth maps without images: {', '.join(missing_images[:5])}"
+                )
+            raise ValueError(f"NYU Depth image/depth mismatch ({'; '.join(details)}).")
+        if not images:
+            raise ValueError(f"NYU Depth contains no image/depth pairs: {root}")
+        self.samples = [(images[stem], depths[stem], stem) for stem in sorted(images)]
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+        """Load an RGB image and finite-safe depth target."""
+
+        image_path, depth_path, stem = self.samples[index]
+        image = cv2.imread(image_path)
+        if image is None:
+            raise FileNotFoundError(f"NYU Depth image not found: {image_path}")
+        raw_depth = np.load(depth_path, allow_pickle=False)
+        if not np.issubdtype(raw_depth.dtype, np.number) or np.issubdtype(
+            raw_depth.dtype, np.complexfloating
+        ):
+            raise ValueError(
+                "NYU Depth target must use a real numeric dtype, "
+                f"got {raw_depth.dtype}: {depth_path}"
+            )
+        depth = np.asarray(raw_depth, dtype=np.float32)
+        if depth.ndim != 2:
+            raise ValueError(
+                f"NYU Depth target must be two-dimensional, got {depth.shape}: {depth_path}"
+            )
+        if depth.shape != image.shape[:2]:
+            raise ValueError(
+                "NYU Depth image and target shapes must match for "
+                f"{stem}: image {image.shape[:2]}, depth {depth.shape}."
+            )
+        if not bool(np.isfinite(depth).all()):
+            raise ValueError(
+                f"NYU Depth target must contain only finite values: {depth_path}"
+            )
+        if bool((depth < 0).any()):
+            raise ValueError(
+                f"NYU Depth target must not contain negative values: {depth_path}"
+            )
+        return (
+            cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
+            depth,
+            stem,
+        )
+
+    def __len__(self) -> int:
+        """Return the number of paired validation samples."""
+
+        return len(self.samples)
+
+
+def get_nyu_depth_loader(
+    dataset: CustomNYUDepth,
+    batch_size: int,
+    preprocess_fn: Callable,
+    image_size: tuple[int, int] | None = None,
+) -> torch.utils.data.DataLoader:
+    """Create a NYU Depth loader with optional stretch-to-size validation preprocessing.
+
+    Args:
+        dataset: Paired NYU Depth validation dataset.
+        batch_size: Number of samples per batch.
+        preprocess_fn: Preprocessing applied after an optional validation resize.
+        image_size: Optional ``(height, width)`` used to stretch RGB inputs with bilinear
+            interpolation and depth targets with nearest-neighbor interpolation. This
+            matches the Ultralytics depth validation pipeline.
+
+    Returns:
+        Configured NYU Depth validation loader.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[
+        np.ndarray, list[np.ndarray], list[tuple[int, int]], list[Any], tuple[str, ...]
+    ]:
+        images, targets, stems = zip(*batch)
+        processed_images, shapes, ratio_pads = [], [], []
+        processed_targets = []
+        for image, target in zip(images, targets):
+            if image_size is not None:
+                height, width = image_size
+                image = cv2.resize(
+                    image, (width, height), interpolation=cv2.INTER_LINEAR
+                )
+                target = cv2.resize(
+                    target, (width, height), interpolation=cv2.INTER_NEAREST
+                )
+            shapes.append(tuple(image.shape[:2]))
+            processed = preprocess_fn(image)
+            if (
+                isinstance(processed, tuple)
+                and len(processed) == 2
+                and isinstance(processed[1], dict)
+            ):
+                processed_image, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_image = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_image)
+            processed_targets.append(target)
+        return np.stack(processed_images), processed_targets, shapes, ratio_pads, stems
+
+    return torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
+    )
+
+
+class CustomADE20K(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]]):
+    """ADE20K validation dataset with paired RGB images and semantic PNG masks."""
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's flat ``images/`` and ``annotations/`` layout."""
+
+        self.root = root
+        image_root = os.path.join(root, "images")
+        annotation_root = os.path.join(root, "annotations")
+        if not os.path.isdir(image_root) or not os.path.isdir(annotation_root):
+            raise FileNotFoundError(
+                f"ADE20K requires images/ and annotations/ directories under: {root}"
+            )
+        images = _unique_paths_by_stem(image_root, self.IMG_EXTENSIONS, "ADE20K images")
+        annotations = _unique_paths_by_stem(
+            annotation_root, (".png",), "ADE20K annotations"
+        )
+        missing_annotations = sorted(set(images) - set(annotations))
+        missing_images = sorted(set(annotations) - set(images))
+        if missing_annotations or missing_images:
+            details = []
+            if missing_annotations:
+                details.append(
+                    f"images without annotations: {', '.join(missing_annotations[:5])}"
+                )
+            if missing_images:
+                details.append(
+                    f"annotations without images: {', '.join(missing_images[:5])}"
+                )
+            raise ValueError(
+                f"ADE20K image/annotation mismatch ({'; '.join(details)})."
+            )
+        if not images:
+            raise ValueError(f"ADE20K contains no image/annotation pairs: {root}")
+        self.samples = [
+            (images[stem], annotations[stem], stem) for stem in sorted(images)
+        ]
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+        """Load one RGB image and map its source labels to model class IDs."""
+
+        image_path, annotation_path, stem = self.samples[index]
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is None:
+            raise FileNotFoundError(f"ADE20K image not found: {image_path}")
+        try:
+            with Image.open(annotation_path) as annotation_image:
+                annotation = np.asarray(annotation_image)
+        except OSError as exc:
+            raise FileNotFoundError(
+                f"ADE20K annotation not found: {annotation_path}"
+            ) from exc
+        if annotation.ndim != 2 or annotation.dtype != np.uint8:
+            raise ValueError(
+                "ADE20K annotations must be single-channel 8-bit PNG masks: "
+                f"{annotation_path}"
+            )
+        if image.shape[:2] != annotation.shape:
+            raise ValueError(
+                f"ADE20K image and annotation shapes must match, got {image.shape[:2]} and {annotation.shape}: {stem}"
+            )
+        if annotation.size and int(annotation.max()) > 150:
+            raise ValueError(
+                f"ADE20K annotation values must be in [0, 150]: {annotation_path}"
+            )
+        target = np.full(annotation.shape, 255, dtype=np.uint8)
+        valid = annotation > 0
+        target[valid] = annotation[valid] - 1
+        if not valid.any():
+            raise ValueError(
+                f"ADE20K annotation contains no evaluable class IDs: {annotation_path}"
+            )
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem
+
+    def __len__(self) -> int:
+        """Return the number of paired validation samples."""
+
+        return len(self.samples)
+
+
+def get_ade20k_loader(
+    dataset: CustomADE20K,
+    batch_size: int,
+    preprocess_fn: Callable,
+    image_size: tuple[int, int],
+) -> torch.utils.data.DataLoader:
+    """Create an ADE20K loader that applies matching letterbox geometry to masks.
+
+    Args:
+        dataset: Paired ADE20K validation dataset.
+        batch_size: Number of samples per batch.
+        preprocess_fn: Image preprocessing function that returns letterbox metadata.
+        image_size: Configured model input size as ``(height, width)``.
+
+    Returns:
+        Configured ADE20K validation loader.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[
+        np.ndarray, np.ndarray, list[tuple[int, int]], list[Any], tuple[str, ...]
+    ]:
+        images, targets, stems = zip(*batch)
+        processed_images, processed_targets, shapes, ratio_pads = [], [], [], []
+        input_height, input_width = image_size
+        for image, target in zip(images, targets):
+            shapes.append(tuple(image.shape[:2]))
+            processed = preprocess_fn(image)
+            if not (
+                isinstance(processed, tuple)
+                and len(processed) == 2
+                and isinstance(processed[1], dict)
+            ):
+                raise ValueError(
+                    "ADE20K preprocessing must return image data and letterbox metadata."
+                )
+            processed_image, metadata = processed
+            ratio_pad = metadata.get("ratio_pad")
+            if ratio_pad is None:
+                raise ValueError(
+                    "ADE20K preprocessing requires LetterBox ratio_pad metadata."
+                )
+            processed_target, target_ratio_pad = letterbox_semantic_mask(
+                target,
+                [input_height, input_width],
+            )
+            if target_ratio_pad != ratio_pad:
+                raise ValueError(
+                    "ADE20K image and mask LetterBox geometry do not match."
+                )
+            processed_images.append(processed_image)
+            processed_targets.append(processed_target)
+            ratio_pads.append(ratio_pad)
+        return (
+            np.stack(processed_images),
+            np.stack(processed_targets),
+            shapes,
+            ratio_pads,
+            stems,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
+    )
+
+
+class CustomCityscapes(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]]):
+    """Cityscapes validation dataset with paired RGB images and source-ID masks."""
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's flat ``images/`` and ``annotations/`` layout."""
+
+        self.root = root
+        image_root = os.path.join(root, "images")
+        annotation_root = os.path.join(root, "annotations")
+        if not os.path.isdir(image_root) or not os.path.isdir(annotation_root):
+            raise FileNotFoundError(
+                f"Cityscapes requires images/ and annotations/ directories under: {root}"
+            )
+        images = _unique_paths_by_stem(
+            image_root, self.IMG_EXTENSIONS, "Cityscapes images"
+        )
+        annotations = _unique_paths_by_stem(
+            annotation_root, (".png",), "Cityscapes annotations"
+        )
+        missing_annotations = sorted(set(images) - set(annotations))
+        missing_images = sorted(set(annotations) - set(images))
+        if missing_annotations or missing_images:
+            details = []
+            if missing_annotations:
+                details.append(
+                    f"images without annotations: {', '.join(missing_annotations[:5])}"
+                )
+            if missing_images:
+                details.append(
+                    f"annotations without images: {', '.join(missing_images[:5])}"
+                )
+            raise ValueError(
+                f"Cityscapes image/annotation mismatch ({'; '.join(details)})."
+            )
+        if not images:
+            raise ValueError(f"Cityscapes contains no image/annotation pairs: {root}")
+        self.samples = [
+            (images[stem], annotations[stem], stem) for stem in sorted(images)
+        ]
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+        """Load an image and map Cityscapes source IDs to contiguous train IDs."""
+
+        image_path, annotation_path, stem = self.samples[index]
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if image is None:
+            raise FileNotFoundError(f"Cityscapes image not found: {image_path}")
+        with Image.open(annotation_path) as annotation_image:
+            annotation = np.asarray(annotation_image)
+        if annotation.ndim == 3:
+            if annotation.shape[2] not in {3, 4} or not np.array_equal(
+                annotation[..., 0], annotation[..., 1]
+            ):
+                raise ValueError(
+                    f"Cityscapes RGB annotation channels must contain identical source IDs: {annotation_path}"
+                )
+            if not np.array_equal(annotation[..., 0], annotation[..., 2]):
+                raise ValueError(
+                    f"Cityscapes RGB annotation channels must contain identical source IDs: {annotation_path}"
+                )
+            annotation = annotation[..., 0]
+        if annotation.ndim != 2:
+            raise ValueError(
+                f"Cityscapes annotation must be grayscale or RGB-grayscale: {annotation_path}"
+            )
+        if image.shape[:2] != annotation.shape:
+            raise ValueError(
+                "Cityscapes image and annotation shapes must match, "
+                f"got {image.shape[:2]} and {annotation.shape}: {stem}"
+            )
+        if annotation.size and (
+            int(annotation.min()) < 0 or int(annotation.max()) > 255
+        ):
+            raise ValueError(
+                f"Cityscapes annotation values must be in [0, 255]: {annotation_path}"
+            )
+        source_ids = np.unique(annotation.astype(np.uint8))
+        known_ids = np.array([*range(34), 255], dtype=np.uint8)
+        unknown_ids = source_ids[~np.isin(source_ids, known_ids)]
+        if unknown_ids.size:
+            raise ValueError(
+                "Cityscapes annotation contains unsupported source IDs "
+                f"{unknown_ids.tolist()}: {annotation_path}"
+            )
+        target = CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)]
+        if not (target != 255).any():
+            raise ValueError(
+                f"Cityscapes annotation contains no evaluable class IDs: {annotation_path}"
+            )
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB), target, stem
+
+    def __len__(self) -> int:
+        """Return the number of paired validation samples."""
+
+        return len(self.samples)
+
+
+def get_cityscapes_loader(
+    dataset: CustomCityscapes,
+    batch_size: int,
+    preprocess_fn: Callable,
+    image_size: tuple[int, int],
+) -> torch.utils.data.DataLoader:
+    """Create a Cityscapes loader with image-matching letterbox geometry."""
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[
+        np.ndarray, np.ndarray, list[tuple[int, int]], list[Any], tuple[str, ...]
+    ]:
+        images, targets, stems = zip(*batch)
+        processed_images, processed_targets, shapes, ratio_pads = [], [], [], []
+        input_height, input_width = image_size
+        for image, target in zip(images, targets):
+            shapes.append(tuple(image.shape[:2]))
+            processed = preprocess_fn(image)
+            if not (
+                isinstance(processed, tuple)
+                and len(processed) == 2
+                and isinstance(processed[1], dict)
+            ):
+                raise ValueError(
+                    "Cityscapes preprocessing must return image data and letterbox metadata."
+                )
+            processed_image, metadata = processed
+            ratio_pad = metadata.get("ratio_pad")
+            if ratio_pad is None:
+                raise ValueError(
+                    "Cityscapes preprocessing requires LetterBox ratio_pad metadata."
+                )
+            processed_target, target_ratio_pad = letterbox_semantic_mask(
+                target,
+                [input_height, input_width],
+            )
+            if target_ratio_pad != ratio_pad:
+                raise ValueError(
+                    "Cityscapes image and mask LetterBox geometry do not match."
+                )
+            processed_images.append(processed_image)
+            processed_targets.append(processed_target)
+            ratio_pads.append(ratio_pad)
+        return (
+            np.stack(processed_images),
+            np.stack(processed_targets),
+            shapes,
+            ratio_pads,
+            stems,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=loader
+    )
+
+
+class CustomDOTAv1(torch.utils.data.Dataset[tuple[np.ndarray, str, int, int]]):
+    """Custom DOTAv1 validation dataset for OBB evaluation.
+
+    Attributes:
+        root: DOTAv1 dataset root.
+        image_root: Directory containing validation images.
+        ids: Image IDs derived from file stems.
+    """
+
+    IMG_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
+
+    def __init__(self, root: str) -> None:
+        """Initializes the DOTAv1 validation dataset.
+
+        Args:
+            root: DOTAv1 root containing flat ``images/`` or legacy
+                ``images/val`` validation images.
+
+        Raises:
+            FileNotFoundError: If the validation image directory is missing.
+            ValueError: If neither supported layout contains validation images.
+        """
+        self.root = root
+        self.image_root = os.path.join(root, "images")
+        if not os.path.isdir(self.image_root):
+            raise FileNotFoundError(
+                f"DOTAv1 image directory not found: {self.image_root}"
+            )
+        self.image_paths = self._find_image_paths(self.image_root)
+        legacy_image_root = os.path.join(self.image_root, "val")
+        if not self.image_paths and os.path.isdir(legacy_image_root):
+            self.image_root = legacy_image_root
+            self.image_paths = self._find_image_paths(self.image_root)
+        if not self.image_paths:
+            raise ValueError(
+                f"DOTAv1 validation images not found directly under {os.path.join(root, 'images')} "
+                "or its legacy `val` subdirectory."
+            )
+        self.ids = [
+            os.path.splitext(os.path.basename(path))[0] for path in self.image_paths
+        ]
+        if len(self.ids) != len(set(self.ids)):
+            raise ValueError(
+                "DOTAv1 validation images contain duplicate filename stems."
+            )
+
+    def _find_image_paths(self, image_root: str) -> list[str]:
+        """Return supported image files directly under a DOTAv1 image directory."""
+
+        return [
+            os.path.join(image_root, file_name)
+            for file_name in sorted(os.listdir(image_root))
+            if file_name.lower().endswith(self.IMG_EXTENSIONS)
+        ]
+
+    def _load_image(self, image_path: str) -> np.ndarray:
+        """Load an image as RGB."""
+        image = cv2.imread(image_path)
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {image_path}")
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, str, int, int]:
+        """Get the image and metadata by index."""
+        image_path = self.image_paths[index]
+        image = self._load_image(image_path)
+        height, width = image.shape[:2]
+        return image, self.ids[index], height, width
+
+    def __len__(self) -> int:
+        """Return the number of validation images."""
+        return len(self.image_paths)
+
+
+def get_dota_loader(
+    dataset: CustomDOTAv1, batch_size: int, preprocess_fn: Callable
+) -> torch.utils.data.DataLoader:
+    """Creates a DataLoader for DOTAv1 validation.
+
+    Args:
+        dataset: The DOTAv1 dataset instance.
+        batch_size: Number of samples per batch.
+        preprocess_fn: Function used to preprocess images.
+
+    Returns:
+        Configured DataLoader for DOTAv1.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[np.ndarray, np.ndarray, list[Any], tuple[str, ...]]:
+        """Collate function for DOTAv1 DataLoader."""
+        batch = list(filter(lambda x: x is not None, batch))
+        images, image_ids, height, width = zip(*batch)
+
+        processed_images = []
+        ratio_pads = []
+        for img in images:
+            processed = preprocess_fn(img)
+            if (
+                isinstance(processed, tuple)
+                and len(processed) == 2
+                and isinstance(processed[1], dict)
+            ):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.stack((np.array(height), np.array(width)), axis=1),
+            ratio_pads,
+            image_ids,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )
+
+
+class CustomImageFolder(torch.utils.data.Dataset[tuple[Image.Image, int]]):
+    """Custom ImageFolder dataset for loading images from class-based directory structures.
+
+    Expects data to be organized in the format: root/class_name/image.jpg.
+
+    Attributes:
+        root (str): Root directory path.
+        classes (list[str]): List of class names found in the root directory.
+        class_to_idx (dict): Mapping from class name to class index.
+        samples (list[tuple]): List of (image_path, class_index) tuples.
+    """
+
+    def __init__(self, root: str) -> None:
+        """Initializes the CustomImageFolder instance.
+
+        Args:
+            root (str): Path to the root directory.
+        """
+        self.root = root
+        self.classes, self.class_to_idx = self.find_classes(root)
+        self.samples: list[tuple[str, int]] = []
+        self.make_dataset()
+
+    def make_dataset(self) -> None:
+        """Scans the root directory to create a list of samples."""
+        instances = []
+        for target_class in sorted(self.class_to_idx.keys()):
+            class_index = self.class_to_idx[target_class]
+            target_dir = os.path.join(self.root, target_class)
+            if not os.path.isdir(target_dir):
+                continue
+            for fname in sorted(os.listdir(target_dir)):
+                path = os.path.join(target_dir, fname)
+                if not os.path.isfile(path):
+                    continue
+                if os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES:
+                    continue
+                instances.append((path, class_index))
+
+        self.samples = instances
+
+    def loader(self, path: str) -> Image.Image:
+        """Load image from path using PIL."""
+        with open(path, "rb") as f:
+            img = Image.open(f)
+            return img.convert("RGB")
+
+    def find_classes(self, directory: str) -> tuple[list[str], dict[str, int]]:
+        """Find classes in the specified directory."""
+        classes = sorted([d.name for d in os.scandir(directory) if d.is_dir()])
+        class_to_idx = {cls: i for i, cls in enumerate(classes)}
+        return classes, class_to_idx
+
+    def __getitem__(self, index: int) -> tuple[Image.Image, int]:
+        """
+        Get sample and target at the specified index.
+        Args:
+            index (int): Index of the sample to retrieve.
+        Returns:
+            tuple: (sample, target) where sample is the loaded image and target is the class index.
+        """
+        path, target = self.samples[index]
+        sample = self.loader(path)
+        return sample, target
+
+    def __len__(self) -> int:
+        """
+        Return the total number of samples.
+        Returns:
+            int: Number of samples in the dataset.
+        """
+        return len(self.samples)
+
+
+def get_imagenet_loader(
+    dataset: CustomImageFolder, batch_size: int, preprocess_fn: Callable
+) -> torch.utils.data.DataLoader:
+    """Creates a DataLoader for the ImageNet dataset.
+
+    Args:
+        dataset (CustomImageFolder): The dataset instance to load from.
+        batch_size (int): Number of samples per batch.
+        preprocess_fn (Callable): Function used to preprocess images.
+
+    Returns:
+        torch.utils.data.DataLoader: A configured DataLoader for the ImageNet dataset.
+    """
+
+    def loader(batch: list[Any]) -> tuple[np.ndarray, np.ndarray]:
+        """Collate function for ImageNet DataLoader."""
+        batch = list(filter(lambda x: x is not None, batch))  # remove None
+        images, labels = zip(*batch)
+        processed_images = []
+        for img in images:
+            img = preprocess_fn(img)
+            processed_images.append(img)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.array(labels),
+        )  # BHWC, labels
+
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )
+
+
+class CustomWiderFaceDataset(torch.utils.data.Dataset[tuple[np.ndarray, str, str]]):
+    """Custom dataset class for the WiderFace dataset.
+
+    Attributes:
+        root (str): Path to the root directory containing WiderFace images.
+        classes (list[str]): List of class/event names found in the root.
+        samples (list[tuple]): List of (image_path, class_name, file_name) tuples.
+    """
+
+    def __init__(self, root: str) -> None:
+        """Initialize the custom WiderFace dataset.
+
+        Args:
+            root (str): Path to the directory containing WiderFace images.
+        """
+        self.root = root
+        self.classes = self.find_classes(root)
+        self.samples: list[tuple[str, str, str]] = []
+        self.make_dataset()
+
+    def make_dataset(self) -> None:
+        """Scans the root directory to create a list of samples."""
+        instances = []
+        for target_class in self.classes:
+            target_dir = os.path.join(self.root, target_class)
+            if not os.path.isdir(target_dir):
+                continue
+            for fname in sorted(os.listdir(target_dir)):
+                path = os.path.join(target_dir, fname)
+                if (
+                    os.path.islink(path)
+                    or not os.path.isfile(path)
+                    or os.path.splitext(fname)[1].lower() not in IMAGE_SUFFIXES
+                ):
+                    continue
+                instances.append((path, target_class, fname))
+
+        self.samples = instances
+
+    def loader(self, image_path: str) -> np.ndarray:
+        """Load image by image path"""
+        image = cv2.imread(image_path)  # Load image (BGR format)
+        if image is None:
+            raise FileNotFoundError(f"Image not found: {image_path}")
+        return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
+
+    def find_classes(self, directory: str) -> list[str]:
+        """Find classes in the specified directory."""
+        unsorted_classes = [d.name for d in os.scandir(directory) if d.is_dir()]
+        class_to_idx = {}
+        for cls_name in unsorted_classes:
+            cls_idx = int(cls_name.split("--")[0])
+            class_to_idx[cls_name] = cls_idx
+
+        sorted_classes = sorted(
+            class_to_idx.keys(), key=lambda x: class_to_idx[x]
+        )  # sort by dictionary value with ascending order
+
+        return sorted_classes
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, str, str]:
+        """
+        Get the image and target by index.
+        Args:
+            index (int): Index of the sample to retrieve.
+        Returns:
+            tuple: (image, target_class, fname) where image is the loaded image in RGB format.
+        """
+        image_path, target_class, fname = self.samples[index]
+        image = self.loader(image_path)
+
+        return image, target_class, fname
+
+    def __len__(self) -> int:
+        """
+        Return the total number of images.
+        Returns:
+            int: Number of images in the dataset.
+        """
+        return len(self.samples)
+
+
+CustomWiderface = CustomWiderFaceDataset
+
+
+def get_widerface_loader(
+    dataset: CustomWiderFaceDataset, batch_size: int, preprocess_fn: Callable
+) -> torch.utils.data.DataLoader:
+    """Creates a DataLoader for the WiderFace dataset.
+
+    Args:
+        dataset (CustomWiderFaceDataset): The dataset instance to load from.
+        batch_size (int): Number of samples per batch.
+        preprocess_fn (Callable): Function used to preprocess images.
+
+    Returns:
+        torch.utils.data.DataLoader: A configured DataLoader for the WiderFace dataset.
+    """
+
+    def loader(
+        batch: list[Any],
+    ) -> tuple[
+        np.ndarray, np.ndarray, list[Any | None], tuple[str, ...], tuple[str, ...]
+    ]:
+        """Collate function for WiderFace DataLoader."""
+        batch = list(filter(lambda x: x is not None, batch))
+        images, target_classes, fnames = zip(*batch)
+        processed_images = []
+        heights = []
+        widths = []
+        ratio_pads = []
+        for img in images:
+            height, width = img.shape[:2]
+            processed = preprocess_fn(img)
+            if isinstance(processed, tuple):
+                processed_img, metadata = processed
+                ratio_pads.append(metadata.get("ratio_pad"))
+            else:
+                processed_img = processed
+                ratio_pads.append(None)
+            processed_images.append(processed_img)
+            heights.append(height)
+            widths.append(width)
+
+        return (
+            np.stack(processed_images, axis=0),
+            np.stack((heights, widths), axis=1),
+            ratio_pads,
+            target_classes,
+            fnames,
+        )
+
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=loader,
+    )

@@ -1,0 +1,1121 @@
+"""
+Wrapper classes for MBLT model execution.
+"""
+
+from __future__ import annotations
+
+import copy
+import importlib
+import os
+import stat
+import sys
+import tempfile
+from pathlib import Path
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Sequence, cast
+
+import numpy as np
+import torch
+import yaml
+from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import EntryNotFoundError
+
+from mblt_npu import MobilintNPUBackend, ONNXBackend, normalize_target_device
+from ._model_paths import resolve_framework as _resolve_framework
+from ._model_paths import split_model_paths as _split_model_paths
+from ._model_paths import (
+    uses_shifted_engine_model_path_layout as _uses_shifted_engine_model_path_layout,
+)
+from .utils.postprocess import build_postprocess
+from .utils.preprocess import build_preprocess
+from .utils.results import Results
+from .utils.types import TensorLike
+
+if TYPE_CHECKING:
+    from qbruntime import Cluster, CoreId
+
+MODEL_CONFIG_DIR = Path(__file__).parent / "models"
+
+ONNXRUNTIME_INSTALL_GUIDE = (
+    "onnxruntime is not installed. To use ONNX inference, install one of the optional extras:\n"
+    "pip install mblt-vision-python[onnxruntime]\n"
+    + (
+        "or\npip install mblt-vision-python[onnxruntime-gpu]"
+        if sys.platform != "darwin"
+        else ""
+    )
+)
+CoreMode = str
+CORE_MODES: tuple[CoreMode, ...] = ("single", "multi", "global4", "global8")
+REGULUS_TARGET_DEVICES = frozenset({"regulus-ra", "regulus-rb"})
+
+
+def core_modes_for_target_device(target_device: str) -> tuple[CoreMode, ...]:
+    """Return the Vision core modes supported by a normalized NPU board."""
+
+    if normalize_target_device(target_device) in REGULUS_TARGET_DEVICES:
+        return ("single",)
+    return CORE_MODES
+
+
+def normalize_core_mode(
+    core_mode: str, *, target_device: str | None = None
+) -> CoreMode:
+    """Validate a Vision engine core mode, including board compatibility."""
+
+    if core_mode not in CORE_MODES:
+        raise ValueError(
+            f"Invalid core mode '{core_mode}'. Expected one of {list(CORE_MODES)}."
+        )
+    if target_device is not None:
+        normalized_target_device = normalize_target_device(target_device)
+        supported_modes = core_modes_for_target_device(normalized_target_device)
+        if core_mode not in supported_modes:
+            raise ValueError(
+                f"Core mode '{core_mode}' is not supported by "
+                f"{normalized_target_device}; expected one of {list(supported_modes)}."
+            )
+    return core_mode
+
+
+__all__ = [
+    "CoreMode",
+    "core_modes_for_target_device",
+    "MOBILINT_CACHE_DIR",
+    "get_mobilint_cache_dir",
+    "normalize_core_mode",
+    "resolve_model_config",
+    "MBLT_Engine",
+]
+
+
+def _derive_onnx_filename(file_cfg: dict[str, Any]) -> str | None:
+    """Return the configured or MXQ-derived ONNX artifact filename.
+
+    ``onnx_filename`` is only required when the Hub ONNX artifact does not share
+    the MXQ artifact stem. Otherwise every model configuration follows the same
+    ``.mxq`` to ``.onnx`` convention.
+    """
+
+    onnx_filename = file_cfg.get("onnx_filename")
+    if isinstance(onnx_filename, str) and onnx_filename:
+        return onnx_filename
+
+    filename = file_cfg.get("filename")
+    if not isinstance(filename, str) or not filename:
+        return None
+
+    return f"{Path(filename).stem}.onnx"
+
+
+def _normalize_model_artifacts(model_config: dict[str, Any]) -> dict[str, Any]:
+    """Populate the derived ONNX artifact name in a resolved model configuration."""
+
+    normalized = copy.deepcopy(model_config)
+    file_cfg = normalized.get("file_cfg")
+    if not isinstance(file_cfg, dict):
+        return normalized
+
+    onnx_filename = _derive_onnx_filename(file_cfg)
+    if onnx_filename is not None:
+        file_cfg["onnx_filename"] = onnx_filename
+    return normalized
+
+
+def _default_cache_dir() -> str:
+    """Returns a writable cache directory for downloaded vision artifacts."""
+
+    preferred = Path(os.path.expanduser("~/.mblt_model_zoo"))
+    try:
+        preferred.mkdir(parents=True, mode=0o700, exist_ok=True)
+        preferred_stat = os.lstat(preferred)
+        if (
+            not stat.S_ISDIR(preferred_stat.st_mode)
+            or stat.S_ISLNK(preferred_stat.st_mode)
+            or preferred_stat.st_uid != os.getuid()
+            or preferred_stat.st_mode & 0o077
+        ):
+            return _fallback_cache_dir()
+        with tempfile.NamedTemporaryFile(prefix=".write_test-", dir=preferred):
+            pass
+        return str(preferred)
+    except OSError:
+        return _fallback_cache_dir()
+
+
+def _fallback_cache_dir() -> str:
+    """Return a stable private fallback cache when the home cache is unavailable."""
+
+    uid = os.getuid()
+    fallback = Path(tempfile.gettempdir()) / f"mblt_model_zoo-{uid}"
+    try:
+        os.mkdir(fallback, mode=0o700)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to create fallback Mobilint cache directory: {fallback}"
+        ) from exc
+
+    fallback_stat = os.lstat(fallback)
+    if (
+        not stat.S_ISDIR(fallback_stat.st_mode)
+        or stat.S_ISLNK(fallback_stat.st_mode)
+        or fallback_stat.st_uid != uid
+        or fallback_stat.st_mode & 0o077
+    ):
+        raise RuntimeError(
+            f"Fallback Mobilint cache directory is not a private directory owned by this user: {fallback}"
+        )
+
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".write_test-", dir=fallback):
+            pass
+    except OSError as exc:
+        raise RuntimeError(
+            f"Fallback Mobilint cache directory is not writable: {fallback}"
+        ) from exc
+    return str(fallback)
+
+
+MOBILINT_CACHE_DIR = os.path.expanduser("~/.mblt_model_zoo")
+"""Preferred artifact cache root, without creating it during import."""
+
+_resolved_cache_dir: str | None = None
+
+
+def get_mobilint_cache_dir() -> str:
+    """Return a writable artifact cache directory, creating it only when needed."""
+
+    global _resolved_cache_dir
+    if _resolved_cache_dir is None:
+        _resolved_cache_dir = _default_cache_dir()
+    return _resolved_cache_dir
+
+
+def _load_onnxruntime() -> Any:
+    """Loads ``onnxruntime`` only when ONNX inference is requested.
+
+    Returns:
+        The imported ``onnxruntime`` module.
+
+    Raises:
+        ImportError: If ``onnxruntime`` is unavailable in the current environment.
+    """
+
+    try:
+        module = importlib.import_module("onnxruntime")
+    except ImportError as exc:
+        raise ImportError(ONNXRUNTIME_INSTALL_GUIDE) from exc
+
+    if not hasattr(module, "InferenceSession"):
+        module_path = getattr(module, "__file__", None) or "<namespace package>"
+        msg = (
+            "onnxruntime is installed, but the package is incomplete or broken and does not expose "
+            f"`InferenceSession` (resolved from {module_path}). "
+            f"{ONNXRUNTIME_INSTALL_GUIDE.replace('is not installed. To use ONNX inference, install', 'Reinstall')}"
+        )
+        raise ImportError(msg)
+
+    return module
+
+
+def _resolve_onnx_providers(
+    ort_module: Any, requested_providers: Sequence[str] | None = None
+) -> list[str]:
+    """Selects ONNX Runtime execution providers.
+
+    Args:
+        ort_module: Imported ``onnxruntime`` module or compatible test double.
+        requested_providers: Optional provider order requested by the caller.
+
+    Returns:
+        The provider list passed to ``InferenceSession``.
+    """
+
+    return (
+        list(requested_providers)
+        if requested_providers is not None
+        else ["CPUExecutionProvider"]
+    )
+
+
+def _model_name_aliasing(model_name: str) -> str:
+    """Find the YAML filename matching a model name.
+
+    Args:
+        model_name: Model identifier provided by the caller.
+
+    Returns:
+        Exact YAML filename stored in ``MODEL_CONFIG_DIR``.
+
+    Raises:
+        ValueError: If no YAML file matches or the normalized name is ambiguous.
+    """
+
+    def _stem(name: str) -> str:
+        return name[: -len(".yaml")] if name.lower().endswith(".yaml") else name
+
+    def _normalize_separators(name: str) -> str:
+        return "_".join(
+            part
+            for part in _stem(name)
+            .replace("-", "_")
+            .replace(" ", "_")
+            .lower()
+            .split("_")
+            if part
+        )
+
+    requested = _normalize_separators(model_name)
+    config_names = sorted(path.name for path in MODEL_CONFIG_DIR.glob("*.yaml"))
+    separator_matches = [
+        name for name in config_names if _normalize_separators(name) == requested
+    ]
+    if len(separator_matches) == 1:
+        return separator_matches[0]
+    if len(separator_matches) > 1:
+        raise ValueError(
+            f"Ambiguous model name '{model_name}'. Matches: {separator_matches}."
+        )
+
+    compact_requested = requested.replace("_", "")
+    compact_matches = [
+        name
+        for name in config_names
+        if _normalize_separators(name).replace("_", "") == compact_requested
+    ]
+    if len(compact_matches) == 1:
+        return compact_matches[0]
+    if len(compact_matches) > 1:
+        raise ValueError(
+            f"Ambiguous model name '{model_name}'. Matches: {compact_matches}."
+        )
+    raise ValueError(f"Model name '{model_name}' is not supported.")
+
+
+def resolve_model_config(
+    model_cls: str | dict[str, Any], model_type: str = "DEFAULT"
+) -> dict[str, Any]:
+    """Resolve a vision model configuration without constructing a runtime.
+
+    Args:
+        model_cls: Model name, YAML path, or direct model configuration.
+        model_type: Variant key within a YAML model definition.
+
+    Returns:
+        A deep copy of the resolved ``file_cfg``, ``pre_cfg``, and ``post_cfg`` mapping.
+        ``file_cfg`` always includes an ONNX filename when an MXQ filename is available.
+
+    Raises:
+        TypeError: If the YAML or resolved configuration is not a mapping.
+        ValueError: If a requested variant, alias, or update base is unavailable.
+    """
+
+    if isinstance(model_cls, dict):
+        return _normalize_model_artifacts(model_cls)
+
+    config_path = Path(model_cls)
+    if not config_path.is_file():
+        config_path = MODEL_CONFIG_DIR / _model_name_aliasing(model_cls)
+
+    with config_path.open(encoding="utf-8") as config_file:
+        full_config = yaml.safe_load(config_file)
+    if not isinstance(full_config, dict):
+        raise TypeError(
+            f"Model configuration '{config_path}' should define a dictionary."
+        )
+
+    resolving: set[str] = set()
+
+    def _resolve_variant(variant: str) -> dict[str, Any]:
+        if variant in resolving:
+            raise ValueError(
+                f"Circular model configuration reference detected for '{variant}'."
+            )
+        resolving.add(variant)
+        try:
+            model_config_part = full_config.get(variant)
+            if model_config_part is None:
+                raise ValueError(f"Model type '{variant}' not found in configuration.")
+            if isinstance(model_config_part, str):
+                if model_config_part not in full_config:
+                    raise ValueError(
+                        f"Model alias '{model_config_part}' not found in configuration."
+                    )
+                return _resolve_variant(model_config_part)
+            if not isinstance(model_config_part, dict):
+                raise TypeError(
+                    f"Resolved model configuration for '{variant}' is not a dictionary."
+                )
+
+            resolved = copy.deepcopy(model_config_part)
+            base_config_key = resolved.pop("update", None)
+            if base_config_key is None:
+                return resolved
+            if (
+                not isinstance(base_config_key, str)
+                or base_config_key not in full_config
+            ):
+                raise ValueError(
+                    f"Base configuration '{base_config_key}' not found for update."
+                )
+
+            merged_config = _resolve_variant(base_config_key)
+            for key, value in resolved.items():
+                if (
+                    key in merged_config
+                    and isinstance(merged_config[key], dict)
+                    and isinstance(value, dict)
+                ):
+                    merged_config[key].update(value)
+                else:
+                    merged_config[key] = value
+            return merged_config
+        finally:
+            resolving.remove(variant)
+
+    return _normalize_model_artifacts(_resolve_variant(model_type))
+
+
+class MBLT_Engine:
+    """Main engine class for running vision models from the MBLT zoo.
+
+    Handles the full pipeline: Preprocessing -> Inference -> Postprocessing.
+
+    Attributes:
+            file_cfg: Model configuration.
+            pre_cfg: Preprocessing configuration.
+            post_cfg: Postprocessing configuration.
+            model: The underlying MXQ_Model.
+            device: The torch device being used.
+    """
+
+    def __init__(
+        self,
+        model_cls: str | dict[str, Any],
+        model_type: str = "DEFAULT",
+        mxq_path: str = "",
+        onnx_path: str = "",
+        dev_no: int | None = None,
+        core_mode: CoreMode | None = None,
+        target_cores: Sequence[str | CoreId] | None = None,
+        target_clusters: Sequence[int | Cluster] | None = None,
+        postprocess_kwargs: dict[str, Any] | None = None,
+        framework: str | None = None,
+        onnx_providers: Sequence[str] | None = None,
+        model_path: str = "",
+        target_device: str | None = None,
+    ) -> None:
+        """Initializes the MBLT_Engine.
+
+        Args:
+            model_cls(if dict):
+                file_cfg: Model configuration.
+                    mxq_path: path to mxq file
+                    onnx_path: path to onnx file
+                    model_path: generic path to local model file
+                    dev_no: Accelerator No.
+                    core_mode: single, multi, global4, global8
+                    target_cores: single mode
+                    target_clusters: multi, global modes
+                    target_device: NPU board identifier; defaults to ``aries-rb``.
+                pre_cfg: Preprocessing configuration.
+                post_cfg: Postprocessing configuration.
+            model_cls(not dict): model name or yaml path
+            postprocess_kwargs: Optional runtime overrides passed to the postprocessor builder.
+            framework: Execution framework, either "mxq" or "onnx". When omitted,
+                ``model_path`` suffix is used first, then MXQ is the fallback.
+            onnx_providers: Optional ONNX Runtime execution provider order.
+            target_device: NPU board identifier. An explicit value takes precedence
+                over ``file_cfg.target_device``; otherwise defaults to ``aries-rb``.
+        """
+
+        if _uses_shifted_engine_model_path_layout(
+            model_path,
+            mxq_path,
+            dev_no,
+            core_mode,
+            target_cores,
+            postprocess_kwargs,
+            framework,
+            onnx_providers,
+        ):
+            (
+                model_path,
+                mxq_path,
+                onnx_path,
+                dev_no,
+                core_mode,
+                target_cores,
+                target_clusters,
+                postprocess_kwargs,
+                framework,
+                onnx_providers,
+            ) = (
+                mxq_path,
+                onnx_path,
+                cast(str, dev_no or ""),
+                cast(int | None, core_mode),
+                cast(CoreMode | None, target_cores),
+                cast(Sequence[str | Any] | None, target_clusters),
+                cast(Sequence[int | Any] | None, postprocess_kwargs),
+                cast(dict[str, Any] | None, framework),
+                cast(str | None, onnx_providers),
+                cast(Sequence[str] | None, model_path or None),
+            )
+        model_config_part = resolve_model_config(model_cls, model_type)
+        for section in ("file_cfg", "pre_cfg", "post_cfg"):
+            if not isinstance(model_config_part.get(section), dict):
+                raise ValueError(
+                    f"Model configuration section '{section}' must be a mapping."
+                )
+
+        if mxq_path and Path(mxq_path).suffix.lower() != ".mxq":
+            raise ValueError(f"Explicit mxq_path must end in '.mxq', got {mxq_path!r}.")
+        if onnx_path and Path(onnx_path).suffix.lower() != ".onnx":
+            raise ValueError(
+                f"Explicit onnx_path must end in '.onnx', got {onnx_path!r}."
+            )
+        for key, suffix in (("mxq_path", ".mxq"), ("onnx_path", ".onnx")):
+            configured_path = model_config_part["file_cfg"].get(key)
+            if configured_path and (
+                not isinstance(configured_path, str)
+                or Path(configured_path).suffix.lower() != suffix
+            ):
+                raise ValueError(
+                    f"Configured file_cfg.{key} must end in {suffix!r}, "
+                    f"got {configured_path!r}."
+                )
+
+        file_cfg_model_path = str(model_config_part["file_cfg"].get("model_path", ""))
+        file_cfg_onnx_path = str(model_config_part["file_cfg"].get("onnx_path", ""))
+        framework_model_path = model_path or file_cfg_model_path
+        if not framework_model_path and not mxq_path:
+            framework_model_path = onnx_path or file_cfg_onnx_path
+        self.framework = _resolve_framework(framework, framework_model_path)
+        mxq_path, onnx_path = _split_model_paths(
+            framework=self.framework,
+            model_path=model_path,
+            mxq_path=mxq_path,
+            onnx_path=onnx_path,
+        )
+
+        _mxq_path_passed = bool(mxq_path)
+        _onnx_path_passed = bool(onnx_path)
+        if _mxq_path_passed and not os.path.isfile(mxq_path):
+            raise FileNotFoundError(
+                "Explicit MXQ model path does not exist: "
+                f"{mxq_path}. Remove model_path/mxq_path to download the configured artifact."
+            )
+        if _onnx_path_passed and not os.path.isfile(onnx_path):
+            raise FileNotFoundError(
+                "Explicit ONNX model path does not exist: "
+                f"{onnx_path}. Remove model_path/onnx_path to download the configured artifact."
+            )
+        _dev_no_passed = dev_no is not None
+        _core_mode_passed = core_mode is not None
+        _target_cores_passed = target_cores is not None
+        _target_clusters_passed = target_clusters is not None
+
+        if dev_no is None:
+            dev_no = 0
+        if target_device is None:
+            target_device = model_config_part["file_cfg"].get(
+                "target_device", "aries-rb"
+            )
+        target_device = normalize_target_device(target_device)
+        is_regulus = target_device in {"regulus-ra", "regulus-rb"}
+        if core_mode is None:
+            core_mode = "single" if is_regulus else "global8"
+        else:
+            core_mode = normalize_core_mode(core_mode, target_device=target_device)
+        if target_cores is None:
+            target_cores = (
+                []
+                if is_regulus
+                else ["0:0", "0:1", "0:2", "0:3", "1:0", "1:1", "1:2", "1:3"]
+            )
+        if target_clusters is None:
+            target_clusters = [] if is_regulus else [0, 1]
+
+        self.file_cfg = copy.deepcopy(model_config_part["file_cfg"])
+        file_cfg_model_path = self.file_cfg.pop("model_path", "")
+        if file_cfg_model_path:
+            yaml_mxq_path, yaml_onnx_path = _split_model_paths(
+                framework=self.framework,
+                model_path=file_cfg_model_path,
+                mxq_path=str(self.file_cfg.get("mxq_path", "")),
+                onnx_path=str(self.file_cfg.get("onnx_path", "")),
+            )
+            self.file_cfg["mxq_path"] = yaml_mxq_path
+            self.file_cfg["onnx_path"] = yaml_onnx_path
+        if _mxq_path_passed or "mxq_path" not in self.file_cfg:
+            self.file_cfg["mxq_path"] = mxq_path
+        if _onnx_path_passed or "onnx_path" not in self.file_cfg:
+            self.file_cfg["onnx_path"] = onnx_path
+        if _core_mode_passed or "core_mode" not in self.file_cfg or is_regulus:
+            self.file_cfg["core_mode"] = core_mode
+        if _target_cores_passed or "target_cores" not in self.file_cfg:
+            self.file_cfg["target_cores"] = target_cores
+        if _target_clusters_passed or "target_clusters" not in self.file_cfg:
+            self.file_cfg["target_clusters"] = target_clusters
+        if _dev_no_passed or "dev_no" not in self.file_cfg:
+            self.file_cfg["dev_no"] = dev_no
+        self.file_cfg["core_mode"] = normalize_core_mode(
+            self.file_cfg["core_mode"], target_device=target_device
+        )
+        self.file_cfg["target_device"] = target_device
+
+        self.pre_cfg = copy.deepcopy(model_config_part["pre_cfg"])
+        self.post_cfg = copy.deepcopy(model_config_part["post_cfg"])
+        self.postprocess_kwargs = (
+            {} if postprocess_kwargs is None else dict(postprocess_kwargs)
+        )
+        self.file_config_cleansing()
+
+        self.model: Any
+        self._mxq_model: MobilintNPUBackend | None = None
+        self._onnx_model: ONNXBackend | None = None
+        self._onnx_session: Any = None
+        self._closed = False
+
+        try:
+            if self.framework == "onnx":
+                ort = _load_onnxruntime()
+                resolved_onnx_path = self.file_cfg.get("onnx_path")
+                if not resolved_onnx_path:
+                    raise RuntimeError(
+                        f"ONNX path not resolved for model {model_cls}. Make sure the model repository has an ONNX file."
+                    )
+                if not os.path.isfile(resolved_onnx_path):
+                    raise FileNotFoundError(
+                        f"ONNX file not found at: {resolved_onnx_path}"
+                    )
+
+                providers = _resolve_onnx_providers(ort, onnx_providers)
+                onnx_model = ONNXBackend(
+                    resolved_onnx_path, providers=providers, ort_module=ort
+                )
+                self._onnx_model = onnx_model
+                onnx_model.create()
+                self._onnx_session = onnx_model.session
+                self.model = self._onnx_session
+                onnx_inputs = self._onnx_session.get_inputs()
+                if len(onnx_inputs) != 1:
+                    raise ValueError(
+                        "ONNX models must declare exactly one input because "
+                        "MBLT_Engine accepts one preprocessed tensor; got "
+                        f"{len(onnx_inputs)} inputs."
+                    )
+                self.input_name = onnx_inputs[0].name
+                self.output_names = [o.name for o in self._onnx_session.get_outputs()]
+            else:
+                mxq_model = MobilintNPUBackend(**self._mxq_backend_kwargs())
+                self._mxq_model = mxq_model
+                self.model = mxq_model
+                mxq_model.create()
+                mxq_model.launch()
+
+                if mxq_model.get_dtype() == "DataType.Uint8":
+                    self.pre_cfg.pop("Normalize", None)
+
+            self.preprocessor = build_preprocess(self.pre_cfg)
+            self.postprocessor = build_postprocess(
+                self.pre_cfg, self.post_cfg, **self.postprocess_kwargs
+            )
+            self.device = torch.device("cpu")
+        except Exception:
+            self._close(suppress_errors=True)
+            raise
+
+    def _mxq_backend_kwargs(self) -> dict[str, Any]:
+        """Builds the MXQ backend kwargs from the resolved file config."""
+
+        excluded_keys = {
+            "repo_id",
+            "filename",
+            "revision",
+            "onnx_filename",
+            "onnx_path",
+        }
+        return {
+            key: value
+            for key, value in self.file_cfg.items()
+            if key not in excluded_keys
+        }
+
+    def _derive_onnx_filename(self) -> str | None:
+        """Returns the ONNX filename associated with the configured MXQ artifact."""
+
+        onnx_filename = _derive_onnx_filename(self.file_cfg)
+        if onnx_filename is not None:
+            self.file_cfg["onnx_filename"] = onnx_filename
+        return onnx_filename
+
+    def _resolve_local_onnx_path(self, mxq_path: str) -> str | None:
+        """Tries to resolve a sibling ONNX file next to a local MXQ artifact."""
+
+        onnx_path = self.file_cfg.get("onnx_path", "")
+        if onnx_path and os.path.isfile(onnx_path):
+            return onnx_path
+
+        onnx_filename = self._derive_onnx_filename()
+        if onnx_filename:
+            sibling_path = Path(mxq_path).with_name(onnx_filename)
+            if sibling_path.is_file():
+                return str(sibling_path)
+
+        if mxq_path.endswith(".mxq"):
+            suffix_swapped = f"{mxq_path[:-4]}.onnx"
+            if os.path.isfile(suffix_swapped):
+                return suffix_swapped
+
+        return None
+
+    def _download_hub_artifact(
+        self,
+        *,
+        repo_id: str,
+        filename: str,
+        revision: str,
+        subfolders: Sequence[str] | None = None,
+    ) -> str:
+        """Downloads a model artifact from Hugging Face Hub and returns its cache path."""
+
+        last_error: Exception | None = None
+        normalized_subfolders = [""] if subfolders is None else list(subfolders)
+        for subfolder in normalized_subfolders:
+            kwargs: dict[str, Any] = {
+                "repo_id": repo_id,
+                "filename": filename,
+                "revision": revision,
+                "local_dir": get_mobilint_cache_dir(),
+            }
+            if subfolder:
+                kwargs["subfolder"] = subfolder
+            try:
+                return hf_hub_download(**kwargs)
+            except EntryNotFoundError as exc:
+                last_error = exc
+
+        attempted_paths = ", ".join(
+            f"{subfolder}/{filename}" if subfolder else filename
+            for subfolder in normalized_subfolders
+        )
+        raise RuntimeError(
+            f"Failed to download model from Hugging Face. Tried repo '{repo_id}' at: {attempted_paths}."
+        ) from last_error
+
+    def file_config_cleansing(self) -> None:
+        """Validates and resolves the MXQ and ONNX model file paths in ``self.file_cfg``."""
+        framework = getattr(self, "framework", "mxq")
+        model_path = self.file_cfg.pop("model_path", "")
+        if model_path:
+            mxq_path, onnx_path = _split_model_paths(
+                framework=framework,
+                model_path=model_path,
+                mxq_path=str(self.file_cfg.get("mxq_path", "")),
+                onnx_path=str(self.file_cfg.get("onnx_path", "")),
+            )
+            self.file_cfg["mxq_path"] = mxq_path
+            self.file_cfg["onnx_path"] = onnx_path
+        mxq_path = self.file_cfg.get("mxq_path", "")
+        onnx_path = self.file_cfg.get("onnx_path", "")
+        onnx_filename = self._derive_onnx_filename()
+
+        if onnx_path and os.path.isfile(onnx_path):
+            self.file_cfg["onnx_path"] = onnx_path
+            if framework == "onnx":
+                return
+
+        if mxq_path and os.path.isfile(mxq_path):
+            resolved_local_onnx = self._resolve_local_onnx_path(mxq_path)
+            if resolved_local_onnx is not None:
+                self.file_cfg["onnx_path"] = resolved_local_onnx
+                self.file_cfg.pop("repo_id", None)
+                self.file_cfg.pop("filename", None)
+                self.file_cfg.pop("revision", None)
+            elif framework == "mxq":
+                self.file_cfg.pop("repo_id", None)
+                self.file_cfg.pop("filename", None)
+                self.file_cfg.pop("revision", None)
+            if framework == "mxq":
+                return
+
+        repo_id = self.file_cfg.pop("repo_id", None)
+        filename = self.file_cfg.pop("filename", None)
+        revision = self.file_cfg.pop("revision", None)
+        if not repo_id or not revision:
+            return
+
+        if filename and framework == "mxq":
+            target_device = self.file_cfg.get("target_device", "aries-rb")
+            self.file_cfg["mxq_path"] = self._download_hub_artifact(
+                repo_id=repo_id,
+                filename=filename,
+                revision=revision,
+                subfolders=[target_device],
+            )
+
+        if onnx_filename and framework == "onnx" and not self.file_cfg.get("onnx_path"):
+            self.file_cfg["onnx_path"] = self._download_hub_artifact(
+                repo_id=repo_id,
+                filename=onnx_filename,
+                revision=revision,
+            )
+
+    def _prepare_onnx_inputs(self, x: TensorLike) -> dict[str, np.ndarray]:
+        """Normalizes runtime inputs to match the ONNX session contract."""
+
+        if isinstance(x, torch.Tensor):
+            x_np = x.detach().cpu().numpy()
+        elif isinstance(x, np.ndarray):
+            x_np = x
+        else:
+            raise TypeError(f"Got unexpected type for ONNX input x={type(x)}.")
+
+        if x_np.dtype == np.float64:
+            x_np = x_np.astype(np.float32)
+
+        expected_shape = self._require_onnx_session().get_inputs()[0].shape
+        if len(expected_shape) == 4:
+            expected_second_dim = expected_shape[1]
+            expected_last_dim = expected_shape[-1]
+            expected_layout = None
+            expected_channels = None
+            # ONNX layout is encoded by the channel axis, not by a spatial
+            # dimension that happens to equal a channel count. This is crucial
+            # for square static inputs such as [1, 3, 224, 224].
+            if isinstance(expected_second_dim, int) and expected_second_dim in {
+                1,
+                2,
+                3,
+                4,
+            }:
+                expected_layout = "nchw"
+                expected_channels = expected_second_dim
+            elif isinstance(expected_last_dim, int) and expected_last_dim in {
+                1,
+                2,
+                3,
+                4,
+            }:
+                expected_layout = "nhwc"
+                expected_channels = expected_last_dim
+
+            if x_np.ndim == 3:
+                if (
+                    expected_layout == "nchw"
+                    and expected_channels is not None
+                    and x_np.shape[0] == expected_channels
+                ):
+                    x_np = np.expand_dims(x_np, axis=0)
+                elif (
+                    expected_layout == "nchw"
+                    and expected_channels is not None
+                    and x_np.shape[-1] == expected_channels
+                ):
+                    x_np = np.transpose(x_np, (2, 0, 1))
+                    x_np = np.expand_dims(x_np, axis=0)
+                elif (
+                    expected_layout == "nhwc"
+                    and expected_channels is not None
+                    and x_np.shape[-1] == expected_channels
+                ):
+                    x_np = np.expand_dims(x_np, axis=0)
+                elif (
+                    expected_layout == "nhwc"
+                    and expected_channels is not None
+                    and x_np.shape[0] == expected_channels
+                ):
+                    x_np = np.transpose(x_np, (1, 2, 0))
+                    x_np = np.expand_dims(x_np, axis=0)
+            elif x_np.ndim == 4:
+                if expected_layout == "nchw" and expected_channels is not None:
+                    if x_np.shape[1] == expected_channels:
+                        pass
+                    elif x_np.shape[-1] == expected_channels:
+                        x_np = np.transpose(x_np, (0, 3, 1, 2))
+                elif expected_layout == "nhwc" and expected_channels is not None:
+                    if x_np.shape[-1] == expected_channels:
+                        pass
+                    elif x_np.shape[1] == expected_channels:
+                        x_np = np.transpose(x_np, (0, 2, 3, 1))
+
+        return {self.input_name: x_np}
+
+    def _require_onnx_session(self) -> Any:
+        """Return the active ONNX session."""
+
+        session = getattr(self, "_onnx_session", None)
+        if session is None:
+            fallback = getattr(self, "model", None)
+            if (
+                fallback is not None
+                and hasattr(fallback, "get_inputs")
+                and hasattr(fallback, "run")
+            ):
+                return fallback
+            raise RuntimeError("ONNX session is not initialized.")
+        return session
+
+    def _require_mxq_model(self) -> MobilintNPUBackend:
+        """Return the active MXQ backend."""
+
+        model = getattr(self, "_mxq_model", None)
+        if model is None:
+            fallback = getattr(self, "model", None)
+            if (
+                fallback is not None
+                and hasattr(fallback, "create")
+                and hasattr(fallback, "launch")
+            ):
+                return cast(MobilintNPUBackend, fallback)
+            raise RuntimeError("MXQ backend is not initialized.")
+        return model
+
+    def __call__(
+        self,
+        x: TensorLike,
+    ) -> Any:
+        """Runs raw model inference on the input.
+
+        Note:
+                This does NOT include preprocessing or postprocessing.
+
+        Args:
+                x: Input tensor for the model.
+
+        Returns:
+                Raw model output.
+        """
+        self._ensure_open()
+        if self.framework == "onnx":
+            outputs = self._require_onnx_session().run(
+                self.output_names, self._prepare_onnx_inputs(x)
+            )
+            if len(outputs) == 1:
+                return outputs[0]
+            return outputs
+        return cast(Any, self._require_mxq_model())(x)
+
+    def preprocess(
+        self,
+        x: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Runs preprocessing on the input.
+
+        Args:
+                x: Input data.
+                **kwargs: Additional arguments for preprocessing.
+
+        Returns:
+                Preprocessed data.
+        """
+        return self.preprocessor(x, **kwargs)
+
+    def preprocess_with_metadata(
+        self,
+        x: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Runs preprocessing and returns metadata needed for exact postprocess scaling.
+
+        Args:
+                x: Input data.
+
+        Returns:
+                A tuple of preprocessed data and metadata such as ``ratio_pad``.
+        """
+        return self.preprocessor.with_metadata(x)
+
+    def postprocess(
+        self,
+        x: Any,
+        **kwargs: Any,
+    ) -> Results:
+        """Runs postprocessing on the input.
+
+        Args:
+                x: Input data.
+                **kwargs: Additional arguments for postprocessing.
+
+        Returns:
+                Postprocessed results.
+        """
+        pre_result = self.postprocessor(x, **kwargs)
+        result_kwargs = dict(kwargs)
+        conf_thres = getattr(self.postprocessor, "conf_thres", None)
+        iou_thres = getattr(self.postprocessor, "iou_thres", None)
+        if "conf_thres" not in result_kwargs and conf_thres is not None:
+            result_kwargs["conf_thres"] = conf_thres
+        if "iou_thres" not in result_kwargs and iou_thres is not None:
+            result_kwargs["iou_thres"] = iou_thres
+        return Results(self.pre_cfg, self.post_cfg, pre_result, **result_kwargs)
+
+    def set_postprocess_thresholds(
+        self, conf_thres: float | None = None, iou_thres: float | None = None
+    ) -> None:
+        """Updates configurable postprocess thresholds for the current model.
+
+        Args:
+                conf_thres: Optional confidence threshold override.
+                iou_thres: Optional IoU threshold override.
+
+        Raises:
+                NotImplementedError: If the current postprocessor does not support thresholds.
+        """
+        set_threshold = getattr(self.postprocessor, "set_threshold", None)
+        if set_threshold is None:
+            raise NotImplementedError(
+                f"Threshold overrides are not supported for task `{self.post_cfg.get('task', 'unknown')}`."
+            )
+        set_threshold(conf_thres=conf_thres, iou_thres=iou_thres)
+
+    def to(
+        self,
+        device: str | torch.device,
+    ) -> None:
+        """Moves the engine and its components to the specified device.
+
+        Args:
+                device: Target device.
+
+        Raises:
+                TypeError: If device type is unexpected.
+        """
+        self.preprocessor.to(device)
+        self.postprocessor.to(device)
+
+        if isinstance(device, str):
+            self.device = torch.device(device)
+        elif isinstance(device, torch.device):
+            self.device = device
+        else:
+            raise TypeError(f"Got unexpected type for device={type(device)}.")
+
+    def cpu(self) -> None:
+        """Moves the engine to CPU."""
+        self.to(device="cpu")
+
+    def gpu(self) -> None:
+        """Moves the engine to GPU (CUDA)."""
+        self.to(device="cuda")
+
+    def cuda(
+        self,
+        device: str | int = 0,
+    ) -> None:
+        """Moves the engine to CUDA device.
+
+        Args:
+                device: CUDA device identifier. Defaults to 0.
+
+        Raises:
+                ValueError: If device string is invalid.
+                RuntimeError: If CUDA is not available.
+        """
+        if isinstance(device, int):
+            device = f"cuda:{device}"
+        elif isinstance(device, str):
+            if not device.startswith("cuda:"):
+                raise ValueError("Invalid device string. It should start with 'cuda:'.")
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available. Please check your environment.")
+        self.to(device=device)
+
+    def launch(self) -> None:
+        """Launches the underlying model."""
+        self._ensure_open()
+        if self.framework == "mxq":
+            self._require_mxq_model().launch()
+
+    def dispose(self) -> None:
+        """Compatibility alias for :meth:`close`."""
+
+        self.close()
+
+    def close(self) -> None:
+        """Release backend resources. Safe to call more than once."""
+
+        self._close(suppress_errors=False)
+
+    def __enter__(self) -> MBLT_Engine:
+        """Return this engine for use in a context manager."""
+
+        self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        """Release resources when leaving a context manager block."""
+
+        del exc_value, traceback
+        self._close(suppress_errors=exc_type is not None)
+        return False
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for engines not explicitly closed by callers."""
+
+        try:
+            self._close(suppress_errors=True)
+        except Exception:
+            pass
+
+    def _ensure_open(self) -> None:
+        """Raise when inference is attempted after backend disposal."""
+
+        if getattr(self, "_closed", False):
+            raise RuntimeError("MBLT_Engine is closed.")
+
+    def _close(self, *, suppress_errors: bool) -> None:
+        """Dispose acquired backends once, optionally suppressing cleanup failures."""
+
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        first_error: Exception | None = None
+        for backend in (
+            getattr(self, "_mxq_model", None),
+            getattr(self, "_onnx_model", None),
+        ):
+            if backend is None:
+                continue
+            try:
+                backend.dispose()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        self._onnx_session = None
+        if first_error is not None and not suppress_errors:
+            raise first_error
+
+    def model_name_aliasing(self, model_name: str) -> str:
+        """Finds the YAML config filename that matches the given model name.
+
+        Matching is case-insensitive and first preserves separator boundaries
+        so names such as ``regnet_x_16gf`` do not collide with
+        ``regnet_x_1_6gf``. A separator-stripped fallback is used only when it
+        resolves to a single unique configuration, so inputs like ``resnet50``,
+        ``ResNet50``, ``Resnet_50``, and ``resnet-50`` all resolve to
+        ``ResNet50.yaml``.
+
+        Args:
+            model_name: The model identifier provided by the caller.
+
+        Returns:
+            The exact YAML filename (basename only) stored in
+            ``MODEL_CONFIG_DIR`` that corresponds to ``model_name``.
+
+        Raises:
+            ValueError: If no YAML file matches, or if the name is ambiguous
+                (i.e., multiple files match after normalization).
+        """
+
+        return _model_name_aliasing(model_name)
