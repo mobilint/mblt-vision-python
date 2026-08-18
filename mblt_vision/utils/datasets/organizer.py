@@ -38,8 +38,10 @@ from .readiness import (
     CITYSCAPES_SAMPLE_ID_PATTERN,
     CITYSCAPES_VALIDATION_SAMPLE_COUNT,
     DOTAV1_VALIDATION_SAMPLE_COUNT,
+    IMAGE_SUFFIXES,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
     _path_has_symlink_component,
+    _polygon_has_positive_image_overlap,
     dataset_ready,
 )
 
@@ -327,9 +329,23 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
         "normalized": staged_root / "labels" / "val",
         "original": staged_root / "labels" / "val_original",
     }
+    image_paths = {
+        path.stem: path
+        for path in (staged_root / "images").iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+    }
     valid_indices = set(DOTAV1_CLASS_TO_IDX.values())
     for kind, label_dir in label_dirs.items():
         for label_path in sorted(label_dir.glob("*.txt")):
+            image_path = image_paths.get(label_path.stem)
+            if image_path is None:
+                raise ValueError(
+                    f"Staged DOTAv1 label has no matching image: {label_path}."
+                )
+            image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            if image is None:
+                raise ValueError(f"Unable to decode staged DOTAv1 image: {image_path}.")
+            height, width = image.shape[:2]
             for line_number, line in enumerate(
                 label_path.read_text(encoding="utf-8").splitlines(), start=1
             ):
@@ -370,6 +386,19 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
                 if abs(signed_double_area) <= 0:
                     raise ValueError(
                         f"Staged DOTAv1 polygon must have positive area at {label_path}:{line_number}."
+                    )
+                image_coordinates = coordinates.copy()
+                if kind == "normalized":
+                    image_coordinates = [
+                        coordinate * (width if index % 2 == 0 else height)
+                        for index, coordinate in enumerate(coordinates)
+                    ]
+                if not _polygon_has_positive_image_overlap(
+                    image_coordinates, (height, width)
+                ):
+                    raise ValueError(
+                        "Staged DOTAv1 polygon must overlap its source image at "
+                        f"{label_path}:{line_number}."
                     )
                 if kind == "normalized":
                     try:
@@ -1817,6 +1846,11 @@ def _write_dotav1_yolo_labels(
                 raise ValueError(
                     f"DOTAv1 coordinates must be finite in {original_label_path} "
                     f"at line {line_number}."
+                )
+            if not _polygon_has_positive_image_overlap(coordinates, (height, width)):
+                raise ValueError(
+                    "DOTAv1 polygon must overlap its source image in "
+                    f"{original_label_path} at line {line_number}."
                 )
             if fields[9] not in {"0", "1", "2"}:
                 raise ValueError(

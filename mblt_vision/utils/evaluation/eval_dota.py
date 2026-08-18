@@ -26,6 +26,7 @@ from ..datasets import (
     get_dotav1_class_num,
     get_dotav1_label,
 )
+from ..datasets.readiness import _polygon_has_positive_image_overlap
 from ..letterbox import RatioPad, resolve_ratio_pad
 
 if TYPE_CHECKING:
@@ -78,6 +79,22 @@ def _validate_polygon_area(
         )
 
 
+def _validate_polygon_image_overlap(
+    coords: torch.Tensor,
+    image_shape: tuple[int, int],
+    annotation_path: Path,
+    line_number: int,
+) -> None:
+    """Require a quadrilateral to cover non-zero area inside its source image."""
+
+    polygon = [coordinate for point in coords.tolist() for coordinate in point]
+    if not _polygon_has_positive_image_overlap(polygon, image_shape):
+        raise ValueError(
+            "DOTAv1 annotation polygon must overlap its source image at "
+            f"{annotation_path}:{line_number}."
+        )
+
+
 def _load_ground_truths(
     data_path: str, dataset: CustomDOTAv1
 ) -> dict[str, dict[str, torch.Tensor]]:
@@ -93,6 +110,16 @@ def _load_ground_truths(
     """
     label_dir = Path(data_path) / "labels" / "val"
     original_label_dir = Path(data_path) / "labels" / "val_original"
+    image_ids = set(dataset.ids)
+    label_ids = {path.stem for path in label_dir.glob("*.txt")} | {
+        path.stem for path in original_label_dir.glob("*.txt")
+    }
+    orphan_label_ids = sorted(label_ids - image_ids)
+    if orphan_label_ids:
+        raise ValueError(
+            "DOTAv1 annotations have no corresponding validation image: "
+            f"{', '.join(orphan_label_ids[:5])}."
+        )
     ground_truths: dict[str, dict[str, torch.Tensor]] = {}
     for image_id, image_path in zip(dataset.ids, dataset.image_paths):
         image = dataset._load_image(image_path)
@@ -137,6 +164,9 @@ def _load_ground_truths(
                     coords[:, 0] *= width
                     coords[:, 1] *= height
                 _validate_polygon_area(coords, label_path, line_number)
+                _validate_polygon_image_overlap(
+                    coords, (height, width), label_path, line_number
+                )
                 if len(parts) >= 10 and parts[9] not in {"0", "1", "2"}:
                     raise ValueError(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
@@ -177,6 +207,9 @@ def _load_ground_truths(
                         f"{original_label_path}:{line_number}."
                     )
                 _validate_polygon_area(coords, original_label_path, line_number)
+                _validate_polygon_image_overlap(
+                    coords, (height, width), original_label_path, line_number
+                )
                 if parts[9] not in {"0", "1", "2"}:
                     raise ValueError(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
@@ -503,7 +536,7 @@ def _evaluate_stats(stats: dict[str, list[np.ndarray]], niou: int = 10) -> DOTAR
         else np.zeros(0, dtype=np.float64)
     )
     if target_cls.size == 0:
-        return DOTAResult(map5095=0.0, map50=0.0)
+        raise ValueError("DOTAv1 evaluation requires at least one non-ignored target.")
 
     tp = (
         np.concatenate(stats["tp"], 0)

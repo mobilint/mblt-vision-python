@@ -152,6 +152,40 @@ def test_coco_evaluation_rejects_invalid_task_payloads(
         )
 
 
+def test_coco_evaluation_rejects_polygons_outside_image_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not let a nonempty off-image polygon become an empty COCO mask."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 10, "width": 10}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 1, 1],
+                    "area": 1,
+                    "iscrowd": 0,
+                    "segmentation": [[11, 0, 12, 0, 12, 1, 11, 1]],
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(
+                post_cfg={"task": "instance_segmentation", "dataset": "coco"}
+            ),
+            "/dataset",
+            batch_size=1,
+        )
+
+
 def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:
     """Require one decoded result for every submitted COCO image."""
 

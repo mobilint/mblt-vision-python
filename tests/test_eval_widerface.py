@@ -81,7 +81,14 @@ def test_widerface_evaluation_rejects_truncated_postprocess_batch(
         lambda _: {"event": {"first.jpg", "second.jpg"}},
     )
     monkeypatch.setattr(
-        eval_widerface_module, "_widerface_difficulty_metadata_ready", lambda *_: True
+        eval_widerface_module,
+        "_widerface_difficulty_metadata_ready",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        eval_widerface_module,
+        "_widerface_image_shapes",
+        lambda *_: [[(8, 8), (8, 8)]],
     )
     monkeypatch.setattr(
         eval_widerface_module, "get_widerface_loader", lambda *_: [batch]
@@ -104,7 +111,9 @@ def test_widerface_evaluation_rejects_malformed_difficulty_metadata(
         lambda _: {"0--Parade": {"sample.jpg"}},
     )
     monkeypatch.setattr(
-        eval_widerface_module, "_widerface_difficulty_metadata_ready", lambda *_: False
+        eval_widerface_module,
+        "_widerface_difficulty_metadata_ready",
+        lambda *_, **__: False,
     )
     monkeypatch.setattr(
         eval_widerface_module,
@@ -133,7 +142,12 @@ def test_widerface_evaluation_rejects_image_tree_mismatching_metadata(
         lambda _: {"0--Parade": {"sample.jpg"}},
     )
     monkeypatch.setattr(
-        eval_widerface_module, "_widerface_difficulty_metadata_ready", lambda *_: True
+        eval_widerface_module,
+        "_widerface_difficulty_metadata_ready",
+        lambda *_, **__: True,
+    )
+    monkeypatch.setattr(
+        eval_widerface_module, "_widerface_image_shapes", lambda *_: [[(8, 8)]]
     )
     monkeypatch.setattr(eval_widerface_module, "CustomWiderface", lambda _: _Dataset())
     monkeypatch.setattr(
@@ -144,3 +158,10 @@ def test_widerface_evaluation_rejects_image_tree_mismatching_metadata(
 
     with pytest.raises(ValueError, match="does not match the validation metadata"):
         eval_widerface_module.eval_widerface(model, "/dataset", batch_size=1)
+
+
+def test_widerface_evaluation_rejects_unequal_box_and_score_counts() -> None:
+    """Do not fabricate or drop face detections during result conversion."""
+
+    with pytest.raises(ValueError, match="unequal box and score counts"):
+        eval_widerface_module._boxes_scores_to_prediction([[0, 0, 1, 1]], [])

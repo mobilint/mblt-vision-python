@@ -207,6 +207,49 @@ def test_dota_annotations_reject_degenerate_polygons(
 @pytest.mark.parametrize(
     ("label_path", "annotation"),
     [
+        ("labels/val/image.txt", "0 1.1 0 1.2 0 1.2 0.1 1.1 0.1"),
+        ("labels/val_original/image.txt", "110 0 120 0 120 10 110 10 plane 0"),
+    ],
+)
+def test_dota_annotations_reject_polygons_outside_images(
+    tmp_path, label_path: str, annotation: str
+) -> None:
+    """Ground-truth polygons must retain foreground within their source images."""
+
+    path = tmp_path / label_path
+    path.parent.mkdir(parents=True)
+    path.write_text(annotation, encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="must overlap its source image"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
+def test_dota_ground_truth_rejects_orphan_label_files(tmp_path) -> None:
+    """Direct evaluation must not ignore labels without a selected image."""
+
+    label_path = tmp_path / "labels" / "val" / "orphan.txt"
+    label_path.parent.mkdir(parents=True)
+    label_path.write_text("0 0 0 0.2 0 0.2 0.2 0 0.2", encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(ids=[], image_paths=[], _load_image=lambda _: None),
+    )
+
+    with pytest.raises(ValueError, match="no corresponding validation image"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
+@pytest.mark.parametrize(
+    ("label_path", "annotation"),
+    [
         ("labels/val/image.txt", "-1 0 0 0.2 0 0.2 0.2 0 0.2"),
         ("labels/val_original/image.txt", "0 0 20 0 20 20 0 20 -1 0"),
     ],
@@ -327,6 +370,13 @@ def test_dota_ap_interpolation_uses_terminal_recall_sentinel() -> None:
 
     assert recall_curve.tolist() == [0.0, 0.5, 1.0]
     assert ap == pytest.approx(0.75)
+
+
+def test_dota_metrics_require_non_ignored_ground_truth() -> None:
+    """Empty or difficult-only labels must not yield a normal AP result."""
+
+    with pytest.raises(ValueError, match="at least one non-ignored target"):
+        eval_dota_module._evaluate_stats(eval_dota_module._empty_stats())
 
 
 def test_dota_export_rejects_truncated_converted_batches() -> None:

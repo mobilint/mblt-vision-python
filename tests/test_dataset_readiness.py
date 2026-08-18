@@ -545,6 +545,34 @@ def test_widerface_readiness_accepts_empty_difficulty_indices(
     )
 
 
+def test_widerface_readiness_rejects_face_boxes_outside_images(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Face ground truth must retain foreground in its decoded source image."""
+
+    face_boxes = np.empty((1, 1), dtype=object)
+    event_faces = np.empty((1, 1), dtype=object)
+    event_faces[0, 0] = np.array([[11, 0, 1, 1]], dtype=np.float64)
+    face_boxes[0, 0] = event_faces
+    difficulty = np.empty((1, 1), dtype=object)
+    event_indices = np.empty((1, 1), dtype=object)
+    event_indices[0, 0] = np.array([1], dtype=np.int64)
+    difficulty[0, 0] = event_indices
+
+    def _loadmat(path: Path) -> dict[str, np.ndarray]:
+        if path.name == "wider_face_val.mat":
+            return {"face_bbx_list": face_boxes}
+        return {"gt_list": difficulty}
+
+    monkeypatch.setattr(readiness, "loadmat", _loadmat)
+
+    assert not readiness._widerface_difficulty_metadata_ready(
+        tmp_path,
+        {"0--Parade": {"sample.jpg"}},
+        image_shapes=[[(10, 10)]],
+    )
+
+
 @pytest.mark.parametrize("relative_image_dir", ["images", "images/val"])
 def test_dotav1_readiness_requires_complete_image_label_pairs(
     monkeypatch: pytest.MonkeyPatch,
@@ -587,7 +615,10 @@ def test_widerface_readiness_requires_complete_event_tree_and_metadata(
     monkeypatch.setattr(readiness, "WIDERFACE_EVENT_COUNT", 2)
     monkeypatch.setattr(readiness, "WIDERFACE_VALIDATION_SAMPLE_COUNT", 2)
     monkeypatch.setattr(
-        readiness, "_widerface_difficulty_metadata_ready", lambda *_: True
+        readiness, "_widerface_difficulty_metadata_ready", lambda *_, **__: True
+    )
+    monkeypatch.setattr(
+        readiness, "_widerface_image_shapes", lambda *_: [[(1, 1)], [(1, 1)]]
     )
     _write_widerface_metadata(
         tmp_path / "wider_face_val.mat",

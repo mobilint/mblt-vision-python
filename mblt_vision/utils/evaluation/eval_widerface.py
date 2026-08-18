@@ -16,6 +16,7 @@ from tqdm import tqdm
 from ..datasets import CustomWiderFaceDataset, get_widerface_loader
 from ..datasets.readiness import (
     _load_widerface_image_names,
+    _widerface_image_shapes,
     _widerface_difficulty_metadata_ready,
 )
 
@@ -75,6 +76,11 @@ def _boxes_scores_to_prediction(
 ) -> np.ndarray:
     """Convert xywh boxes and scores to a WiderFace prediction array."""
 
+    if len(boxes) != len(scores):
+        raise ValueError(
+            "WiderFace postprocess returned unequal box and score counts: "
+            f"boxes={len(boxes)}, scores={len(scores)}."
+        )
     if not boxes:
         return _empty_prediction()
     prediction = np.zeros((len(boxes), 5), dtype=np.float32)
@@ -117,8 +123,17 @@ def eval_widerface(
 
     dataset_root = Path(data_path)
     expected_images = _load_widerface_image_names(dataset_root / "wider_face_val.mat")
-    if expected_images is None or not _widerface_difficulty_metadata_ready(
-        dataset_root, expected_images
+    image_shapes = (
+        _widerface_image_shapes(dataset_root, expected_images)
+        if expected_images is not None
+        else None
+    )
+    if (
+        expected_images is None
+        or image_shapes is None
+        or not _widerface_difficulty_metadata_ready(
+            dataset_root, expected_images, image_shapes=image_shapes
+        )
     ):
         raise ValueError(
             "WiderFace evaluation metadata is malformed or has inconsistent difficulty indices."

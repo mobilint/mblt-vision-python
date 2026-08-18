@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 from faster_coco_eval import mask as coco_mask
+from PIL import Image
 from scipy.io import loadmat
 from scipy.io.matlab import MatReadError
 
@@ -116,6 +117,84 @@ def _has_positive_polygon_area(polygon: list[int | float]) -> bool:
         points[:, 1], np.roll(points[:, 0], -1)
     )
     return bool(abs(signed_double_area) > 0)
+
+
+def _polygon_has_positive_image_overlap(
+    polygon: list[int | float], image_shape: tuple[int, int] | None
+) -> bool:
+    """Return whether a polygon covers non-zero area within an image rectangle."""
+
+    if image_shape is None:
+        return True
+    height, width = image_shape
+    if height <= 0 or width <= 0:
+        return False
+    points = [
+        tuple(point) for point in np.asarray(polygon, dtype=np.float64).reshape(-1, 2)
+    ]
+
+    def _clip(
+        vertices: list[tuple[float, float]],
+        inside: Any,
+        intersect: Any,
+    ) -> list[tuple[float, float]]:
+        clipped: list[tuple[float, float]] = []
+        if not vertices:
+            return clipped
+        previous = vertices[-1]
+        previous_inside = bool(inside(previous))
+        for current in vertices:
+            current_inside = bool(inside(current))
+            if current_inside != previous_inside:
+                clipped.append(intersect(previous, current))
+            if current_inside:
+                clipped.append(current)
+            previous = current
+            previous_inside = current_inside
+        return clipped
+
+    def _vertical_intersection(
+        x: float, start: tuple[float, float], end: tuple[float, float]
+    ) -> tuple[float, float]:
+        delta_x = end[0] - start[0]
+        if delta_x == 0:
+            return x, start[1]
+        ratio = (x - start[0]) / delta_x
+        return x, start[1] + ratio * (end[1] - start[1])
+
+    def _horizontal_intersection(
+        y: float, start: tuple[float, float], end: tuple[float, float]
+    ) -> tuple[float, float]:
+        delta_y = end[1] - start[1]
+        if delta_y == 0:
+            return start[0], y
+        ratio = (y - start[1]) / delta_y
+        return start[0] + ratio * (end[0] - start[0]), y
+
+    points = _clip(
+        points,
+        lambda point: point[0] >= 0,
+        lambda a, b: _vertical_intersection(0, a, b),
+    )
+    points = _clip(
+        points,
+        lambda point: point[0] <= width,
+        lambda a, b: _vertical_intersection(width, a, b),
+    )
+    points = _clip(
+        points,
+        lambda point: point[1] >= 0,
+        lambda a, b: _horizontal_intersection(0, a, b),
+    )
+    points = _clip(
+        points,
+        lambda point: point[1] <= height,
+        lambda a, b: _horizontal_intersection(height, a, b),
+    )
+    if len(points) < 3:
+        return False
+    clipped = [coordinate for point in points for coordinate in point]
+    return _has_positive_polygon_area(clipped)
 
 
 def _imagenet_ready(root: Path) -> bool:
@@ -312,6 +391,9 @@ def _coco_task_annotations_valid(
                         for value in polygon
                     )
                     or not _has_positive_polygon_area(polygon)
+                    or not _polygon_has_positive_image_overlap(
+                        polygon, image_shapes.get(image_id)
+                    )
                     for polygon in segmentation
                 ):
                     return False
@@ -501,18 +583,25 @@ def _widerface_ready(root: Path) -> bool:
         }
         for event_dir in event_dirs
     }
+    image_shapes = _widerface_image_shapes(root, expected_images)
     return (
         actual_images == expected_images
         and sum(len(image_names) for image_names in actual_images.values())
         == WIDERFACE_VALIDATION_SAMPLE_COUNT
-        and _widerface_difficulty_metadata_ready(root, expected_images)
+        and image_shapes is not None
+        and _widerface_difficulty_metadata_ready(
+            root, expected_images, image_shapes=image_shapes
+        )
     )
 
 
 def _widerface_difficulty_metadata_ready(
-    root: Path, expected_images: dict[str, set[str]]
+    root: Path,
+    expected_images: dict[str, set[str]],
+    *,
+    image_shapes: list[list[tuple[int, int]]] | None = None,
 ) -> bool:
-    """Validate WiderFace difficulty table dimensions and one-based face indices."""
+    """Validate WiderFace difficulty metadata and its decoded-image geometry."""
 
     try:
         main = loadmat(root / "wider_face_val.mat")
@@ -531,6 +620,8 @@ def _widerface_difficulty_metadata_ready(
         len(table) != len(expected_images) for table in difficulties
     ):
         return False
+    if image_shapes is not None and len(image_shapes) != len(expected_images):
+        return False
     for event_index, image_names in enumerate(expected_images.values()):
         try:
             event_faces = face_boxes[event_index][0]
@@ -538,6 +629,38 @@ def _widerface_difficulty_metadata_ready(
             return False
         if len(event_faces) != len(image_names):
             return False
+        if image_shapes is not None and len(image_shapes[event_index]) != len(
+            image_names
+        ):
+            return False
+        face_counts: list[int] = []
+        for image_index, face_entry in enumerate(event_faces):
+            try:
+                face_array = np.asarray(face_entry[0])
+            except (IndexError, TypeError):
+                return False
+            if (
+                face_array.ndim != 2
+                or face_array.shape[1] != 4
+                or len(face_array) == 0
+                or not np.isfinite(face_array).all()
+                or (face_array[:, 2:] <= 0).any()
+            ):
+                return False
+            if image_shapes is not None:
+                height, width = image_shapes[event_index][image_index]
+                if (
+                    height <= 0
+                    or width <= 0
+                    or not (
+                        (face_array[:, 0] < width)
+                        & (face_array[:, 0] + face_array[:, 2] > 0)
+                        & (face_array[:, 1] < height)
+                        & (face_array[:, 1] + face_array[:, 3] > 0)
+                    ).all()
+                ):
+                    return False
+            face_counts.append(len(face_array))
         for table in difficulties:
             try:
                 event_indices = table[event_index][0]
@@ -545,18 +668,8 @@ def _widerface_difficulty_metadata_ready(
                 return False
             if len(event_indices) != len(image_names):
                 return False
-            for image_index, face_entry in enumerate(event_faces):
+            for image_index in range(len(event_faces)):
                 try:
-                    face_array = np.asarray(face_entry[0])
-                    if (
-                        face_array.ndim != 2
-                        or face_array.shape[1] != 4
-                        or len(face_array) == 0
-                        or not np.isfinite(face_array).all()
-                        or (face_array[:, 2:] <= 0).any()
-                    ):
-                        return False
-                    face_count = len(face_array)
                     keep_indices = np.asarray(event_indices[image_index][0])
                 except (IndexError, TypeError):
                     return False
@@ -581,7 +694,8 @@ def _widerface_difficulty_metadata_ready(
                 if not valid_indices:
                     return False
                 if keep_indices.size and (
-                    int(keep_indices.min()) < 1 or int(keep_indices.max()) > face_count
+                    int(keep_indices.min()) < 1
+                    or int(keep_indices.max()) > face_counts[image_index]
                 ):
                     return False
                 if len(np.unique(keep_indices)) != keep_indices.size:
@@ -631,6 +745,45 @@ def _load_widerface_image_names(annotation_path: Path) -> dict[str, set[str]] | 
     if len(expected) != WIDERFACE_EVENT_COUNT:
         return None
     return expected
+
+
+def _widerface_image_shapes(
+    root: Path, expected_images: dict[str, set[str]]
+) -> list[list[tuple[int, int]]] | None:
+    """Load WiderFace image shapes in the annotation's event and file order."""
+
+    try:
+        annotation = loadmat(root / "wider_face_val.mat")
+        event_list = annotation["event_list"]
+        file_list = annotation["file_list"]
+    except (IndexError, KeyError, MatReadError, OSError, TypeError, ValueError):
+        return None
+    if len(event_list) != len(file_list) or len(event_list) != len(expected_images):
+        return None
+
+    all_shapes: list[list[tuple[int, int]]] = []
+    for event_cell, file_cell in zip(event_list, file_list, strict=True):
+        event_names = _flatten_matlab_strings(event_cell)
+        image_stems = _flatten_matlab_strings(file_cell)
+        if (
+            len(event_names) != 1
+            or not image_stems
+            or expected_images.get(event_names[0])
+            != {f"{stem}.jpg" for stem in image_stems}
+        ):
+            return None
+        event_shapes: list[tuple[int, int]] = []
+        for stem in image_stems:
+            try:
+                with Image.open(
+                    root / "images" / event_names[0] / f"{stem}.jpg"
+                ) as image:
+                    width, height = image.size
+            except OSError:
+                return None
+            event_shapes.append((height, width))
+        all_shapes.append(event_shapes)
+    return all_shapes
 
 
 def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
