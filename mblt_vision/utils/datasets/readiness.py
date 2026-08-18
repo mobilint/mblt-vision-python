@@ -394,6 +394,7 @@ def _coco_task_annotations_valid(
                     or not _polygon_has_positive_image_overlap(
                         polygon, image_shapes.get(image_id)
                     )
+                    or not _valid_coco_polygon(polygon, image_shapes.get(image_id))
                     for polygon in segmentation
                 ):
                     return False
@@ -425,6 +426,18 @@ def _coco_task_annotations_valid(
                 != sum(keypoints[index] > 0 for index in range(2, len(keypoints), 3))
             ):
                 return False
+            image_shape = image_shapes.get(image_id)
+            if image_shape is not None:
+                height, width = image_shape
+                if any(
+                    keypoints[index + 2] == 2
+                    and not (
+                        0 <= keypoints[index] < width
+                        and 0 <= keypoints[index + 1] < height
+                    )
+                    for index in range(0, len(keypoints), 3)
+                ):
+                    return False
         annotation_ids.append(annotation_id)
     return len(annotation_ids) == len(set(annotation_ids))
 
@@ -502,6 +515,22 @@ def _valid_coco_rle(
     except (RuntimeError, TypeError, ValueError):
         return False
     return decoded.shape == tuple(size) and bool(np.any(decoded))
+
+
+def _valid_coco_polygon(
+    polygon: list[int | float], image_shape: tuple[int, int] | None
+) -> bool:
+    """Require a COCO polygon to rasterize to foreground in its image."""
+
+    if image_shape is None:
+        return True
+    height, width = image_shape
+    try:
+        encoded = coco_mask.frPyObjects([polygon], height, width)
+        decoded = np.asarray(coco_mask.decode(encoded))
+    except (RuntimeError, TypeError, ValueError):
+        return False
+    return bool(np.any(decoded))
 
 
 def _coco_ready(root: Path, task: str) -> bool:
@@ -668,6 +697,7 @@ def _widerface_difficulty_metadata_ready(
                 return False
             if len(event_indices) != len(image_names):
                 return False
+            table_has_eligible_face = False
             for image_index in range(len(event_faces)):
                 try:
                     keep_indices = np.asarray(event_indices[image_index][0])
@@ -700,6 +730,9 @@ def _widerface_difficulty_metadata_ready(
                     return False
                 if len(np.unique(keep_indices)) != keep_indices.size:
                     return False
+                table_has_eligible_face |= bool(keep_indices.size)
+            if not table_has_eligible_face:
+                return False
     return True
 
 
@@ -778,6 +811,7 @@ def _widerface_image_shapes(
                 with Image.open(
                     root / "images" / event_names[0] / f"{stem}.jpg"
                 ) as image:
+                    image.load()
                     width, height = image.size
             except OSError:
                 return None

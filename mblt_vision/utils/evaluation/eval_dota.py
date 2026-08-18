@@ -160,9 +160,8 @@ def _load_ground_truths(
                         "DOTAv1 annotation coordinates must be finite at "
                         f"{label_path}:{line_number}."
                     )
-                if coords.numel() and float(coords.max()) <= 1.5:
-                    coords[:, 0] *= width
-                    coords[:, 1] *= height
+                coords[:, 0] *= width
+                coords[:, 1] *= height
                 _validate_polygon_area(coords, label_path, line_number)
                 _validate_polygon_image_overlap(
                     coords, (height, width), label_path, line_number

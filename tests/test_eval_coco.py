@@ -186,6 +186,75 @@ def test_coco_evaluation_rejects_polygons_outside_image_bounds(
         )
 
 
+def test_coco_evaluation_rejects_polygons_without_rasterized_foreground(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Continuous subpixel overlap must not admit an empty raster mask."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 10, "width": 10}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [9, 9, 1, 1],
+                    "area": 1,
+                    "iscrowd": 0,
+                    "segmentation": [[9.9, 9.9, 9.99, 9.9, 9.99, 9.99]],
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(
+                post_cfg={"task": "instance_segmentation", "dataset": "coco"}
+            ),
+            "/dataset",
+            batch_size=1,
+        )
+
+
+def test_coco_evaluation_rejects_visible_keypoints_outside_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Visible pose coordinates must refer to pixels in the source image."""
+
+    keypoints = [0.0, 0.0, 0.0] * 17
+    keypoints[:3] = [11.0, 1.0, 2.0]
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 10, "width": 10}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 1, 1],
+                    "area": 1,
+                    "iscrowd": 0,
+                    "keypoints": keypoints,
+                    "num_keypoints": 1,
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(post_cfg={"task": "pose_estimation", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
+
+
 def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:
     """Require one decoded result for every submitted COCO image."""
 

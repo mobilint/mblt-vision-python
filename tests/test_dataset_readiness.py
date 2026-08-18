@@ -519,10 +519,10 @@ def test_widerface_readiness_rejects_row_vector_difficulty_indices(
     )
 
 
-def test_widerface_readiness_accepts_empty_difficulty_indices(
+def test_widerface_readiness_rejects_all_empty_difficulty_indices(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Keep valid images with no eligible faces in a difficulty split."""
+    """Every complete WiderFace difficulty split needs an eligible face."""
 
     face_boxes = np.empty((1, 1), dtype=object)
     event_faces = np.empty((1, 1), dtype=object)
@@ -540,7 +540,7 @@ def test_widerface_readiness_accepts_empty_difficulty_indices(
 
     monkeypatch.setattr(readiness, "loadmat", _loadmat)
 
-    assert readiness._widerface_difficulty_metadata_ready(
+    assert not readiness._widerface_difficulty_metadata_ready(
         tmp_path, {"0--Parade": {"sample.jpg"}}
     )
 

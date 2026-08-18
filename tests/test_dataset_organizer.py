@@ -86,6 +86,20 @@ def test_dotav1_organizer_rejects_truncated_raw_annotation_rows(
         )
 
 
+def test_dotav1_stage_requires_a_non_difficult_target(tmp_path: Path) -> None:
+    """Do not replace a usable DOTAv1 cache with an unscorable staged split."""
+
+    image_path = tmp_path / "images" / "P0001.png"
+    image_path.parent.mkdir()
+    Image.new("RGB", (100, 50)).save(image_path)
+    label_path = tmp_path / "labels" / "val_original" / "P0001.txt"
+    label_path.parent.mkdir(parents=True)
+    label_path.write_text("0 0 20 0 20 20 0 20 plane 1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="at least one non-difficult target"):
+        organizer._validate_staged_dotav1_labels(tmp_path)
+
+
 @pytest.mark.parametrize(
     ("organize_dataset", "dataset_name"),
     [

@@ -335,8 +335,11 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
         if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
     }
     valid_indices = set(DOTAV1_CLASS_TO_IDX.values())
+    label_stems = {kind: set() for kind in label_dirs}
+    positive_stems = {kind: set() for kind in label_dirs}
     for kind, label_dir in label_dirs.items():
         for label_path in sorted(label_dir.glob("*.txt")):
+            label_stems[kind].add(label_path.stem)
             image_path = image_paths.get(label_path.stem)
             if image_path is None:
                 raise ValueError(
@@ -346,6 +349,7 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
             if image is None:
                 raise ValueError(f"Unable to decode staged DOTAv1 image: {image_path}.")
             height, width = image.shape[:2]
+            has_positive_target = False
             for line_number, line in enumerate(
                 label_path.read_text(encoding="utf-8").splitlines(), start=1
             ):
@@ -422,6 +426,16 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
                     raise ValueError(
                         f"Unsupported staged DOTAv1 difficulty flag at {label_path}:{line_number}."
                     )
+                has_positive_target |= difficulty == "0"
+            if has_positive_target:
+                positive_stems[kind].add(label_path.stem)
+    authoritative_positive_stems = positive_stems["original"] | (
+        positive_stems["normalized"] - label_stems["original"]
+    )
+    if not authoritative_positive_stems:
+        raise ValueError(
+            "Staged DOTAv1 dataset must contain at least one non-difficult target."
+        )
 
 
 class _GoogleDriveDownloadEntry(Protocol):

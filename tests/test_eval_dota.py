@@ -232,6 +232,28 @@ def test_dota_annotations_reject_polygons_outside_images(
         _load_ground_truths(str(tmp_path), dataset)
 
 
+def test_dota_normalized_coordinates_are_scaled_even_when_partially_clipped(
+    tmp_path,
+) -> None:
+    """The normalized-label directory always uses normalized image coordinates."""
+
+    label_path = tmp_path / "labels" / "val" / "image.txt"
+    label_path.parent.mkdir(parents=True)
+    label_path.write_text("0 0.9 0 1.6 0 1.6 0.1 0.9 0.1", encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    ground_truth = _load_ground_truths(str(tmp_path), dataset)["image"]
+
+    assert ground_truth["polygons"][0, :, 0].tolist() == [90.0, 160.0, 160.0, 90.0]
+
+
 def test_dota_ground_truth_rejects_orphan_label_files(tmp_path) -> None:
     """Direct evaluation must not ignore labels without a selected image."""
 
