@@ -1,5 +1,15 @@
 # Mobilint Vision Python
 
+<!-- markdownlint-disable MD033 -->
+<div align="center">
+<p>
+<a href="https://www.mobilint.com/" target="_blank">
+<img src="https://raw.githubusercontent.com/mobilint/.github/main/assets/Mobilint_Logo_Primary.png" alt="Mobilint Logo" width="60%">
+</a>
+</p>
+</div>
+<!-- markdownlint-enable MD033 -->
+
 Run pre-trained Mobilint Vision models from Python. `mblt-vision-python` provides
 model configuration, artifact loading, preprocessing, inference integration, and
 typed postprocessing results for image classification, depth estimation, face and
@@ -9,6 +19,10 @@ and pose estimation.
 Version `0.0.0` is the initial standalone release.
 
 ## Installation
+
+[![PyPI - Version](https://img.shields.io/pypi/v/mblt-vision-python?logo=pypi&logoColor=white)](https://pypi.org/project/mblt-vision-python/)
+[![PyPI Downloads](https://static.pepy.tech/badge/mblt-vision-python?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://clickpy.clickhouse.com/dashboard/mblt-vision-python)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mblt-vision-python?logo=python&logoColor=gold)](https://pypi.org/project/mblt-vision-python/)
 
 ```bash
 pip install mblt-vision-python
