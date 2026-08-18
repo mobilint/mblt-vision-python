@@ -16,6 +16,7 @@ from mblt_vision.utils.evaluation.eval_dota import (
     evaluate_dota_predictions,
     format_dota_results,
 )
+from mblt_vision.utils.results import Results
 
 eval_dota_module = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
 
@@ -166,6 +167,40 @@ def test_dota_annotations_reject_duplicate_targets(
     path = tmp_path / label_path
     path.parent.mkdir(parents=True)
     path.write_text(f"{annotation}\n{annotation}\n", encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Duplicate DOTAv1 annotation target"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
+@pytest.mark.parametrize(
+    ("label_path", "annotations"),
+    [
+        (
+            "labels/val/image.txt",
+            "0 0 0 0.2 0 0.2 0.2 0 0.2\n0 0.2 0 0.2 0.2 0 0.2 0 0",
+        ),
+        (
+            "labels/val_original/image.txt",
+            "0 0 20 0 20 20 0 20 plane 0\n20 0 20 20 0 20 0 0 plane 0",
+        ),
+    ],
+)
+def test_dota_annotations_reject_equivalent_reordered_targets(
+    tmp_path, label_path: str, annotations: str
+) -> None:
+    """Duplicate quadrilaterals remain duplicates after cyclic reordering."""
+
+    path = tmp_path / label_path
+    path.parent.mkdir(parents=True)
+    path.write_text(annotations, encoding="utf-8")
     dataset = cast(
         CustomDOTAv1,
         SimpleNamespace(
@@ -466,7 +501,7 @@ def test_dota_export_rejects_truncated_converted_batches() -> None:
 
     with pytest.raises(ValueError, match="export batch length mismatch"):
         format_dota_results(
-            SimpleNamespace(output=[]),
+            cast(Results, SimpleNamespace(output=[])),
             (640, 640),
             [(640, 640), (640, 640)],
             [None, None],
@@ -484,7 +519,7 @@ def test_dota_export_rejects_mismatched_detection_fields() -> None:
 
     with pytest.raises(ValueError, match="export detection length mismatch"):
         format_dota_results(
-            SimpleNamespace(output=[]),
+            cast(Results, SimpleNamespace(output=[])),
             (640, 640),
             [(640, 640)],
             [None],

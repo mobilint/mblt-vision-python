@@ -4,6 +4,7 @@ Custom dataloaders for vision datasets.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -58,6 +59,17 @@ class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int
                 annotation whose ``num_keypoints`` is greater than this value.
         """
         self.root = root
+        try:
+            raw_annotation = json.loads(Path(annFile).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Unable to read COCO annotation file {annFile}: {exc}."
+            ) from exc
+        if not isinstance(raw_annotation, dict):
+            raise ValueError(
+                f"COCO annotation file {annFile} must contain a JSON object."
+            )
+        self.raw_annotation = raw_annotation
         self.coco = COCO(annFile)
         if min_keypoints is None:
             self.ids = list(sorted(self.coco.imgs.keys()))

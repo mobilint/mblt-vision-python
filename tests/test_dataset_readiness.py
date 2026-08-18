@@ -289,6 +289,47 @@ def test_coco_readiness_rejects_invalid_instance_box_geometry(
 
 
 @pytest.mark.parametrize(
+    ("bbox", "area"),
+    [([3, 0, 1, 1], 1), ([0, 0, 1, 1], 5)],
+)
+def test_coco_readiness_rejects_unrealizable_box_or_area(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bbox: list[int],
+    area: int,
+) -> None:
+    """Boxes and areas must describe foreground that fits the source image."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    image_name = "000000000001.jpg"
+    _write_image(tmp_path / "val2017" / image_name, (2, 2))
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [{"id": 1, "file_name": image_name, "height": 2, "width": 2}],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {
+                        "id": 1,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "bbox": bbox,
+                        "area": area,
+                        "iscrowd": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+
+@pytest.mark.parametrize(
     ("counts", "expected_ready"),
     [([3, 1], True), ("31", True), ([4], False), ([3], False), ("4", False)],
 )
@@ -383,13 +424,55 @@ def test_coco_readiness_rejects_corrupt_or_mismatched_images(
     assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
 
 
+def test_nyu_readiness_matches_the_evaluator_depth_domain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Cache reuse must reject depth targets that evaluation cannot score."""
+
+    monkeypatch.setattr(readiness, "NYU_DEPTH_VALIDATION_SAMPLE_COUNT", 1)
+    _write_image(tmp_path / "images" / "sample.png", (2, 2))
+    depth_path = tmp_path / "depth" / "sample.npy"
+    depth_path.parent.mkdir()
+
+    np.save(depth_path, np.full((2, 2), 0.001, dtype=np.float64))
+    assert not readiness.dense_dataset_ready(tmp_path, "nyu-depth")
+
+    np.save(
+        depth_path,
+        np.array([[1.0, np.finfo(np.float64).max], [1.0, 1.0]], dtype=np.float64),
+    )
+    assert not readiness.dense_dataset_ready(tmp_path, "nyu-depth")
+
+    np.save(depth_path, np.ones((2, 2), dtype=np.float32))
+    assert readiness.dense_dataset_ready(tmp_path, "nyu-depth")
+
+
+def test_cityscapes_readiness_rejects_unsupported_source_ids(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Source IDs outside the Cityscapes label taxonomy cannot hide as ignore."""
+
+    monkeypatch.setattr(readiness, "CITYSCAPES_VALIDATION_SAMPLE_COUNT", 1)
+    stem = "frankfurt_000000_000000"
+    _write_image(tmp_path / "images" / f"{stem}.png", (2, 2))
+    annotation_path = tmp_path / "annotations" / f"{stem}.png"
+    annotation_path.parent.mkdir()
+    Image.new("L", (2, 2), color=34).save(annotation_path)
+
+    assert not readiness.dense_dataset_ready(tmp_path, "cityscapes")
+
+    Image.new("L", (2, 2), color=7).save(annotation_path)
+    assert readiness.dense_dataset_ready(tmp_path, "cityscapes")
+
+
 def test_coco_annotation_identity_digest_rejects_wrong_validation_split(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Bind a complete COCO annotation table to its canonical image identities."""
 
     images = [
-        {"id": index, "file_name": f"{index:012d}.jpg"} for index in range(1, 5001)
+        {"id": index, "file_name": f"{index:012d}.jpg", "height": 1, "width": 1}
+        for index in range(1, 5001)
     ]
     payload = "".join(f"{item['id']}:{item['file_name']}\n" for item in images).encode()
     monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 5000)

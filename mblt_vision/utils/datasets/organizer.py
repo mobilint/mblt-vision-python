@@ -40,6 +40,7 @@ from .readiness import (
     DOTAV1_VALIDATION_SAMPLE_COUNT,
     IMAGE_SUFFIXES,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+    _canonicalize_quadrilateral,
     _path_has_symlink_component,
     _polygon_has_positive_image_overlap,
     dataset_ready,
@@ -430,7 +431,10 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
                     raise ValueError(
                         f"Unsupported staged DOTAv1 difficulty flag at {label_path}:{line_number}."
                     )
-                target_key = (target_class, tuple(image_coordinates))
+                target_key = (
+                    target_class,
+                    _canonicalize_quadrilateral(image_coordinates),
+                )
                 if target_key in seen_targets:
                     raise ValueError(
                         "Duplicate staged DOTAv1 annotation target at "
@@ -1907,7 +1911,7 @@ def _write_dotav1_yolo_labels(
                     f"Unsupported DOTAv1 difficulty flag {fields[9]!r} in "
                     f"{original_label_path} at line {line_number}."
                 )
-            target_key = (class_name, tuple(coordinates))
+            target_key = (class_name, _canonicalize_quadrilateral(coordinates))
             if target_key in seen_targets:
                 raise ValueError(
                     "Duplicate DOTAv1 annotation target in "

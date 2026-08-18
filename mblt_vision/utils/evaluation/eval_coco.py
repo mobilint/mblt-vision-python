@@ -59,6 +59,36 @@ def _require_batch_cardinality(expected: int, **values: Any) -> None:
 def _validate_coco_dataset_taxonomy(dataset: CustomCOCODataset, task: str) -> None:
     """Ensure direct COCO evaluation uses only task-compatible category IDs."""
 
+    raw_annotation = getattr(dataset, "raw_annotation", None)
+    if raw_annotation is not None and not isinstance(raw_annotation, dict):
+        raise ValueError("COCO evaluation dataset has invalid raw annotation data.")
+    raw_images = (
+        raw_annotation.get("images") if isinstance(raw_annotation, dict) else None
+    )
+    raw_categories = (
+        raw_annotation.get("categories") if isinstance(raw_annotation, dict) else None
+    )
+    raw_annotations = (
+        raw_annotation.get("annotations") if isinstance(raw_annotation, dict) else None
+    )
+    raw_image_records: list[Any] = []
+    raw_category_records: list[Any] = []
+    raw_annotation_records: list[Any] = []
+    if raw_annotation is not None:
+        if not isinstance(raw_images, list):
+            raise ValueError("COCO evaluation dataset has malformed raw image table.")
+        if not isinstance(raw_categories, list):
+            raise ValueError(
+                "COCO evaluation dataset has malformed raw category table."
+            )
+        if not isinstance(raw_annotations, list):
+            raise ValueError(
+                "COCO evaluation dataset has malformed raw annotation table."
+            )
+        raw_image_records = raw_images
+        raw_category_records = raw_categories
+        raw_annotation_records = raw_annotations
+
     categories = getattr(dataset.coco, "cats", None)
     if not isinstance(categories, dict) or not categories:
         raise ValueError("COCO evaluation dataset must define at least one category.")
@@ -92,18 +122,65 @@ def _validate_coco_dataset_taxonomy(dataset: CustomCOCODataset, task: str) -> No
         ):
             raise ValueError("COCO evaluation dataset contains invalid image metadata.")
         height, width = image.get("height"), image.get("width")
-        image_shapes[image_id] = (
-            (height, width)
-            if isinstance(height, int)
+        if not (
+            isinstance(height, int)
             and not isinstance(height, bool)
             and height > 0
             and isinstance(width, int)
             and not isinstance(width, bool)
             and width > 0
-            else None
-        )
+        ):
+            raise ValueError(
+                "COCO evaluation dataset contains invalid image dimensions."
+            )
+        image_shapes[image_id] = (height, width)
+
+    annotation_records = (
+        raw_annotation_records
+        if raw_annotation is not None
+        else list(annotations.values())
+    )
+    if not annotation_records:
+        raise ValueError("COCO evaluation dataset must define at least one annotation.")
+    if raw_annotation is not None:
+        raw_image_ids = [
+            record.get("id") if isinstance(record, dict) else None
+            for record in raw_image_records
+        ]
+        raw_category_ids = [
+            record.get("id") if isinstance(record, dict) else None
+            for record in raw_category_records
+        ]
+        raw_annotation_ids = [
+            record.get("id") if isinstance(record, dict) else None
+            for record in raw_annotation_records
+        ]
+        if (
+            any(
+                not isinstance(record_id, int) or isinstance(record_id, bool)
+                for record_id in (
+                    *raw_image_ids,
+                    *raw_category_ids,
+                    *raw_annotation_ids,
+                )
+            )
+            or len(raw_image_ids) != len(set(raw_image_ids))
+            or len(raw_category_ids) != len(set(raw_category_ids))
+            or len(raw_annotation_ids) != len(set(raw_annotation_ids))
+        ):
+            raise ValueError(
+                "COCO evaluation dataset has duplicate or invalid raw IDs."
+            )
+        if (
+            set(raw_image_ids) != set(images)
+            or set(raw_category_ids) != category_ids
+            or set(raw_annotation_ids) != set(annotations)
+        ):
+            raise ValueError(
+                "COCO evaluation dataset raw and indexed records disagree."
+            )
     if not _coco_task_annotations_valid(
-        list(annotations.values()),
+        annotation_records,
         image_ids=set(images),
         category_ids=category_ids,
         image_shapes=image_shapes,

@@ -120,6 +120,25 @@ def _has_positive_polygon_area(polygon: list[int | float]) -> bool:
     return bool(abs(signed_double_area) > 0)
 
 
+def _canonicalize_quadrilateral(
+    coordinates: list[int | float] | tuple[int | float, ...],
+) -> tuple[float, ...]:
+    """Return a quadrilateral key independent of its start vertex and winding."""
+
+    if len(coordinates) != 8:
+        raise ValueError(
+            "A quadrilateral must contain exactly four two-dimensional vertices."
+        )
+    points = tuple(
+        (float(coordinates[index]), float(coordinates[index + 1]))
+        for index in range(0, len(coordinates), 2)
+    )
+    candidates = []
+    for winding in (points, tuple(reversed(points))):
+        candidates.extend(winding[index:] + winding[:index] for index in range(4))
+    return tuple(coordinate for point in min(candidates) for coordinate in point)
+
+
 def _polygon_has_positive_image_overlap(
     polygon: list[int | float], image_shape: tuple[int, int] | None
 ) -> bool:
@@ -268,7 +287,7 @@ def _load_coco_image_names(
             ):
                 image_shapes[image_id] = (height, width)
             else:
-                image_shapes[image_id] = None
+                return None
     if (
         len(names) != len(image_records)
         or len(names) != len(set(names))
@@ -352,6 +371,10 @@ def _coco_task_annotations_valid(
             or category_id not in category_ids
         ):
             return False
+        image_shape = image_shapes.get(image_id)
+        if image_shape is None:
+            return False
+        image_height, image_width = image_shape
         bbox = record.get("bbox")
         if (
             not isinstance(bbox, list)
@@ -364,6 +387,10 @@ def _coco_task_annotations_valid(
             )
             or bbox[2] <= 0
             or bbox[3] <= 0
+            or bbox[0] >= image_width
+            or bbox[0] + bbox[2] <= 0
+            or bbox[1] >= image_height
+            or bbox[1] + bbox[3] <= 0
         ):
             return False
         area = record.get("area")
@@ -373,6 +400,7 @@ def _coco_task_annotations_valid(
             or isinstance(area, bool)
             or not np.isfinite(area)
             or area <= 0
+            or area > image_height * image_width
             or not isinstance(iscrowd, int)
             or isinstance(iscrowd, bool)
             or iscrowd not in {0, 1}
@@ -429,18 +457,15 @@ def _coco_task_annotations_valid(
                 != sum(keypoints[index] > 0 for index in range(2, len(keypoints), 3))
             ):
                 return False
-            image_shape = image_shapes.get(image_id)
-            if image_shape is not None:
-                height, width = image_shape
-                if any(
-                    keypoints[index + 2] > 0
-                    and not (
-                        0 <= keypoints[index] < width
-                        and 0 <= keypoints[index + 1] < height
-                    )
-                    for index in range(0, len(keypoints), 3)
-                ):
-                    return False
+            height, width = image_shape
+            if any(
+                keypoints[index + 2] > 0
+                and not (
+                    0 <= keypoints[index] < width and 0 <= keypoints[index + 1] < height
+                )
+                for index in range(0, len(keypoints), 3)
+            ):
+                return False
         annotation_ids.append(annotation_id)
     return len(annotation_ids) == len(set(annotation_ids))
 
@@ -706,6 +731,8 @@ def _widerface_difficulty_metadata_ready(
                 face_array.ndim != 2
                 or face_array.shape[1] != 4
                 or len(face_array) == 0
+                or not np.issubdtype(face_array.dtype, np.number)
+                or np.issubdtype(face_array.dtype, np.complexfloating)
                 or not np.isfinite(face_array).all()
                 or (face_array[:, 2:] <= 0).any()
                 or len(np.unique(face_array, axis=0)) != len(face_array)
@@ -741,6 +768,8 @@ def _widerface_difficulty_metadata_ready(
                     keep_indices = keep_indices.reshape(1)
                 elif keep_indices.ndim == 2:
                     if keep_indices.size == 0:
+                        if keep_indices.shape[0] != 0:
+                            return False
                         keep_indices = keep_indices.reshape(0)
                     elif keep_indices.shape[1] == 1:
                         keep_indices = keep_indices[:, 0]
@@ -891,17 +920,21 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
                 with Image.open(image_path) as image:
                     image.load()
                     image_shape = (image.height, image.width)
-                depth = np.load(depths[stem], allow_pickle=False)
+                raw_depth = np.load(depths[stem], allow_pickle=False)
             except (OSError, ValueError):
                 return False
+            if not np.issubdtype(raw_depth.dtype, np.number) or np.issubdtype(
+                raw_depth.dtype, np.complexfloating
+            ):
+                return False
+            with np.errstate(over="ignore", invalid="ignore"):
+                depth = np.asarray(raw_depth, dtype=np.float32)
             if (
-                not np.issubdtype(depth.dtype, np.number)
-                or np.issubdtype(depth.dtype, np.complexfloating)
-                or depth.ndim != 2
+                depth.ndim != 2
                 or depth.shape != image_shape
                 or not np.isfinite(depth).all()
                 or bool((depth < 0).any())
-                or not bool(((depth >= 0.001) & (depth <= 100.0)).any())
+                or not bool(((depth > 0.001) & (depth < 100.0)).any())
             ):
                 return False
         return True
@@ -943,6 +976,8 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             if annotation.size and (
                 int(annotation.min()) < 0 or int(annotation.max()) > 255
             ):
+                return False
+            if not bool(np.all((annotation <= 33) | (annotation == 255))):
                 return False
             train_ids = CITYSCAPES_SOURCE_TO_TRAIN_ID[annotation.astype(np.uint8)]
             if not bool((train_ids != 255).any()):

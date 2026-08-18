@@ -27,7 +27,18 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
             self.ids = [1, 2]
             self.coco = SimpleNamespace(
                 cats={1: {}},
-                anns={},
+                anns={
+                    1: {
+                        "id": 1,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "bbox": [0, 0, 1, 1],
+                        "area": 1,
+                        "iscrowd": 0,
+                        "keypoints": [0, 0, 0] * 17,
+                        "num_keypoints": 0,
+                    }
+                },
                 imgs={1: {"height": 1, "width": 1}, 2: {"height": 1, "width": 1}},
             )
 
@@ -89,6 +100,59 @@ def test_coco_evaluation_rejects_noncanonical_artifact_categories(
     monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
 
     with pytest.raises(ValueError, match=r"unsupported category IDs: \[999\]"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
+
+
+def test_coco_evaluation_rejects_duplicate_raw_annotation_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate raw COCO IDs before the backend's index can overwrite one row."""
+
+    annotation = {
+        "id": 1,
+        "image_id": 1,
+        "category_id": 1,
+        "bbox": [0, 0, 1, 1],
+        "area": 1,
+        "iscrowd": 0,
+    }
+    dataset = SimpleNamespace(
+        raw_annotation={
+            "images": [{"id": 1, "height": 1, "width": 1}],
+            "categories": [{"id": 1}],
+            "annotations": [annotation, annotation.copy()],
+        },
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 1, "width": 1}},
+            anns={1: annotation},
+        ),
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="duplicate or invalid raw IDs"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
+
+
+def test_coco_evaluation_rejects_empty_ground_truth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A direct COCO run must not present undefined AP as a normal metric."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(cats={1: {}}, imgs={1: {"height": 1, "width": 1}}, anns={})
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="at least one annotation"):
         eval_coco_module.eval_coco_metrics(
             SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
             "/dataset",

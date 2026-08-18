@@ -26,7 +26,10 @@ from ..datasets import (
     get_dotav1_class_num,
     get_dotav1_label,
 )
-from ..datasets.readiness import _polygon_has_positive_image_overlap
+from ..datasets.readiness import (
+    _canonicalize_quadrilateral,
+    _polygon_has_positive_image_overlap,
+)
 from ..letterbox import RatioPad, resolve_ratio_pad
 
 if TYPE_CHECKING:
@@ -193,7 +196,10 @@ def _load_ground_truths(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
                         f"{label_path}:{line_number}."
                     )
-                target_key = (cls, tuple(coords.flatten().tolist()))
+                target_key = (
+                    cls,
+                    _canonicalize_quadrilateral(coords.flatten().tolist()),
+                )
                 if target_key in seen_targets:
                     raise ValueError(
                         "Duplicate DOTAv1 annotation target at "
@@ -244,7 +250,10 @@ def _load_ground_truths(
                         f"Unsupported DOTAv1 difficulty flag {parts[9]!r} at "
                         f"{original_label_path}:{line_number}."
                     )
-                target_key = (cls, tuple(coords.flatten().tolist()))
+                target_key = (
+                    cls,
+                    _canonicalize_quadrilateral(coords.flatten().tolist()),
+                )
                 if target_key in seen_targets:
                     raise ValueError(
                         "Duplicate DOTAv1 annotation target at "
@@ -300,7 +309,7 @@ def _load_ground_truths(
 def format_dota_results(
     nms_outs: Results,
     input_shape: tuple[int, ...],
-    org_shape: tuple[int, ...],
+    org_shape: list[tuple[int, int]],
     ratio_pad: list[Any],
     image_ids: tuple[str, ...],
     postprocess: Any,
