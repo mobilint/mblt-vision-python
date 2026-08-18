@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
 from scipy.io import savemat
 
 from mblt_vision.utils.datasets import readiness
@@ -18,6 +19,13 @@ def _write_file(path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"data")
+
+
+def _write_image(path: Path, size: tuple[int, int]) -> None:
+    """Create a decodable RGB image with the requested ``(width, height)``."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size).save(path)
 
 
 def _write_widerface_metadata(path: Path, event_images: dict[str, list[str]]) -> None:
@@ -80,7 +88,7 @@ def test_coco_readiness_matches_images_to_task_annotations(
     monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
     image_names = ["000000000001.jpg", "000000000002.jpg"]
     for image_name in image_names:
-        _write_file(tmp_path / "val2017" / image_name)
+        _write_image(tmp_path / "val2017" / image_name, (2, 2))
     (tmp_path / annotation_name).write_text(
         json.dumps({"images": [{"id": 1, "file_name": image_names[0]}]}),
         encoding="utf-8",
@@ -92,7 +100,12 @@ def test_coco_readiness_matches_images_to_task_annotations(
         json.dumps(
             {
                 "images": [
-                    {"id": index, "file_name": image_name}
+                    {
+                        "id": index,
+                        "file_name": image_name,
+                        "height": 2,
+                        "width": 2,
+                    }
                     for index, image_name in enumerate(image_names, start=1)
                 ],
                 "categories": [{"id": 1}],
@@ -101,11 +114,11 @@ def test_coco_readiness_matches_images_to_task_annotations(
                         "id": index,
                         "image_id": index,
                         "category_id": 1,
-                        "bbox": [0, 0, 1, 1],
-                        "area": 1,
+                        "bbox": [0, 0, 2, 2],
+                        "area": 4,
                         "iscrowd": 0,
                         **(
-                            {"segmentation": [[0, 0, 1, 0, 1, 1]]}
+                            {"segmentation": [[0, 0, 2, 0, 2, 2]]}
                             if task == "instance_segmentation"
                             else {}
                         ),
@@ -151,7 +164,7 @@ def test_coco_readiness_rejects_missing_task_specific_ground_truth(
     monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, annotation_name, 1)
     monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, annotation_name, 1)
     monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
-    _write_file(tmp_path / "val2017" / "000000000001.jpg")
+    _write_image(tmp_path / "val2017" / "000000000001.jpg", (2, 2))
     annotation = {
         "id": 1,
         "image_id": 1,
@@ -291,7 +304,7 @@ def test_coco_readiness_decodes_and_validates_rle_segmentations(
     monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
     monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
     monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
-    _write_file(tmp_path / "val2017" / "000000000001.jpg")
+    _write_image(tmp_path / "val2017" / "000000000001.jpg", (2, 2))
     (tmp_path / "instances_val2017.json").write_text(
         json.dumps(
             {
@@ -324,6 +337,50 @@ def test_coco_readiness_decodes_and_validates_rle_segmentations(
         readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
         is expected_ready
     )
+
+
+def test_coco_readiness_rejects_corrupt_or_mismatched_images(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Cache readiness must decode COCO images and match annotation geometry."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    _write_image(tmp_path / "val2017" / "000000000001.jpg", (1, 1))
+    annotation_path = tmp_path / "instances_val2017.json"
+    annotation_path.write_text(
+        json.dumps(
+            {
+                "images": [
+                    {
+                        "id": 1,
+                        "file_name": "000000000001.jpg",
+                        "height": 2,
+                        "width": 2,
+                    }
+                ],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {
+                        "id": 1,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "bbox": [0, 0, 1, 1],
+                        "area": 1,
+                        "iscrowd": 0,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
+
+    _write_file(tmp_path / "val2017" / "000000000001.jpg")
+    assert not readiness.dataset_ready(tmp_path, "object_detection", "coco")
 
 
 def test_coco_annotation_identity_digest_rejects_wrong_validation_split(
@@ -570,6 +627,64 @@ def test_widerface_readiness_rejects_face_boxes_outside_images(
         tmp_path,
         {"0--Parade": {"sample.jpg"}},
         image_shapes=[[(10, 10)]],
+    )
+
+
+def test_widerface_readiness_allows_empty_event_difficulty_contributions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A difficulty split may have no eligible faces in one event but not all."""
+
+    face_boxes = np.empty((2, 1), dtype=object)
+    difficulty = np.empty((2, 1), dtype=object)
+    for event_index in range(2):
+        event_faces = np.empty((1, 1), dtype=object)
+        event_faces[0, 0] = np.array([[0, 0, 1, 1]], dtype=np.float64)
+        face_boxes[event_index, 0] = event_faces
+        event_indices = np.empty((1, 1), dtype=object)
+        event_indices[0, 0] = (
+            np.empty((0, 0), dtype=np.int64)
+            if event_index == 0
+            else np.array([1], dtype=np.int64)
+        )
+        difficulty[event_index, 0] = event_indices
+
+    def _loadmat(path: Path) -> dict[str, np.ndarray]:
+        if path.name == "wider_face_val.mat":
+            return {"face_bbx_list": face_boxes}
+        return {"gt_list": difficulty}
+
+    monkeypatch.setattr(readiness, "loadmat", _loadmat)
+
+    assert readiness._widerface_difficulty_metadata_ready(
+        tmp_path,
+        {"0--Parade": {"first.jpg"}, "1--Handshaking": {"second.jpg"}},
+    )
+
+
+def test_widerface_readiness_rejects_duplicate_face_boxes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Duplicate ground-truth rows cannot alter the WiderFace recall denominator."""
+
+    face_boxes = np.empty((1, 1), dtype=object)
+    event_faces = np.empty((1, 1), dtype=object)
+    event_faces[0, 0] = np.array([[0, 0, 1, 1], [0, 0, 1, 1]], dtype=np.float64)
+    face_boxes[0, 0] = event_faces
+    difficulty = np.empty((1, 1), dtype=object)
+    event_indices = np.empty((1, 1), dtype=object)
+    event_indices[0, 0] = np.array([1, 2], dtype=np.int64)
+    difficulty[0, 0] = event_indices
+
+    def _loadmat(path: Path) -> dict[str, np.ndarray]:
+        if path.name == "wider_face_val.mat":
+            return {"face_bbx_list": face_boxes}
+        return {"gt_list": difficulty}
+
+    monkeypatch.setattr(readiness, "loadmat", _loadmat)
+
+    assert not readiness._widerface_difficulty_metadata_ready(
+        tmp_path, {"0--Parade": {"sample.jpg"}}
     )
 
 

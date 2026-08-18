@@ -207,6 +207,34 @@ def test_dota_annotations_reject_degenerate_polygons(
 @pytest.mark.parametrize(
     ("label_path", "annotation"),
     [
+        ("labels/val/image.txt", "0 0 0 0.2 0 0.2 0.2 0 0"),
+        ("labels/val_original/image.txt", "0 0 20 0 20 20 0 0 plane 0"),
+    ],
+)
+def test_dota_annotations_reject_repeated_vertices(
+    tmp_path, label_path: str, annotation: str
+) -> None:
+    """DOTAv1 quadrilaterals cannot silently degrade into triangles."""
+
+    path = tmp_path / label_path
+    path.parent.mkdir(parents=True)
+    path.write_text(annotation, encoding="utf-8")
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="four distinct vertices"):
+        _load_ground_truths(str(tmp_path), dataset)
+
+
+@pytest.mark.parametrize(
+    ("label_path", "annotation"),
+    [
         ("labels/val/image.txt", "0 1.1 0 1.2 0 1.2 0.1 1.1 0.1"),
         ("labels/val_original/image.txt", "110 0 120 0 120 10 110 10 plane 0"),
     ],

@@ -255,6 +255,39 @@ def test_coco_evaluation_rejects_visible_keypoints_outside_images(
         )
 
 
+def test_coco_evaluation_rejects_pose_area_larger_than_its_box(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not let inflated pose areas weaken OKS matching thresholds."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 10, "width": 10}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 1, 1],
+                    "area": 100,
+                    "iscrowd": 0,
+                    "keypoints": [0, 0, 0] * 17,
+                    "num_keypoints": 0,
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module.eval_coco_metrics(
+            SimpleNamespace(post_cfg={"task": "pose_estimation", "dataset": "coco"}),
+            "/dataset",
+            batch_size=1,
+        )
+
+
 def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:
     """Require one decoded result for every submitted COCO image."""
 

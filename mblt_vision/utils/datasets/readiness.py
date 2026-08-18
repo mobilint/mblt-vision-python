@@ -377,6 +377,8 @@ def _coco_task_annotations_valid(
             or iscrowd not in {0, 1}
         ):
             return False
+        if task == "pose_estimation" and area > bbox[2] * bbox[3]:
+            return False
         if task == "instance_segmentation":
             segmentation = record.get("segmentation")
             if isinstance(segmentation, list):
@@ -557,7 +559,37 @@ def _coco_ready(root: Path, task: str) -> bool:
         for path in image_paths
     ):
         return False
-    return {path.name for path in image_paths} == annotation_names
+    if {path.name for path in image_paths} != annotation_names:
+        return False
+    try:
+        payload = json.loads((root / annotation_name).read_text(encoding="utf-8"))
+        image_records = payload["images"]
+        image_shapes = {
+            record["file_name"]: (record["height"], record["width"])
+            for record in image_records
+        }
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, OSError):
+        return False
+    for image_path in image_paths:
+        expected_shape = image_shapes.get(image_path.name)
+        if (
+            not isinstance(expected_shape, tuple)
+            or len(expected_shape) != 2
+            or any(
+                not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                for value in expected_shape
+            )
+        ):
+            return False
+        try:
+            with Image.open(image_path) as image:
+                image.load()
+                width, height = image.size
+        except OSError:
+            return False
+        if (height, width) != expected_shape:
+            return False
+    return True
 
 
 def _dotav1_ready(root: Path) -> bool:
@@ -651,6 +683,7 @@ def _widerface_difficulty_metadata_ready(
         return False
     if image_shapes is not None and len(image_shapes) != len(expected_images):
         return False
+    difficulty_has_eligible_face = [False] * len(difficulties)
     for event_index, image_names in enumerate(expected_images.values()):
         try:
             event_faces = face_boxes[event_index][0]
@@ -674,6 +707,7 @@ def _widerface_difficulty_metadata_ready(
                 or len(face_array) == 0
                 or not np.isfinite(face_array).all()
                 or (face_array[:, 2:] <= 0).any()
+                or len(np.unique(face_array, axis=0)) != len(face_array)
             ):
                 return False
             if image_shapes is not None:
@@ -690,14 +724,13 @@ def _widerface_difficulty_metadata_ready(
                 ):
                     return False
             face_counts.append(len(face_array))
-        for table in difficulties:
+        for difficulty_index, table in enumerate(difficulties):
             try:
                 event_indices = table[event_index][0]
             except (IndexError, TypeError):
                 return False
             if len(event_indices) != len(image_names):
                 return False
-            table_has_eligible_face = False
             for image_index in range(len(event_faces)):
                 try:
                     keep_indices = np.asarray(event_indices[image_index][0])
@@ -730,9 +763,11 @@ def _widerface_difficulty_metadata_ready(
                     return False
                 if len(np.unique(keep_indices)) != keep_indices.size:
                     return False
-                table_has_eligible_face |= bool(keep_indices.size)
-            if not table_has_eligible_face:
-                return False
+                difficulty_has_eligible_face[difficulty_index] |= bool(
+                    keep_indices.size
+                )
+    if not all(difficulty_has_eligible_face):
+        return False
     return True
 
 

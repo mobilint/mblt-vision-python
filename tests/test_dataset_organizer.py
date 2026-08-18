@@ -86,6 +86,20 @@ def test_dotav1_organizer_rejects_truncated_raw_annotation_rows(
         )
 
 
+def test_dotav1_organizer_rejects_repeated_polygon_vertices(tmp_path: Path) -> None:
+    """Keep malformed triangle-like rows out of the staged normalized labels."""
+
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (100, 50)).save(image_path)
+    source_path = tmp_path / "source.txt"
+    source_path.write_text("0 0 20 0 20 20 0 0 plane 0\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="four distinct vertices"):
+        organizer._write_dotav1_yolo_labels(
+            str(image_path), str(source_path), str(tmp_path / "normalized.txt")
+        )
+
+
 def test_dotav1_stage_requires_a_non_difficult_target(tmp_path: Path) -> None:
     """Do not replace a usable DOTAv1 cache with an unscorable staged split."""
 

@@ -391,6 +391,7 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
                     raise ValueError(
                         f"Staged DOTAv1 polygon must have positive area at {label_path}:{line_number}."
                     )
+                _validate_dotav1_polygon_vertices(coordinates, label_path, line_number)
                 image_coordinates = coordinates.copy()
                 if kind == "normalized":
                     image_coordinates = [
@@ -435,6 +436,27 @@ def _validate_staged_dotav1_labels(staged_root: Path) -> None:
     if not authoritative_positive_stems:
         raise ValueError(
             "Staged DOTAv1 dataset must contain at least one non-difficult target."
+        )
+
+
+def _validate_dotav1_polygon_vertices(
+    coordinates: list[float], annotation_path: str | Path, line_number: int
+) -> None:
+    """Require four distinct, consistently ordered DOTAv1 quadrilateral vertices."""
+
+    points = np.asarray(coordinates, dtype=np.float64).reshape(4, 2)
+    if len(np.unique(points, axis=0)) != 4:
+        raise ValueError(
+            "DOTAv1 polygon must contain four distinct vertices in "
+            f"{annotation_path} at line {line_number}."
+        )
+    edges = np.roll(points, -1, axis=0) - points
+    next_edges = np.roll(edges, -1, axis=0)
+    turns = edges[:, 0] * next_edges[:, 1] - edges[:, 1] * next_edges[:, 0]
+    if not (np.all(turns > 0) or np.all(turns < 0)):
+        raise ValueError(
+            "DOTAv1 polygon vertices must be consistently ordered in "
+            f"{annotation_path} at line {line_number}."
         )
 
 
@@ -1866,6 +1888,9 @@ def _write_dotav1_yolo_labels(
                     "DOTAv1 polygon must overlap its source image in "
                     f"{original_label_path} at line {line_number}."
                 )
+            _validate_dotav1_polygon_vertices(
+                coordinates, original_label_path, line_number
+            )
             if fields[9] not in {"0", "1", "2"}:
                 raise ValueError(
                     f"Unsupported DOTAv1 difficulty flag {fields[9]!r} in "

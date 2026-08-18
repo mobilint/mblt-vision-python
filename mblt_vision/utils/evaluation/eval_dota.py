@@ -79,6 +79,26 @@ def _validate_polygon_area(
         )
 
 
+def _validate_polygon_vertices(
+    coords: torch.Tensor, annotation_path: Path, line_number: int
+) -> None:
+    """Require four distinct, consistently ordered DOTAv1 quadrilateral vertices."""
+
+    if torch.unique(coords, dim=0).shape[0] != 4:
+        raise ValueError(
+            "DOTAv1 annotation polygon must contain four distinct vertices at "
+            f"{annotation_path}:{line_number}."
+        )
+    edges = torch.roll(coords, shifts=-1, dims=0) - coords
+    next_edges = torch.roll(edges, shifts=-1, dims=0)
+    turns = edges[:, 0] * next_edges[:, 1] - edges[:, 1] * next_edges[:, 0]
+    if not bool(torch.all(turns > 0) or torch.all(turns < 0)):
+        raise ValueError(
+            "DOTAv1 annotation polygon vertices must be consistently ordered at "
+            f"{annotation_path}:{line_number}."
+        )
+
+
 def _validate_polygon_image_overlap(
     coords: torch.Tensor,
     image_shape: tuple[int, int],
@@ -163,6 +183,7 @@ def _load_ground_truths(
                 coords[:, 0] *= width
                 coords[:, 1] *= height
                 _validate_polygon_area(coords, label_path, line_number)
+                _validate_polygon_vertices(coords, label_path, line_number)
                 _validate_polygon_image_overlap(
                     coords, (height, width), label_path, line_number
                 )
@@ -206,6 +227,7 @@ def _load_ground_truths(
                         f"{original_label_path}:{line_number}."
                     )
                 _validate_polygon_area(coords, original_label_path, line_number)
+                _validate_polygon_vertices(coords, original_label_path, line_number)
                 _validate_polygon_image_overlap(
                     coords, (height, width), original_label_path, line_number
                 )
