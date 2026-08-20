@@ -685,10 +685,10 @@ def test_widerface_readiness_rejects_all_empty_difficulty_indices(
     )
 
 
-def test_widerface_readiness_rejects_face_boxes_outside_images(
+def test_widerface_readiness_accepts_official_out_of_image_boxes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Face ground truth must retain foreground in its decoded source image."""
+    """Permit the slight out-of-image boxes present in official metadata."""
 
     face_boxes = np.empty((1, 1), dtype=object)
     event_faces = np.empty((1, 1), dtype=object)
@@ -706,7 +706,7 @@ def test_widerface_readiness_rejects_face_boxes_outside_images(
 
     monkeypatch.setattr(readiness, "loadmat", _loadmat)
 
-    assert not readiness._widerface_difficulty_metadata_ready(
+    assert readiness._widerface_difficulty_metadata_ready(
         tmp_path,
         {"0--Parade": {"sample.jpg"}},
         image_shapes=[[(10, 10)]],
@@ -716,13 +716,17 @@ def test_widerface_readiness_rejects_face_boxes_outside_images(
 def test_widerface_readiness_allows_empty_event_difficulty_contributions(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A difficulty split may have no eligible faces in one event but not all."""
+    """Accept the official no-face sentinel when no split indexes it."""
 
     face_boxes = np.empty((2, 1), dtype=object)
     difficulty = np.empty((2, 1), dtype=object)
     for event_index in range(2):
         event_faces = np.empty((1, 1), dtype=object)
-        event_faces[0, 0] = np.array([[0, 0, 1, 1]], dtype=np.float64)
+        event_faces[0, 0] = (
+            np.array([[0, 0, 0, 0]], dtype=np.float64)
+            if event_index == 0
+            else np.array([[0, 0, 1, 1]], dtype=np.float64)
+        )
         face_boxes[event_index, 0] = event_faces
         event_indices = np.empty((1, 1), dtype=object)
         event_indices[0, 0] = (
@@ -745,10 +749,10 @@ def test_widerface_readiness_allows_empty_event_difficulty_contributions(
     )
 
 
-def test_widerface_readiness_rejects_duplicate_face_boxes(
+def test_widerface_readiness_accepts_duplicate_official_face_boxes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Duplicate ground-truth rows cannot alter the WiderFace recall denominator."""
+    """Permit duplicate rows present in the official WiderFace metadata."""
 
     face_boxes = np.empty((1, 1), dtype=object)
     event_faces = np.empty((1, 1), dtype=object)
@@ -766,7 +770,7 @@ def test_widerface_readiness_rejects_duplicate_face_boxes(
 
     monkeypatch.setattr(readiness, "loadmat", _loadmat)
 
-    assert not readiness._widerface_difficulty_metadata_ready(
+    assert readiness._widerface_difficulty_metadata_ready(
         tmp_path, {"0--Parade": {"sample.jpg"}}
     )
 
@@ -777,7 +781,7 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
     tmp_path: Path,
     relative_image_dir: str,
 ) -> None:
-    """Accept flat and legacy DOTA images only when every image has a label."""
+    """Require an authoritative original label for every DOTA image."""
 
     monkeypatch.setattr(readiness, "DOTAV1_VALIDATION_SAMPLE_COUNT", 2)
     for stem in ("P0001", "P0002"):
@@ -786,7 +790,7 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
 
     assert not readiness.dataset_ready(tmp_path, "obb", "dotav1")
 
-    _write_file(tmp_path / "labels" / "val" / "P0002.txt")
+    _write_file(tmp_path / "labels" / "val_original" / "P0002.txt")
 
     assert readiness.dataset_ready(tmp_path, "obb", "dotav1")
 
@@ -795,7 +799,7 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
     _write_file(external_image)
     _write_file(external_label)
     image_path = tmp_path / relative_image_dir / "P0001.png"
-    label_path = tmp_path / "labels" / "val" / "P0002.txt"
+    label_path = tmp_path / "labels" / "val_original" / "P0002.txt"
     image_path.unlink()
     label_path.unlink()
     image_path.symlink_to(external_image)
@@ -870,11 +874,11 @@ def test_widerface_readiness_rejects_tree_not_named_by_metadata(
     assert not readiness.dataset_ready(tmp_path, "face_detection", "widerface")
 
 
-def test_ade20k_readiness_requires_source_metadata(
+def test_ade20k_readiness_does_not_require_unused_source_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Require both ADE20K metadata files before reusing an organized cache."""
+    """Allow organized ADE20K evaluation data without unused source metadata."""
 
     monkeypatch.setattr(readiness, "ADE20K_VALIDATION_SAMPLE_COUNT", 1)
     _write_image(tmp_path / "images" / "ADE_val_00000001.jpg", (1, 1))
@@ -882,12 +886,6 @@ def test_ade20k_readiness_requires_source_metadata(
     annotation_path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("L", (1, 1), color=1).save(annotation_path)
 
-    assert not readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
-
-    _write_file(tmp_path / "objectInfo150.txt")
-    assert not readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
-
-    _write_file(tmp_path / "sceneCategories.txt")
     assert readiness.dataset_ready(tmp_path, "semantic_segmentation", "ade20k")
 
 
@@ -899,7 +897,6 @@ def test_ade20k_readiness_requires_source_metadata(
         ("nyu-depth", "depth_estimation", "images/extra.jpg"),
         ("ade20k", "semantic_segmentation", "images/ADE_val_00000001.jpg"),
         ("ade20k", "semantic_segmentation", "annotations/ADE_val_00000001.png"),
-        ("ade20k", "semantic_segmentation", "objectInfo150.txt"),
     ],
 )
 def test_dense_readiness_rejects_symlinked_files(
@@ -919,8 +916,6 @@ def test_dense_readiness_rejects_symlinked_files(
     else:
         _write_file(tmp_path / "images" / "ADE_val_00000001.jpg")
         _write_file(tmp_path / "annotations" / "ADE_val_00000001.png")
-        for file_name in readiness.ADE20K_METADATA_FILES:
-            _write_file(tmp_path / file_name)
     external_file = tmp_path.parent / f"{tmp_path.name}-outside"
     external_file.write_bytes(b"outside dataset")
     source_path = tmp_path / relative_path
@@ -946,8 +941,6 @@ def test_dense_readiness_rejects_symlinked_root_ancestors(
     ade20k_root = target_parent / "ade20k"
     _write_file(ade20k_root / "images" / "ADE_val_00000001.jpg")
     _write_file(ade20k_root / "annotations" / "ADE_val_00000001.png")
-    for file_name in readiness.ADE20K_METADATA_FILES:
-        _write_file(ade20k_root / file_name)
     symlinked_parent = tmp_path / "datasets"
     symlinked_parent.symlink_to(target_parent, target_is_directory=True)
 
