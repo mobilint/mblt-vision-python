@@ -19,7 +19,7 @@ from ._api import list_models as list_models
 from ._api import list_tasks as list_tasks
 from .wrapper import MBLT_Engine as MBLT_Engine
 
-__version__ = "0.0.0"
+__version__ = "0.0.1"
 
 _TASK_MODULES = (
     face_detection,
