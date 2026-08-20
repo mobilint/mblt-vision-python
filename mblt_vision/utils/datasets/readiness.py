@@ -406,6 +406,8 @@ def _coco_task_annotations_valid(
             or iscrowd not in {0, 1}
         ):
             return False
+        if task == "pose_estimation" and not iscrowd and area > bbox[2] * bbox[3]:
+            return False
         if task == "instance_segmentation":
             segmentation = record.get("segmentation")
             if isinstance(segmentation, list):
@@ -611,10 +613,12 @@ def _dotav1_ready(root: Path) -> bool:
     if images is None or len(images) != DOTAV1_VALIDATION_SAMPLE_COUNT:
         return False
 
+    normalized_labels = _files_by_stem(root / "labels" / "val", {".txt"})
     original_labels = _files_by_stem(root / "labels" / "val_original", {".txt"})
-    if original_labels is None:
+    if normalized_labels is None or original_labels is None:
         return False
-    return images.keys() == original_labels.keys()
+    label_stems = normalized_labels.keys() | original_labels.keys()
+    return images.keys() == label_stems
 
 
 def _widerface_ready(root: Path) -> bool:
@@ -706,10 +710,7 @@ def _widerface_difficulty_metadata_ready(
                 face_array = np.asarray(face_entry[0])
             except (IndexError, TypeError):
                 return False
-            no_face_sentinel = face_array.shape == (1, 4) and not bool(
-                np.any(face_array)
-            )
-            if not no_face_sentinel and (
+            if (
                 face_array.ndim != 2
                 or face_array.shape[1] != 4
                 or len(face_array) == 0
@@ -718,6 +719,9 @@ def _widerface_difficulty_metadata_ready(
                 or not np.isfinite(face_array).all()
             ):
                 return False
+            no_face_sentinel = face_array.shape == (1, 4) and not bool(
+                np.any(face_array)
+            )
             face_counts.append(0 if no_face_sentinel else len(face_array))
         for difficulty_index, table in enumerate(difficulties):
             try:

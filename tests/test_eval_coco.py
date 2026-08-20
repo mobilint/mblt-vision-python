@@ -337,6 +337,32 @@ def test_coco_evaluation_accepts_crowd_pose_area_larger_than_its_box() -> None:
     eval_coco_module._validate_coco_dataset_taxonomy(dataset, "pose_estimation")
 
 
+def test_coco_evaluation_rejects_non_crowd_pose_area_larger_than_its_box() -> None:
+    """Keep area validation for non-crowd pose annotations used in OKS scoring."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 640, "width": 640}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [223, 405, 12, 27],
+                    "area": 351,
+                    "iscrowd": 0,
+                    "keypoints": [0, 0, 0] * 17,
+                    "num_keypoints": 0,
+                }
+            },
+        )
+    )
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module._validate_coco_dataset_taxonomy(dataset, "pose_estimation")
+
+
 def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:
     """Require one decoded result for every submitted COCO image."""
 

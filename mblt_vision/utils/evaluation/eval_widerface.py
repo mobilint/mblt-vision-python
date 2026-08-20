@@ -263,6 +263,14 @@ def get_gt_boxes(gt_dir: str) -> tuple[Any, ...]:
     )
 
 
+def _normalize_ground_truth_boxes(boxes: np.ndarray) -> np.ndarray:
+    """Convert WiderFace's all-zero no-face sentinel into an empty box table."""
+
+    if boxes.shape == (1, 4) and not bool(np.any(boxes)):
+        return np.empty((0, 4), dtype=boxes.dtype)
+    return boxes
+
+
 def norm_score(pred: dict[str, Any]) -> dict[str, Any]:
     """Normalize WiderFace prediction scores to ``[0, 1]``."""
 
@@ -413,7 +421,9 @@ def evaluation(
             gt_bbx_list = facebox_list[event_index][0]
             for image_index, img_info in enumerate(img_list):
                 pred_info = pred_list[str(img_info[0][0])]
-                gt_boxes = np.array(gt_bbx_list[image_index][0], dtype=np.float32)
+                gt_boxes = _normalize_ground_truth_boxes(
+                    np.array(gt_bbx_list[image_index][0], dtype=np.float32)
+                )
                 keep_index = np.array(sub_gt_list[image_index][0], dtype=np.int64)
                 count_face += len(keep_index)
 

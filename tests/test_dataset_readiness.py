@@ -781,7 +781,7 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
     tmp_path: Path,
     relative_image_dir: str,
 ) -> None:
-    """Require an authoritative original label for every DOTA image."""
+    """Allow normalized labels when an original DOTA label is unavailable."""
 
     monkeypatch.setattr(readiness, "DOTAV1_VALIDATION_SAMPLE_COUNT", 2)
     for stem in ("P0001", "P0002"):
@@ -790,7 +790,7 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
 
     assert not readiness.dataset_ready(tmp_path, "obb", "dotav1")
 
-    _write_file(tmp_path / "labels" / "val_original" / "P0002.txt")
+    _write_file(tmp_path / "labels" / "val" / "P0002.txt")
 
     assert readiness.dataset_ready(tmp_path, "obb", "dotav1")
 
@@ -799,7 +799,7 @@ def test_dotav1_readiness_requires_complete_image_label_pairs(
     _write_file(external_image)
     _write_file(external_label)
     image_path = tmp_path / relative_image_dir / "P0001.png"
-    label_path = tmp_path / "labels" / "val_original" / "P0002.txt"
+    label_path = tmp_path / "labels" / "val" / "P0002.txt"
     image_path.unlink()
     label_path.unlink()
     image_path.symlink_to(external_image)

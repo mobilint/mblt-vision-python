@@ -165,3 +165,13 @@ def test_widerface_evaluation_rejects_unequal_box_and_score_counts() -> None:
 
     with pytest.raises(ValueError, match="unequal box and score counts"):
         eval_widerface_module._boxes_scores_to_prediction([[0, 0, 1, 1]], [])
+
+
+def test_widerface_evaluation_normalizes_no_face_sentinel() -> None:
+    """Do not score the official all-zero no-face marker as a ground-truth box."""
+
+    boxes = eval_widerface_module._normalize_ground_truth_boxes(
+        np.zeros((1, 4), dtype=np.float32)
+    )
+
+    assert boxes.shape == (0, 4)
