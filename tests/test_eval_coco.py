@@ -250,38 +250,31 @@ def test_coco_evaluation_rejects_polygons_outside_image_bounds(
         )
 
 
-def test_coco_evaluation_rejects_polygons_without_rasterized_foreground(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Continuous subpixel overlap must not admit an empty raster mask."""
+def test_coco_evaluation_accepts_official_thin_polygons() -> None:
+    """Accept valid COCO polygons that have no foreground after rasterization."""
 
     dataset = SimpleNamespace(
         coco=SimpleNamespace(
-            cats={1: {}},
-            imgs={1: {"height": 10, "width": 10}},
+            cats={35: {}},
+            imgs={361919: {"height": 425, "width": 640}},
             anns={
-                7: {
-                    "id": 7,
-                    "image_id": 1,
-                    "category_id": 1,
-                    "bbox": [9, 9, 1, 1],
-                    "area": 1,
+                1847218: {
+                    "id": 1847218,
+                    "image_id": 361919,
+                    "category_id": 35,
+                    "bbox": [179.52, 371.41, 6.9, 1.97],
+                    "area": 3.1930999999999816,
                     "iscrowd": 0,
-                    "segmentation": [[9.9, 9.9, 9.99, 9.9, 9.99, 9.99]],
+                    "segmentation": [
+                        [179.52, 371.9, 181.49, 372.89, 181.49, 372.64, 181.24, 371.41],
+                        [183.95, 372.15, 185.43, 373.38, 186.42, 372.89, 185.43, 371.9],
+                    ],
                 }
             },
         )
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
 
-    with pytest.raises(ValueError, match="invalid task-specific annotations"):
-        eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(
-                post_cfg={"task": "instance_segmentation", "dataset": "coco"}
-            ),
-            "/dataset",
-            batch_size=1,
-        )
+    eval_coco_module._validate_coco_dataset_taxonomy(dataset, "instance_segmentation")
 
 
 @pytest.mark.parametrize("visibility", [1, 2])
@@ -320,22 +313,44 @@ def test_coco_evaluation_rejects_labeled_keypoints_outside_images(
         )
 
 
-def test_coco_evaluation_rejects_pose_area_larger_than_its_box(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Do not let inflated pose areas weaken OKS matching thresholds."""
+def test_coco_evaluation_accepts_crowd_pose_area_larger_than_its_box() -> None:
+    """Accept official COCO crowd annotations with RLE area rounding differences."""
 
     dataset = SimpleNamespace(
         coco=SimpleNamespace(
             cats={1: {}},
-            imgs={1: {"height": 10, "width": 10}},
+            imgs={305317: {"height": 640, "width": 640}},
+            anns={
+                900100305317: {
+                    "id": 900100305317,
+                    "image_id": 305317,
+                    "category_id": 1,
+                    "bbox": [223, 405, 12, 27],
+                    "area": 351,
+                    "iscrowd": 1,
+                    "keypoints": [0, 0, 0] * 17,
+                    "num_keypoints": 0,
+                }
+            },
+        )
+    )
+    eval_coco_module._validate_coco_dataset_taxonomy(dataset, "pose_estimation")
+
+
+def test_coco_evaluation_rejects_non_crowd_pose_area_larger_than_its_box() -> None:
+    """Keep area validation for non-crowd pose annotations used in OKS scoring."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 640, "width": 640}},
             anns={
                 7: {
                     "id": 7,
                     "image_id": 1,
                     "category_id": 1,
-                    "bbox": [0, 0, 1, 1],
-                    "area": 100,
+                    "bbox": [223, 405, 12, 27],
+                    "area": 351,
                     "iscrowd": 0,
                     "keypoints": [0, 0, 0] * 17,
                     "num_keypoints": 0,
@@ -343,14 +358,9 @@ def test_coco_evaluation_rejects_pose_area_larger_than_its_box(
             },
         )
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
 
     with pytest.raises(ValueError, match="invalid task-specific annotations"):
-        eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(post_cfg={"task": "pose_estimation", "dataset": "coco"}),
-            "/dataset",
-            batch_size=1,
-        )
+        eval_coco_module._validate_coco_dataset_taxonomy(dataset, "pose_estimation")
 
 
 def test_coco_result_formatter_rejects_truncated_postprocess_batch() -> None:

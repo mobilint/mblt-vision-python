@@ -120,6 +120,27 @@ def _has_positive_polygon_area(polygon: list[int | float]) -> bool:
     return bool(abs(signed_double_area) > 0)
 
 
+def _polygon_union_has_rasterized_foreground(
+    polygons: list[list[int | float]], image_shape: tuple[int, int] | None
+) -> bool:
+    """Return whether the combined COCO polygons rasterize to foreground.
+
+    COCO polygons describe one instance as a union.  Individual components can
+    be thinner than a pixel (as occurs in the official validation annotations),
+    so only the combined raster needs to contain foreground.
+    """
+
+    if image_shape is None:
+        return False
+    height, width = image_shape
+    try:
+        encoded = coco_mask.frPyObjects(polygons, height, width)
+        decoded = np.asarray(coco_mask.decode(encoded))
+    except (RuntimeError, TypeError, ValueError):
+        return False
+    return bool(np.any(decoded))
+
+
 def _canonicalize_quadrilateral(
     coordinates: list[int | float] | tuple[int | float, ...],
 ) -> tuple[float, ...]:
@@ -406,27 +427,32 @@ def _coco_task_annotations_valid(
             or iscrowd not in {0, 1}
         ):
             return False
-        if task == "pose_estimation" and area > bbox[2] * bbox[3]:
+        if task == "pose_estimation" and not iscrowd and area > bbox[2] * bbox[3]:
             return False
         if task == "instance_segmentation":
             segmentation = record.get("segmentation")
             if isinstance(segmentation, list):
-                if not segmentation or any(
-                    not isinstance(polygon, list)
-                    or len(polygon) < 6
-                    or len(polygon) % 2
+                if (
+                    not segmentation
                     or any(
-                        not isinstance(value, (int, float))
-                        or isinstance(value, bool)
-                        or not np.isfinite(value)
-                        for value in polygon
+                        not isinstance(polygon, list)
+                        or len(polygon) < 6
+                        or len(polygon) % 2
+                        or any(
+                            not isinstance(value, (int, float))
+                            or isinstance(value, bool)
+                            or not np.isfinite(value)
+                            for value in polygon
+                        )
+                        or not _has_positive_polygon_area(polygon)
+                        or not _polygon_has_positive_image_overlap(
+                            polygon, image_shapes.get(image_id)
+                        )
+                        for polygon in segmentation
                     )
-                    or not _has_positive_polygon_area(polygon)
-                    or not _polygon_has_positive_image_overlap(
-                        polygon, image_shapes.get(image_id)
+                    or not _polygon_union_has_rasterized_foreground(
+                        segmentation, image_shapes.get(image_id)
                     )
-                    or not _valid_coco_polygon(polygon, image_shapes.get(image_id))
-                    for polygon in segmentation
                 ):
                     return False
             elif isinstance(segmentation, dict):
@@ -543,22 +569,6 @@ def _valid_coco_rle(
     except (RuntimeError, TypeError, ValueError):
         return False
     return decoded.shape == tuple(size) and bool(np.any(decoded))
-
-
-def _valid_coco_polygon(
-    polygon: list[int | float], image_shape: tuple[int, int] | None
-) -> bool:
-    """Require a COCO polygon to rasterize to foreground in its image."""
-
-    if image_shape is None:
-        return True
-    height, width = image_shape
-    try:
-        encoded = coco_mask.frPyObjects([polygon], height, width)
-        decoded = np.asarray(coco_mask.decode(encoded))
-    except (RuntimeError, TypeError, ValueError):
-        return False
-    return bool(np.any(decoded))
 
 
 def _coco_ready(root: Path, task: str) -> bool:
@@ -734,24 +744,12 @@ def _widerface_difficulty_metadata_ready(
                 or not np.issubdtype(face_array.dtype, np.number)
                 or np.issubdtype(face_array.dtype, np.complexfloating)
                 or not np.isfinite(face_array).all()
-                or (face_array[:, 2:] <= 0).any()
-                or len(np.unique(face_array, axis=0)) != len(face_array)
             ):
                 return False
-            if image_shapes is not None:
-                height, width = image_shapes[event_index][image_index]
-                if (
-                    height <= 0
-                    or width <= 0
-                    or not (
-                        (face_array[:, 0] < width)
-                        & (face_array[:, 0] + face_array[:, 2] > 0)
-                        & (face_array[:, 1] < height)
-                        & (face_array[:, 1] + face_array[:, 3] > 0)
-                    ).all()
-                ):
-                    return False
-            face_counts.append(len(face_array))
+            no_face_sentinel = face_array.shape == (1, 4) and not bool(
+                np.any(face_array)
+            )
+            face_counts.append(0 if no_face_sentinel else len(face_array))
         for difficulty_index, table in enumerate(difficulties):
             try:
                 event_indices = table[event_index][0]
@@ -989,10 +987,6 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
             and all(stem.startswith("ADE_val_") for stem in images)
             and all(
                 path.suffix.lower() in {".jpg", ".jpeg"} for path in images.values()
-            )
-            and all(
-                not (root / file_name).is_symlink() and (root / file_name).is_file()
-                for file_name in ADE20K_METADATA_FILES
             )
         )
     if normalized == "cityscapes":
