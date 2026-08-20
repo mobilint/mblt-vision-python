@@ -175,3 +175,14 @@ def test_widerface_evaluation_normalizes_no_face_sentinel() -> None:
     )
 
     assert boxes.shape == (0, 4)
+
+
+def test_widerface_evaluation_counts_predictions_on_no_face_image() -> None:
+    """Predictions on an official no-face image must contribute false positives."""
+
+    contribution = eval_widerface_module._empty_ground_truth_prediction_contribution(
+        2, np.array([[0, 0, 1, 1, 0.9]], dtype=np.float32)
+    )
+
+    np.testing.assert_array_equal(contribution[:, 0], np.ones(2))
+    np.testing.assert_array_equal(contribution[:, 1], np.zeros(2))

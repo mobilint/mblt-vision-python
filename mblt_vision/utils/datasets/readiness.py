@@ -120,6 +120,27 @@ def _has_positive_polygon_area(polygon: list[int | float]) -> bool:
     return bool(abs(signed_double_area) > 0)
 
 
+def _polygon_union_has_rasterized_foreground(
+    polygons: list[list[int | float]], image_shape: tuple[int, int] | None
+) -> bool:
+    """Return whether the combined COCO polygons rasterize to foreground.
+
+    COCO polygons describe one instance as a union.  Individual components can
+    be thinner than a pixel (as occurs in the official validation annotations),
+    so only the combined raster needs to contain foreground.
+    """
+
+    if image_shape is None:
+        return False
+    height, width = image_shape
+    try:
+        encoded = coco_mask.frPyObjects(polygons, height, width)
+        decoded = np.asarray(coco_mask.decode(encoded))
+    except (RuntimeError, TypeError, ValueError):
+        return False
+    return bool(np.any(decoded))
+
+
 def _canonicalize_quadrilateral(
     coordinates: list[int | float] | tuple[int | float, ...],
 ) -> tuple[float, ...]:
@@ -411,21 +432,27 @@ def _coco_task_annotations_valid(
         if task == "instance_segmentation":
             segmentation = record.get("segmentation")
             if isinstance(segmentation, list):
-                if not segmentation or any(
-                    not isinstance(polygon, list)
-                    or len(polygon) < 6
-                    or len(polygon) % 2
+                if (
+                    not segmentation
                     or any(
-                        not isinstance(value, (int, float))
-                        or isinstance(value, bool)
-                        or not np.isfinite(value)
-                        for value in polygon
+                        not isinstance(polygon, list)
+                        or len(polygon) < 6
+                        or len(polygon) % 2
+                        or any(
+                            not isinstance(value, (int, float))
+                            or isinstance(value, bool)
+                            or not np.isfinite(value)
+                            for value in polygon
+                        )
+                        or not _has_positive_polygon_area(polygon)
+                        or not _polygon_has_positive_image_overlap(
+                            polygon, image_shapes.get(image_id)
+                        )
+                        for polygon in segmentation
                     )
-                    or not _has_positive_polygon_area(polygon)
-                    or not _polygon_has_positive_image_overlap(
-                        polygon, image_shapes.get(image_id)
+                    or not _polygon_union_has_rasterized_foreground(
+                        segmentation, image_shapes.get(image_id)
                     )
-                    for polygon in segmentation
                 ):
                     return False
             elif isinstance(segmentation, dict):

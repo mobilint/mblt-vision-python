@@ -271,6 +271,19 @@ def _normalize_ground_truth_boxes(boxes: np.ndarray) -> np.ndarray:
     return boxes
 
 
+def _empty_ground_truth_prediction_contribution(
+    thresh_num: int, pred_info: np.ndarray
+) -> np.ndarray:
+    """Return precision-recall counts for predictions on a no-face image."""
+
+    return img_pr_info(
+        thresh_num,
+        pred_info,
+        np.ones(len(pred_info), dtype=np.float32),
+        np.zeros(len(pred_info), dtype=np.float32),
+    )
+
+
 def norm_score(pred: dict[str, Any]) -> dict[str, Any]:
     """Normalize WiderFace prediction scores to ``[0, 1]``."""
 
@@ -427,7 +440,13 @@ def evaluation(
                 keep_index = np.array(sub_gt_list[image_index][0], dtype=np.int64)
                 count_face += len(keep_index)
 
-                if len(gt_boxes) == 0 or len(pred_info) == 0:
+                if len(gt_boxes) == 0:
+                    if len(pred_info) != 0:
+                        pr_curve += _empty_ground_truth_prediction_contribution(
+                            thresh_num, pred_info
+                        )
+                    continue
+                if len(pred_info) == 0:
                     continue
                 ignore = np.zeros(gt_boxes.shape[0])
                 if len(keep_index) != 0:

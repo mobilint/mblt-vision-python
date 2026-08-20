@@ -380,6 +380,47 @@ def test_coco_readiness_decodes_and_validates_rle_segmentations(
     )
 
 
+def test_coco_readiness_rejects_polygon_union_without_rasterized_foreground(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject polygon instances whose combined mask contains no pixels."""
+
+    monkeypatch.setattr(readiness, "COCO_VALIDATION_SAMPLE_COUNT", 1)
+    monkeypatch.setitem(readiness.COCO_ANNOTATION_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setitem(readiness.COCO_CATEGORY_COUNTS, "instances_val2017.json", 1)
+    monkeypatch.setattr(readiness, "COCO_CATEGORY_IDS", frozenset({1}))
+    _write_image(tmp_path / "val2017" / "000000000001.jpg", (10, 10))
+    (tmp_path / "instances_val2017.json").write_text(
+        json.dumps(
+            {
+                "images": [
+                    {
+                        "id": 1,
+                        "file_name": "000000000001.jpg",
+                        "height": 10,
+                        "width": 10,
+                    }
+                ],
+                "categories": [{"id": 1}],
+                "annotations": [
+                    {
+                        "id": 1,
+                        "image_id": 1,
+                        "category_id": 1,
+                        "bbox": [9, 9, 1, 1],
+                        "area": 0.01,
+                        "iscrowd": 0,
+                        "segmentation": [[9.9, 9.9, 9.99, 9.9, 9.99, 9.99]],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
+
+
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
