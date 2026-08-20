@@ -451,6 +451,28 @@ def test_detection_postprocessor_rejects_missing_head_count() -> None:
         )
 
 
+def test_anchor_postprocessor_rearranges_yolov7_onnx_heads() -> None:
+    """Accept WongKinYiu YOLOv7's explicit-anchor ONNX head layout."""
+
+    postprocessor = YOLOAnchorDetectionPost.__new__(YOLOAnchorDetectionPost)
+    postprocessor.nl = 3
+    postprocessor.na = 3
+    postprocessor.no = 85
+    raw_outputs = [
+        torch.arange(3 * height * width * 85, dtype=torch.float32).reshape(
+            1, 3, height, width, 85
+        )
+        for height, width in ((80, 80), (40, 40), (20, 20))
+    ]
+
+    output = postprocessor.rearrange(raw_outputs)
+
+    assert output.shape == (1, 25200, 85)
+    assert torch.equal(output[0, 0], raw_outputs[0][0, 0, 0, 0])
+    assert torch.equal(output[0, 19200], raw_outputs[1][0, 0, 0, 0])
+    assert torch.equal(output[0, 24000], raw_outputs[2][0, 0, 0, 0])
+
+
 @pytest.mark.parametrize(
     ("post_cfg", "channels"),
     [

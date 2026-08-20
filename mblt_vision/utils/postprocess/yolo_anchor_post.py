@@ -104,10 +104,18 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         y = []
         for i in range(self.nl):
             tmp = x[i]
-            if tmp.shape[3] == self.no * self.na:
+            if tmp.ndim == 4 and tmp.shape[3] == self.no * self.na:
                 y.append(
                     tmp.permute(0, 3, 1, 2)
                 )  # (b, 80, 80, 255) -> (b, 255, 80, 80)
+            elif tmp.ndim == 5 and tmp.shape[1] == self.na and tmp.shape[-1] == self.no:
+                # WongKinYiu YOLOv7 ONNX exports each head as
+                # (batch, anchors, height, width, features).
+                y.append(
+                    tmp.permute(0, 1, 4, 2, 3).reshape(
+                        tmp.shape[0], self.na * self.no, tmp.shape[2], tmp.shape[3]
+                    )
+                )
             else:
                 raise NotImplementedError(
                     f"Got unsupported shape for input: {tmp.shape}."
