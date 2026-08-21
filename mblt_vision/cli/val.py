@@ -439,10 +439,9 @@ def _run_validation(args: argparse.Namespace) -> float:
             )
             print(
                 "Validation score "
-                f"(Easy AP): {widerface_result.easy_ap:.5f}, "
-                f"(Medium AP): {widerface_result.medium_ap:.5f}, "
-                f"(Hard AP): {widerface_result.hard_ap:.5f}, "
-                f"(Mean AP): {widerface_result.mean_ap:.5f}"
+                f"(Hard AP, primary): {widerface_result.hard_ap:.5f}, "
+                f"(Medium AP, secondary): {widerface_result.medium_ap:.5f}, "
+                f"(Easy AP, secondary): {widerface_result.easy_ap:.5f}"
             )
             return widerface_result.primary_score
 

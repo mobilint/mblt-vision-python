@@ -41,6 +41,8 @@ description: >-
   maps are finite, integral, and in-range before converting them to integer class IDs.
 - Keep result shapes, ordering, coordinates, dtype, and empty-result behavior compatible with
   the Model Zoo reference.
+- Rank WiderFace evaluation by Hard-set AP. Expose Medium-set then Easy-set AP
+  as secondary metrics, and do not compute mean AP across difficulty splits.
 
 ## Runtime and Packaging
 

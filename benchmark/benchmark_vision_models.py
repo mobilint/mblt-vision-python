@@ -327,12 +327,11 @@ def _evaluate(
         )
         return (
             float(result.primary_score),
-            "mean_ap",
+            "hard_ap",
             {
                 "easy_ap": float(result.easy_ap),
                 "medium_ap": float(result.medium_ap),
                 "hard_ap": float(result.hard_ap),
-                "mean_ap": float(result.mean_ap),
             },
         )
     raise ValueError(f"Unsupported vision benchmark task: {args.task}")
