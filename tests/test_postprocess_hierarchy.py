@@ -99,6 +99,51 @@ def test_nmsfree_postprocessor_accepts_decode_enabled_output_triplet() -> None:
     assert result[0][0, 5].item() == 3
 
 
+def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
+    """Keep QBCompiler's compact decoded pose output drawable."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+    )
+    converted = torch.zeros((1, 2, 56), dtype=torch.float32)
+    converted[0, :, :5] = torch.tensor(
+        [[20.0, 20.0, 10.0, 10.0, 0.9], [20.0, 20.0, 10.0, 10.0, 0.8]]
+    )
+    converted[0, :, 5::3] = 20.0
+    converted[0, :, 6::3] = 20.0
+    converted[0, :, 7::3] = 0.001
+
+    result = postprocessor([converted], conf_thres=0.25)
+
+    assert result[0].shape == (1, 57)
+    assert result[0][0, 8].item() > 0.5
+
+
+def test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts() -> None:
+    """Normalize YOLO26's split decoded pose tensors before rendering."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+    )
+    scores = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
+    reduced_scores = torch.tensor([[[0.8], [0.7]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]]],
+        dtype=torch.float32,
+    )
+    keypoints = torch.zeros((1, 2, 51), dtype=torch.float32)
+    keypoints[..., 0::3] = 20.0
+    keypoints[..., 1::3] = 30.0
+    keypoints[..., 2::3] = 0.001
+
+    result = postprocessor([scores, reduced_scores, boxes, keypoints], conf_thres=0.25)
+
+    assert result[0].shape == (1, 57)
+    assert result[0][0, 8].item() > 0.5
+
+
 @pytest.mark.parametrize(
     "scores",
     [
@@ -489,6 +534,7 @@ def test_anchor_postprocessor_rearranges_yolov7_onnx_heads() -> None:
 
     output = postprocessor.rearrange(raw_outputs)
 
+    assert isinstance(output, torch.Tensor)
     assert output.shape == (1, 25200, 85)
     assert torch.equal(output[0, 0], raw_outputs[0][0, 0, 0, 0])
     assert torch.equal(output[0, 19200], raw_outputs[1][0, 0, 0, 0])
@@ -512,6 +558,7 @@ def test_anchor_postprocessor_ignores_decode_enabled_auxiliary_output() -> None:
 
     output = postprocessor.rearrange([decoded_output, *raw_outputs])
 
+    assert isinstance(output, torch.Tensor)
     assert output.shape == (1, 25200, 85)
     assert torch.equal(output[0, 0], raw_outputs[0][0, 0, 0, 0])
 
