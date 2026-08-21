@@ -99,11 +99,23 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
                 ``(batch, anchors, no)`` format, optionally paired with prototype masks in
                 segmentation subclasses.
         """
-        if len(x) != self.nl:
-            raise ValueError(f"Expected {self.nl} detection heads, got {len(x)}.")
+        # Decode-enabled MXQ artifacts prepend their already-decoded
+        # ``(batch, anchors, features)`` output to the raw detection heads.
+        # Only raw heads participate in anchor-grid decoding.
+        heads = [
+            tmp
+            for tmp in x
+            if (tmp.ndim == 4 and tmp.shape[3] == self.no * self.na)
+            or (tmp.ndim == 5 and tmp.shape[1] == self.na and tmp.shape[-1] == self.no)
+        ]
+        if len(heads) != self.nl:
+            shapes = ", ".join(str(tuple(tmp.shape)) for tmp in x)
+            raise ValueError(
+                f"Expected {self.nl} raw detection heads, got {len(heads)} "
+                f"from outputs: {shapes}."
+            )
         y = []
-        for i in range(self.nl):
-            tmp = x[i]
+        for tmp in heads:
             if tmp.ndim == 4 and tmp.shape[3] == self.no * self.na:
                 y.append(
                     tmp.permute(0, 3, 1, 2)

@@ -473,6 +473,27 @@ def test_anchor_postprocessor_rearranges_yolov7_onnx_heads() -> None:
     assert torch.equal(output[0, 24000], raw_outputs[2][0, 0, 0, 0])
 
 
+def test_anchor_postprocessor_ignores_decode_enabled_auxiliary_output() -> None:
+    """Use only raw heads when an MXQ also returns decoded YOLO predictions."""
+
+    postprocessor = YOLOAnchorDetectionPost.__new__(YOLOAnchorDetectionPost)
+    postprocessor.nl = 3
+    postprocessor.na = 3
+    postprocessor.no = 85
+    raw_outputs = [
+        torch.arange(3 * height * width * 85, dtype=torch.float32).reshape(
+            1, 3, height, width, 85
+        )
+        for height, width in ((80, 80), (40, 40), (20, 20))
+    ]
+    decoded_output = torch.zeros((1, 25200, 85), dtype=torch.float32)
+
+    output = postprocessor.rearrange([decoded_output, *raw_outputs])
+
+    assert output.shape == (1, 25200, 85)
+    assert torch.equal(output[0, 0], raw_outputs[0][0, 0, 0, 0])
+
+
 @pytest.mark.parametrize(
     ("post_cfg", "channels"),
     [
