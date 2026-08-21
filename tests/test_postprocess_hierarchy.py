@@ -120,6 +120,17 @@ def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
     assert result[0][0, 8].item() > 0.5
 
 
+def test_pose_evaluation_conversion_accepts_empty_nms_output() -> None:
+    """An image without retained pose detections has no keypoints to scale."""
+    labels, boxes, scores, keypoints = common_module.nmsout2eval_pose(
+        [torch.empty((0, 57), dtype=torch.float32)],
+        (640, 640),
+        (480, 640),
+    )
+
+    assert labels == boxes == scores == keypoints == [[]]
+
+
 def test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts() -> None:
     """Normalize YOLO26's split decoded pose tensors before rendering."""
 
