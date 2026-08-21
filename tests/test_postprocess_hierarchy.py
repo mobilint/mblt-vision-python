@@ -77,6 +77,28 @@ def test_classification_postprocessor_keeps_batched_singleton_outputs() -> None:
     assert output.shape == (2, 1000)
 
 
+def test_nmsfree_postprocessor_accepts_decode_enabled_output_triplet() -> None:
+    """Normalize QBCompiler's YOLOv10 score/confidence/box outputs."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.zeros((1, 2, 80), dtype=torch.float32)
+    classes[0, 0, 3] = 0.9
+    classes[0, 1, 7] = 0.8
+    confidence = torch.tensor([[[0.9], [0.1]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [1.0, 2.0, 3.0, 4.0]]], dtype=torch.float32
+    )
+
+    result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+    assert len(result) == 1
+    assert result[0].shape == (1, 6)
+    assert result[0][0, 5].item() == 3
+
+
 @pytest.mark.parametrize(
     "scores",
     [

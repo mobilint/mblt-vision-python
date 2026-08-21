@@ -4,8 +4,9 @@ YOLO NMS-free postprocessing.
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Sequence, cast
 
+import numpy as np
 import torch
 
 from .common import dist2bbox, dual_topk
@@ -16,6 +17,54 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
     """Postprocessing for YOLO NMS-free models."""
 
     max_det = 300
+
+    def extract_final_outputs(
+        self, x: Any
+    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+        """Accept QBCompiler's decode-enabled YOLOv10 output triplet.
+
+        The compiler emits class probabilities, the selected confidence, and
+        ``xyxy`` boxes separately as ``(B, A, C)``, ``(B, A, 1)``, and
+        ``(B, A, 4)``.  They are already decoded, but are not a conventional
+        six-column detection tensor, so normalize them before raw-head logic
+        sees the auxiliary tensors.
+        """
+        if isinstance(x, Sequence) and len(x) == 3:
+            tensors = [
+                value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
+                for value in x
+                if isinstance(value, (np.ndarray, torch.Tensor))
+            ]
+            if len(tensors) == 3:
+                classes = next(
+                    (
+                        value
+                        for value in tensors
+                        if value.ndim == 3 and value.shape[-1] == self.nc
+                    ),
+                    None,
+                )
+                confidence = next(
+                    (
+                        value
+                        for value in tensors
+                        if value.ndim == 3 and value.shape[-1] == 1
+                    ),
+                    None,
+                )
+                boxes = next(
+                    (
+                        value
+                        for value in tensors
+                        if value.ndim == 3 and value.shape[-1] == 4
+                    ),
+                    None,
+                )
+                if classes is not None and confidence is not None and boxes is not None:
+                    labels = classes.argmax(dim=-1, keepdim=True).to(boxes.dtype)
+                    detections = torch.cat((boxes, confidence, labels), dim=-1)
+                    return self._final_detection_batches(detections), None
+        return super().extract_final_outputs(x)
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Return the export-style output tensor for NMS-free YOLO models."""
