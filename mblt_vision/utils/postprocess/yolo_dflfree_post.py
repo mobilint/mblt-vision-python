@@ -572,6 +572,8 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
                 scores = converted[..., 4 : 4 + self.nc]
                 keypoints = converted[..., 4 + self.nc :]
                 keypoints = keypoints.reshape(*keypoints.shape[:2], -1, 3).clone()
+                if not bool(torch.isfinite(keypoints[..., 2]).all()):
+                    raise ValueError("Decoded pose visibility logits must be finite.")
                 keypoints[..., 2] = keypoints[..., 2].sigmoid()
                 labels = torch.zeros_like(scores)
                 detections = torch.cat(

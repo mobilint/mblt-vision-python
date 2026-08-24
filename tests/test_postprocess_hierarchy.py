@@ -186,6 +186,27 @@ def test_nmsfree_decode_enabled_output_validates_boxes_before_topk() -> None:
         postprocessor([classes, confidence, boxes], conf_thres=0.25)
 
 
+def test_non_e2e_nmsfree_preserves_batched_export_contract() -> None:
+    """Decoded YOLOv10 triplets retain the standard fixed export output shape."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+        e2e=False,
+    )
+    classes = torch.zeros((1, 2, 80), dtype=torch.float32)
+    classes[..., 0] = torch.tensor([[0.9, 0.8]])
+    confidence = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [1.0, 2.0, 3.0, 4.0]]], dtype=torch.float32
+    )
+
+    result = postprocessor([classes, confidence, boxes])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 300, 6)
+
+
 def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
     """Keep QBCompiler's compact decoded pose output drawable."""
 
@@ -275,6 +296,22 @@ def test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts() -> Non
 
     assert result[0].shape == (1, 57)
     assert result[0][0, 8].item() > 0.8
+
+
+def test_dflfree_pose_postprocessor_rejects_nonfinite_visibility_logits() -> None:
+    """Do not sanitize malformed DFL-free pose visibility logits with sigmoid."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+    )
+    scores = torch.tensor([[[0.9]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+    keypoints = torch.zeros((1, 1, 51), dtype=torch.float32)
+    keypoints[..., 2] = float("inf")
+
+    with pytest.raises(ValueError, match="visibility logits must be finite"):
+        postprocessor([keypoints, boxes, scores.clone(), scores])
 
 
 def test_non_e2e_dflfree_pose_preserves_batched_export_contract() -> None:
