@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 import torch
+
 from mblt_vision.utils.postprocess import build_postprocess
 from mblt_vision.utils.postprocess import common as common_module
 from mblt_vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
@@ -99,6 +100,26 @@ def test_nmsfree_postprocessor_accepts_decode_enabled_output_triplet() -> None:
     assert result[0][0, 5].item() == 3
 
 
+def test_nmsfree_decode_enabled_output_is_confidence_ranked_and_capped() -> None:
+    """Keep decoded YOLOv10 output cardinality aligned with every other NMS-free path."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    candidate_count = 301
+    confidence = torch.linspace(0.3, 0.9, candidate_count).reshape(1, -1, 1)
+    classes = torch.zeros((1, candidate_count, 80), dtype=torch.float32)
+    classes[..., 0] = confidence[..., 0]
+    boxes = torch.tensor([0.0, 0.0, 10.0, 10.0]).repeat(1, candidate_count, 1)
+
+    result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+    assert result[0].shape == (300, 6)
+    assert torch.all(result[0][1:, 4] <= result[0][:-1, 4])
+    assert result[0][0, 4].item() == pytest.approx(0.9)
+
+
 def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
     """Keep QBCompiler's compact decoded pose output drawable."""
 
@@ -113,11 +134,12 @@ def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
     converted[0, :, 5::3] = 20.0
     converted[0, :, 6::3] = 20.0
     converted[0, :, 7::3] = 0.001
+    converted[0, 0, 7] = 2.0
 
     result = postprocessor([converted], conf_thres=0.25)
 
     assert result[0].shape == (1, 57)
-    assert result[0][0, 8].item() > 0.5
+    assert result[0][0, 8].item() > 0.8
 
 
 def test_pose_evaluation_conversion_accepts_empty_nms_output() -> None:
@@ -139,7 +161,7 @@ def test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts() -> Non
         {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
     )
     scores = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
-    reduced_scores = torch.tensor([[[0.8], [0.7]]], dtype=torch.float32)
+    reduced_scores = scores.clone()
     boxes = torch.tensor(
         [[[10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]]],
         dtype=torch.float32,
@@ -148,11 +170,33 @@ def test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts() -> Non
     keypoints[..., 0::3] = 20.0
     keypoints[..., 1::3] = 30.0
     keypoints[..., 2::3] = 0.001
+    keypoints[0, 0, 2] = 2.0
 
-    result = postprocessor([scores, reduced_scores, boxes, keypoints], conf_thres=0.25)
+    result = postprocessor([keypoints, boxes, reduced_scores, scores], conf_thres=0.25)
 
     assert result[0].shape == (1, 57)
-    assert result[0][0, 8].item() > 0.5
+    assert result[0][0, 8].item() > 0.8
+
+
+def test_non_e2e_dflfree_pose_preserves_batched_export_contract() -> None:
+    """Decode-enabled pose parts must reach ``non_e2e`` when requested."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+        e2e=False,
+    )
+    scores = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]]],
+        dtype=torch.float32,
+    )
+    keypoints = torch.zeros((1, 2, 51), dtype=torch.float32)
+
+    result = postprocessor([scores, scores.clone(), boxes, keypoints])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 300, 57)
 
 
 @pytest.mark.parametrize(

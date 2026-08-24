@@ -9,8 +9,8 @@ from typing import Literal
 
 import torch
 
-from .base import YOLODetectionPostBase
 from ..types import ListTensorLike, TensorLike
+from .base import YOLODetectionPostBase
 from .common import (
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
@@ -599,8 +599,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
                 boxes[..., :2] -= boxes[..., 2:] / 2
                 boxes[..., 2:] += boxes[..., :2]
                 keypoints = tensor[..., 5:].reshape(*tensor.shape[:2], -1, 3).clone()
-                if bool((keypoints[..., 2].abs() <= 0.01).all()):
-                    keypoints[..., 2] = keypoints[..., 2].sigmoid()
+                keypoints[..., 2] = keypoints[..., 2].sigmoid()
                 detections = torch.cat(
                     (boxes, tensor[..., 4:5], labels, keypoints.flatten(2)), dim=-1
                 )

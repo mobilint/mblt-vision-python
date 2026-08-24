@@ -4,8 +4,8 @@ from typing import Any, cast
 
 import torch
 
-from .base import YOLODetectionPostBase
 from ..types import ListTensorLike, TensorLike
+from .base import YOLODetectionPostBase
 from .common import (
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
@@ -560,39 +560,19 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
         self, x: TensorLike | ListTensorLike
     ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
         """Accept YOLO26's decode-enabled score, xyxy, and keypoint outputs."""
-        if isinstance(x, (list, tuple)) and len(x) == 4:
+        if self.e2e and isinstance(x, (list, tuple)) and len(x) == 4:
             tensors = [
                 value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
                 for value in x
             ]
-            boxes = next(
-                (
-                    value
-                    for value in tensors
-                    if value.ndim == 3 and value.shape[-1] == 4
-                ),
-                None,
-            )
-            keypoints = next(
-                (
-                    value
-                    for value in tensors
-                    if value.ndim == 3 and value.shape[-1] == self.n_extra
-                ),
-                None,
-            )
-            scores = next(
-                (
-                    value
-                    for value in tensors
-                    if value.ndim == 3 and value.shape[-1] == 1
-                ),
-                None,
-            )
-            if boxes is not None and keypoints is not None and scores is not None:
+            converted_parts = self._collect_converted_parts(tensors, require_extra=True)
+            if converted_parts is not None:
+                converted, _ = converted_parts
+                boxes = converted[..., :4]
+                scores = converted[..., 4 : 4 + self.nc]
+                keypoints = converted[..., 4 + self.nc :]
                 keypoints = keypoints.reshape(*keypoints.shape[:2], -1, 3).clone()
-                if bool((keypoints[..., 2].abs() <= 0.01).all()):
-                    keypoints[..., 2] = keypoints[..., 2].sigmoid()
+                keypoints[..., 2] = keypoints[..., 2].sigmoid()
                 labels = torch.zeros_like(scores)
                 detections = torch.cat(
                     (boxes, scores, labels, keypoints.flatten(2)), dim=-1

@@ -4,7 +4,8 @@ YOLO NMS-free postprocessing.
 
 from __future__ import annotations
 
-from typing import Any, Sequence, cast
+from collections.abc import Sequence
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -63,7 +64,12 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
                 if classes is not None and confidence is not None and boxes is not None:
                     labels = classes.argmax(dim=-1, keepdim=True).to(boxes.dtype)
                     detections = torch.cat((boxes, confidence, labels), dim=-1)
-                    return self._final_detection_batches(detections), None
+                    return [
+                        batch[
+                            torch.argsort(batch[:, 4], descending=True)[: self.max_det]
+                        ]
+                        for batch in self._final_detection_batches(detections)
+                    ], None
         return super().extract_final_outputs(x)
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor:
