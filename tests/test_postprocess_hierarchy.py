@@ -96,8 +96,40 @@ def test_nmsfree_postprocessor_accepts_decode_enabled_output_triplet() -> None:
     result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
 
     assert len(result) == 1
-    assert result[0].shape == (1, 6)
+    assert result[0].shape == (2, 6)
     assert result[0][0, 5].item() == 3
+
+
+def test_nmsfree_single_class_output_uses_ordered_confidence_tensor() -> None:
+    """Face models must not mistake their class-probability tensor for confidence."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "face_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.tensor([[[0.9]]], dtype=torch.float32)
+    confidence = torch.tensor([[[0.1]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+
+    result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+    assert len(result) == 1
+    assert result[0].shape == (0, 6)
+
+
+def test_nmsfree_decode_enabled_output_rejects_nonfinite_class_probabilities() -> None:
+    """Do not turn malformed class values into plausible labels through argmax."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.full((1, 1, 80), float("nan"))
+    confidence = torch.tensor([[[0.9]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="class probabilities must be finite"):
+        postprocessor([classes, confidence, boxes])
 
 
 def test_nmsfree_decode_enabled_output_is_confidence_ranked_and_capped() -> None:
@@ -140,6 +172,22 @@ def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
 
     assert result[0].shape == (1, 57)
     assert result[0][0, 8].item() > 0.8
+
+
+def test_non_e2e_anchorless_pose_preserves_batched_export_output() -> None:
+    """Compact decoded pose tensors must bypass e2e-only final-output extraction."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+        e2e=False,
+    )
+    converted = torch.zeros((1, 2, 56), dtype=torch.float32)
+
+    result = postprocessor([converted])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 56, 2)
 
 
 def test_pose_evaluation_conversion_accepts_empty_nms_output() -> None:

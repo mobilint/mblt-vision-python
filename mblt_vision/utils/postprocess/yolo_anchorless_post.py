@@ -575,7 +575,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
         visibility as near-zero logits in this layout, so normalize them as the
         split-head pose decoder does.
         """
-        if isinstance(x, (list, tuple)) and len(x) == 1:
+        if self.e2e and isinstance(x, (list, tuple)) and len(x) == 1:
             value = x[0]
             if isinstance(value, torch.Tensor):
                 tensor = value

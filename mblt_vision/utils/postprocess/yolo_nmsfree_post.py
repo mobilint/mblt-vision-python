@@ -19,6 +19,38 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
 
     max_det = 300
 
+    def _decoded_output_triplet(
+        self, x: Any
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+        """Return QBCompiler's ordered decoded class, confidence, and box outputs."""
+        if not isinstance(x, Sequence) or len(x) != 3:
+            return None
+        tensors = [
+            value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
+            for value in x
+            if isinstance(value, (np.ndarray, torch.Tensor))
+        ]
+        if len(tensors) != 3:
+            return None
+        classes, confidence, boxes = tensors
+        if not (
+            classes.ndim == confidence.ndim == boxes.ndim == 3
+            and classes.shape[-1] == self.nc
+            and confidence.shape[-1] == 1
+            and boxes.shape[-1] == 4
+            and classes.shape[:2] == confidence.shape[:2] == boxes.shape[:2]
+        ):
+            return None
+        if not bool(torch.isfinite(classes).all()):
+            raise ValueError("Decoded YOLOv10 class probabilities must be finite.")
+        if not bool(((classes >= 0) & (classes <= 1)).all()):
+            raise ValueError("Decoded YOLOv10 class probabilities must be in [0, 1].")
+        if not bool(torch.isfinite(confidence).all()):
+            raise ValueError("Decoded YOLOv10 confidence values must be finite.")
+        if not bool(torch.isfinite(boxes).all()):
+            raise ValueError("Decoded YOLOv10 boxes must be finite.")
+        return classes, confidence, boxes
+
     def extract_final_outputs(
         self, x: Any
     ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
@@ -30,46 +62,28 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         six-column detection tensor, so normalize them before raw-head logic
         sees the auxiliary tensors.
         """
-        if isinstance(x, Sequence) and len(x) == 3:
-            tensors = [
-                value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
-                for value in x
-                if isinstance(value, (np.ndarray, torch.Tensor))
-            ]
-            if len(tensors) == 3:
-                classes = next(
-                    (
-                        value
-                        for value in tensors
-                        if value.ndim == 3 and value.shape[-1] == self.nc
-                    ),
-                    None,
-                )
-                confidence = next(
-                    (
-                        value
-                        for value in tensors
-                        if value.ndim == 3 and value.shape[-1] == 1
-                    ),
-                    None,
-                )
-                boxes = next(
-                    (
-                        value
-                        for value in tensors
-                        if value.ndim == 3 and value.shape[-1] == 4
-                    ),
-                    None,
-                )
-                if classes is not None and confidence is not None and boxes is not None:
-                    labels = classes.argmax(dim=-1, keepdim=True).to(boxes.dtype)
-                    detections = torch.cat((boxes, confidence, labels), dim=-1)
-                    return [
-                        batch[
-                            torch.argsort(batch[:, 4], descending=True)[: self.max_det]
-                        ]
-                        for batch in self._final_detection_batches(detections)
-                    ], None
+        decoded = self._decoded_output_triplet(x)
+        if decoded is not None:
+            classes, confidence, boxes = decoded
+            if self.nc == 1:
+                labels = torch.zeros_like(confidence)
+                detections = torch.cat((boxes, confidence, labels), dim=-1)
+                return [
+                    batch[torch.argsort(batch[:, 4], descending=True)[: self.max_det]]
+                    for batch in self._final_detection_batches(detections)
+                ], None
+            return [
+                self._final_detection_batches(
+                    dual_topk(
+                        torch.cat((batch_boxes, batch_classes), dim=-1),
+                        self.nc,
+                        self.n_extra,
+                        max_det=self.max_det,
+                        conf_thres=self.conf_thres,
+                    ).unsqueeze(0)
+                )[0]
+                for batch_classes, batch_boxes in zip(classes, boxes)
+            ], None
         return super().extract_final_outputs(x)
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor:
