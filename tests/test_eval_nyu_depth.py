@@ -68,6 +68,18 @@ def test_nyu_depth_metrics_reject_nonreal_or_nonnumeric_inputs(dtype: np.dtype) 
         eval_nyu_depth_module.calculate_nyu_depth_metrics(values, values)
 
 
+def test_nyu_depth_metrics_average_rmse_per_image() -> None:
+    """Match Ultralytics' equal-weighted, median-aligned depth metrics."""
+
+    accumulator = eval_nyu_depth_module.NYUDepthMetricAccumulator()
+    accumulator.update(np.array([1.0, 4.0]), np.array([1.0, 2.0]))
+    accumulator.update(np.array([1.0, 2.0, 3.0, 8.0]), np.array([1.0, 2.0, 3.0, 4.0]))
+
+    result = accumulator.result()
+    assert np.isclose(result.rmse, 1.2)
+    assert result.secondary_scores == (result.abs_rel, result.rmse)
+
+
 def test_nyu_depth_evaluation_rejects_wrong_model_taxonomy() -> None:
     """Require the model's declared depth taxonomy before loading a dataset."""
 

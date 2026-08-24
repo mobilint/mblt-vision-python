@@ -43,6 +43,8 @@ description: >-
   the Model Zoo reference.
 - Rank WiderFace evaluation by Hard-set AP. Expose Medium-set then Easy-set AP
   as secondary metrics, and do not compute mean AP across difficulty splits.
+- Rank NYU Depth evaluation by delta1. Expose abs_rel then RMSE (m) as
+  secondary metrics, with median-aligned metrics averaged per image.
 
 ## Runtime and Packaging
 
