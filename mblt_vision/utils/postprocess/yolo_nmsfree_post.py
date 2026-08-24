@@ -47,6 +47,8 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             raise ValueError("Decoded YOLOv10 class probabilities must be in [0, 1].")
         if not bool(torch.isfinite(confidence).all()):
             raise ValueError("Decoded YOLOv10 confidence values must be finite.")
+        if not bool(((confidence >= 0) & (confidence <= 1)).all()):
+            raise ValueError("Decoded YOLOv10 confidence values must be in [0, 1].")
         if not bool(torch.isfinite(boxes).all()):
             raise ValueError("Decoded YOLOv10 boxes must be finite.")
         return classes, confidence, boxes
@@ -72,6 +74,18 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
                     batch[torch.argsort(batch[:, 4], descending=True)[: self.max_det]]
                     for batch in self._final_detection_batches(detections)
                 ], None
+            candidate_mask = classes.amax(dim=-1) > self.conf_thres
+            candidate_boxes = boxes[candidate_mask]
+            if candidate_boxes.numel() and not bool(
+                (
+                    (candidate_boxes[:, 2] > candidate_boxes[:, 0])
+                    & (candidate_boxes[:, 3] > candidate_boxes[:, 1])
+                ).all()
+            ):
+                raise ValueError(
+                    "Decoded YOLOv10 boxes must have positive xyxy area after "
+                    "confidence filtering."
+                )
             return [
                 self._final_detection_batches(
                     dual_topk(

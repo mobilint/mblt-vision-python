@@ -132,6 +132,22 @@ def test_nmsfree_decode_enabled_output_rejects_nonfinite_class_probabilities() -
         postprocessor([classes, confidence, boxes])
 
 
+def test_nmsfree_decode_enabled_output_rejects_invalid_selected_confidence() -> None:
+    """Validate the selected-confidence output even for multi-class models."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.zeros((1, 1, 80), dtype=torch.float32)
+    classes[..., 0] = 0.9
+    confidence = torch.tensor([[[1.1]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="confidence values must be in \\[0, 1\\]"):
+        postprocessor([classes, confidence, boxes])
+
+
 def test_nmsfree_decode_enabled_output_is_confidence_ranked_and_capped() -> None:
     """Keep decoded YOLOv10 output cardinality aligned with every other NMS-free path."""
 
@@ -150,6 +166,24 @@ def test_nmsfree_decode_enabled_output_is_confidence_ranked_and_capped() -> None
     assert result[0].shape == (300, 6)
     assert torch.all(result[0][1:, 4] <= result[0][:-1, 4])
     assert result[0][0, 4].item() == pytest.approx(0.9)
+
+
+def test_nmsfree_decode_enabled_output_validates_boxes_before_topk() -> None:
+    """Do not hide an above-threshold invalid box behind the top-k cap."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    candidate_count = 301
+    classes = torch.zeros((1, candidate_count, 80), dtype=torch.float32)
+    classes[..., 0] = torch.linspace(0.9, 0.3, candidate_count)
+    confidence = torch.ones((1, candidate_count, 1), dtype=torch.float32)
+    boxes = torch.tensor([0.0, 0.0, 10.0, 10.0]).repeat(1, candidate_count, 1)
+    boxes[0, -1] = torch.tensor([10.0, 0.0, 0.0, 10.0])
+
+    with pytest.raises(ValueError, match="positive xyxy area"):
+        postprocessor([classes, confidence, boxes], conf_thres=0.25)
 
 
 def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
@@ -172,6 +206,23 @@ def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
 
     assert result[0].shape == (1, 57)
     assert result[0][0, 8].item() > 0.8
+
+
+def test_pose_postprocessor_rejects_nonfinite_decode_enabled_visibility_logits() -> (
+    None
+):
+    """Do not let sigmoid turn invalid visibility logits into plausible values."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+    )
+    converted = torch.zeros((1, 1, 56), dtype=torch.float32)
+    converted[0, 0, :5] = torch.tensor([20.0, 20.0, 10.0, 10.0, 0.9])
+    converted[0, 0, 7] = float("inf")
+
+    with pytest.raises(ValueError, match="visibility logits must be finite"):
+        postprocessor([converted], conf_thres=0.25)
 
 
 def test_non_e2e_anchorless_pose_preserves_batched_export_output() -> None:

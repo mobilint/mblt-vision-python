@@ -599,6 +599,8 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
                 boxes[..., :2] -= boxes[..., 2:] / 2
                 boxes[..., 2:] += boxes[..., :2]
                 keypoints = tensor[..., 5:].reshape(*tensor.shape[:2], -1, 3).clone()
+                if not bool(torch.isfinite(keypoints[..., 2]).all()):
+                    raise ValueError("Decoded pose visibility logits must be finite.")
                 keypoints[..., 2] = keypoints[..., 2].sigmoid()
                 detections = torch.cat(
                     (boxes, tensor[..., 4:5], labels, keypoints.flatten(2)), dim=-1
