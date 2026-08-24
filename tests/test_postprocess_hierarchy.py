@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 import torch
+
 from mblt_vision.utils.postprocess import build_postprocess
 from mblt_vision.utils.postprocess import common as common_module
 from mblt_vision.utils.postprocess.base import PostBase, YOLODetectionPostBase
@@ -75,6 +76,263 @@ def test_classification_postprocessor_keeps_batched_singleton_outputs() -> None:
     output = postprocessor(torch.zeros((2, 1000, 1), dtype=torch.float32))
 
     assert output.shape == (2, 1000)
+
+
+def test_nmsfree_postprocessor_accepts_decode_enabled_output_triplet() -> None:
+    """Normalize QBCompiler's YOLOv10 score/confidence/box outputs."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.zeros((1, 2, 80), dtype=torch.float32)
+    classes[0, 0, 3] = 0.9
+    classes[0, 1, 7] = 0.8
+    confidence = torch.tensor([[[0.9], [0.1]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [1.0, 2.0, 3.0, 4.0]]], dtype=torch.float32
+    )
+
+    result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+    assert len(result) == 1
+    assert result[0].shape == (2, 6)
+    assert result[0][0, 5].item() == 3
+
+
+def test_nmsfree_single_class_output_uses_ordered_confidence_tensor() -> None:
+    """Face models must not mistake their class-probability tensor for confidence."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "face_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.tensor([[[0.9]]], dtype=torch.float32)
+    confidence = torch.tensor([[[0.1]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+
+    result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+    assert len(result) == 1
+    assert result[0].shape == (0, 6)
+
+
+def test_nmsfree_decode_enabled_output_rejects_nonfinite_class_probabilities() -> None:
+    """Do not turn malformed class values into plausible labels through argmax."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.full((1, 1, 80), float("nan"))
+    confidence = torch.tensor([[[0.9]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="class probabilities must be finite"):
+        postprocessor([classes, confidence, boxes])
+
+
+def test_nmsfree_decode_enabled_output_rejects_invalid_selected_confidence() -> None:
+    """Validate the selected-confidence output even for multi-class models."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    classes = torch.zeros((1, 1, 80), dtype=torch.float32)
+    classes[..., 0] = 0.9
+    confidence = torch.tensor([[[1.1]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="confidence values must be in \\[0, 1\\]"):
+        postprocessor([classes, confidence, boxes])
+
+
+def test_nmsfree_decode_enabled_output_is_confidence_ranked_and_capped() -> None:
+    """Keep decoded YOLOv10 output cardinality aligned with every other NMS-free path."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    candidate_count = 301
+    confidence = torch.linspace(0.3, 0.9, candidate_count).reshape(1, -1, 1)
+    classes = torch.zeros((1, candidate_count, 80), dtype=torch.float32)
+    classes[..., 0] = confidence[..., 0]
+    boxes = torch.tensor([0.0, 0.0, 10.0, 10.0]).repeat(1, candidate_count, 1)
+
+    result = postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+    assert result[0].shape == (300, 6)
+    assert torch.all(result[0][1:, 4] <= result[0][:-1, 4])
+    assert result[0][0, 4].item() == pytest.approx(0.9)
+
+
+def test_nmsfree_decode_enabled_output_validates_boxes_before_topk() -> None:
+    """Do not hide an above-threshold invalid box behind the top-k cap."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+    )
+    candidate_count = 301
+    classes = torch.zeros((1, candidate_count, 80), dtype=torch.float32)
+    classes[..., 0] = torch.linspace(0.9, 0.3, candidate_count)
+    confidence = torch.ones((1, candidate_count, 1), dtype=torch.float32)
+    boxes = torch.tensor([0.0, 0.0, 10.0, 10.0]).repeat(1, candidate_count, 1)
+    boxes[0, -1] = torch.tensor([10.0, 0.0, 0.0, 10.0])
+
+    with pytest.raises(ValueError, match="positive xyxy area"):
+        postprocessor([classes, confidence, boxes], conf_thres=0.25)
+
+
+def test_non_e2e_nmsfree_preserves_batched_export_contract() -> None:
+    """Decoded YOLOv10 triplets retain the standard fixed export output shape."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "object_detection", "nl": 3, "reg_max": 16, "nmsfree": True},
+        e2e=False,
+    )
+    classes = torch.zeros((1, 2, 80), dtype=torch.float32)
+    classes[..., 0] = torch.tensor([[0.9, 0.8]])
+    confidence = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [1.0, 2.0, 3.0, 4.0]]], dtype=torch.float32
+    )
+
+    result = postprocessor([classes, confidence, boxes])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 300, 6)
+
+
+def test_pose_postprocessor_normalizes_decode_enabled_keypoint_logits() -> None:
+    """Keep QBCompiler's compact decoded pose output drawable."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+    )
+    converted = torch.zeros((1, 2, 56), dtype=torch.float32)
+    converted[0, :, :5] = torch.tensor(
+        [[20.0, 20.0, 10.0, 10.0, 0.9], [20.0, 20.0, 10.0, 10.0, 0.8]]
+    )
+    converted[0, :, 5::3] = 20.0
+    converted[0, :, 6::3] = 20.0
+    converted[0, :, 7::3] = 0.001
+    converted[0, 0, 7] = 2.0
+
+    result = postprocessor([converted], conf_thres=0.25)
+
+    assert result[0].shape == (1, 57)
+    assert result[0][0, 8].item() > 0.8
+
+
+def test_pose_postprocessor_rejects_nonfinite_decode_enabled_visibility_logits() -> (
+    None
+):
+    """Do not let sigmoid turn invalid visibility logits into plausible values."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+    )
+    converted = torch.zeros((1, 1, 56), dtype=torch.float32)
+    converted[0, 0, :5] = torch.tensor([20.0, 20.0, 10.0, 10.0, 0.9])
+    converted[0, 0, 7] = float("inf")
+
+    with pytest.raises(ValueError, match="visibility logits must be finite"):
+        postprocessor([converted], conf_thres=0.25)
+
+
+def test_non_e2e_anchorless_pose_preserves_batched_export_output() -> None:
+    """Compact decoded pose tensors must bypass e2e-only final-output extraction."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "reg_max": 16, "n_extra": 51},
+        e2e=False,
+    )
+    converted = torch.zeros((1, 2, 56), dtype=torch.float32)
+
+    result = postprocessor([converted])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 56, 2)
+
+
+def test_pose_evaluation_conversion_accepts_empty_nms_output() -> None:
+    """An image without retained pose detections has no keypoints to scale."""
+    labels, boxes, scores, keypoints = common_module.nmsout2eval_pose(
+        [torch.empty((0, 57), dtype=torch.float32)],
+        (640, 640),
+        (480, 640),
+    )
+
+    assert labels == boxes == scores == keypoints == [[]]
+
+
+def test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts() -> None:
+    """Normalize YOLO26's split decoded pose tensors before rendering."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+    )
+    scores = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
+    reduced_scores = scores.clone()
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]]],
+        dtype=torch.float32,
+    )
+    keypoints = torch.zeros((1, 2, 51), dtype=torch.float32)
+    keypoints[..., 0::3] = 20.0
+    keypoints[..., 1::3] = 30.0
+    keypoints[..., 2::3] = 0.001
+    keypoints[0, 0, 2] = 2.0
+
+    result = postprocessor([keypoints, boxes, reduced_scores, scores], conf_thres=0.25)
+
+    assert result[0].shape == (1, 57)
+    assert result[0][0, 8].item() > 0.8
+
+
+def test_dflfree_pose_postprocessor_rejects_nonfinite_visibility_logits() -> None:
+    """Do not sanitize malformed DFL-free pose visibility logits with sigmoid."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+    )
+    scores = torch.tensor([[[0.9]]], dtype=torch.float32)
+    boxes = torch.tensor([[[10.0, 20.0, 30.0, 40.0]]], dtype=torch.float32)
+    keypoints = torch.zeros((1, 1, 51), dtype=torch.float32)
+    keypoints[..., 2] = float("inf")
+
+    with pytest.raises(ValueError, match="visibility logits must be finite"):
+        postprocessor([keypoints, boxes, scores.clone(), scores])
+
+
+def test_non_e2e_dflfree_pose_preserves_batched_export_contract() -> None:
+    """Decode-enabled pose parts must reach ``non_e2e`` when requested."""
+
+    postprocessor = build_postprocess(
+        {"LetterBox": {"img_size": [640, 640]}},
+        {"task": "pose_estimation", "nl": 3, "dflfree": True, "n_extra": 51},
+        e2e=False,
+    )
+    scores = torch.tensor([[[0.9], [0.8]]], dtype=torch.float32)
+    boxes = torch.tensor(
+        [[[10.0, 20.0, 30.0, 40.0], [10.0, 20.0, 30.0, 40.0]]],
+        dtype=torch.float32,
+    )
+    keypoints = torch.zeros((1, 2, 51), dtype=torch.float32)
+
+    result = postprocessor([scores, scores.clone(), boxes, keypoints])
+
+    assert isinstance(result, torch.Tensor)
+    assert result.shape == (1, 300, 57)
 
 
 @pytest.mark.parametrize(
@@ -449,6 +707,51 @@ def test_detection_postprocessor_rejects_missing_head_count() -> None:
             {"LetterBox": {"img_size": [640, 640]}},
             {"task": "object_detection", "dataset": "coco"},
         )
+
+
+def test_anchor_postprocessor_rearranges_yolov7_onnx_heads() -> None:
+    """Accept WongKinYiu YOLOv7's explicit-anchor ONNX head layout."""
+
+    postprocessor = YOLOAnchorDetectionPost.__new__(YOLOAnchorDetectionPost)
+    postprocessor.nl = 3
+    postprocessor.na = 3
+    postprocessor.no = 85
+    raw_outputs = [
+        torch.arange(3 * height * width * 85, dtype=torch.float32).reshape(
+            1, 3, height, width, 85
+        )
+        for height, width in ((80, 80), (40, 40), (20, 20))
+    ]
+
+    output = postprocessor.rearrange(raw_outputs)
+
+    assert isinstance(output, torch.Tensor)
+    assert output.shape == (1, 25200, 85)
+    assert torch.equal(output[0, 0], raw_outputs[0][0, 0, 0, 0])
+    assert torch.equal(output[0, 19200], raw_outputs[1][0, 0, 0, 0])
+    assert torch.equal(output[0, 24000], raw_outputs[2][0, 0, 0, 0])
+
+
+def test_anchor_postprocessor_ignores_decode_enabled_auxiliary_output() -> None:
+    """Use only raw heads when an MXQ also returns decoded YOLO predictions."""
+
+    postprocessor = YOLOAnchorDetectionPost.__new__(YOLOAnchorDetectionPost)
+    postprocessor.nl = 3
+    postprocessor.na = 3
+    postprocessor.no = 85
+    raw_outputs = [
+        torch.arange(3 * height * width * 85, dtype=torch.float32).reshape(
+            1, 3, height, width, 85
+        )
+        for height, width in ((80, 80), (40, 40), (20, 20))
+    ]
+    decoded_output = torch.zeros((1, 25200, 85), dtype=torch.float32)
+
+    output = postprocessor.rearrange([decoded_output, *raw_outputs])
+
+    assert isinstance(output, torch.Tensor)
+    assert output.shape == (1, 25200, 85)
+    assert torch.equal(output[0, 0], raw_outputs[0][0, 0, 0, 0])
 
 
 @pytest.mark.parametrize(

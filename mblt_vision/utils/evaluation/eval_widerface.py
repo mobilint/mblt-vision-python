@@ -34,22 +34,22 @@ class WiderFaceResult(NamedTuple):
     hard_ap: float
 
     @property
-    def mean_ap(self) -> float:
-        """Return the mean AP across Easy, Medium, and Hard."""
-
-        return (self.easy_ap + self.medium_ap + self.hard_ap) / 3.0
-
-    @property
     def primary_score(self) -> float:
-        """Return mean AP across the three validation splits."""
+        """Return Hard-set AP as the primary WiderFace metric."""
 
-        return self.mean_ap
+        return self.hard_ap
 
     @property
     def secondary_score(self) -> float:
-        """Return Hard-set AP."""
+        """Return Medium-set AP for singular-score compatibility."""
 
-        return self.hard_ap
+        return self.medium_ap
+
+    @property
+    def secondary_scores(self) -> tuple[float, float]:
+        """Return Medium- and Easy-set AP in secondary-metric order."""
+
+        return self.medium_ap, self.easy_ap
 
 
 def _empty_prediction() -> np.ndarray:

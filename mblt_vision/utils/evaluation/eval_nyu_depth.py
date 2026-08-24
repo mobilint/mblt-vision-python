@@ -31,27 +31,33 @@ class NYUDepthResult:
 
     @property
     def secondary_score(self) -> float:
-        """Return the secondary NYU Depth validation metric."""
+        """Return abs_rel for singular-score compatibility."""
 
         return self.abs_rel
 
+    @property
+    def secondary_scores(self) -> tuple[float, float]:
+        """Return abs_rel and RMSE in secondary-metric order."""
+
+        return self.abs_rel, self.rmse
+
 
 class NYUDepthMetricAccumulator:
-    """Accumulate median-aligned metrics over every valid NYU depth pixel."""
+    """Accumulate median-aligned metrics with equal weight for each image."""
 
     MIN_DEPTH = 0.001
     MAX_DEPTH = 100.0
 
     def __init__(self) -> None:
-        """Initialize zero-valued pixel sums."""
+        """Initialize zero-valued per-image metric sums."""
 
         self.delta1_sum = 0.0
         self.abs_rel_sum = 0.0
-        self.squared_error_sum = 0.0
-        self.valid_pixel_count = 0
+        self.rmse_sum = 0.0
+        self.valid_sample_count = 0
 
     def update(self, prediction: np.ndarray, target: np.ndarray) -> None:
-        """Median-align one prediction and add its valid-pixel statistics."""
+        """Median-align one prediction and add its per-image metric values."""
 
         prediction = _as_real_float32(prediction, "prediction")
         target = _as_real_float32(target, "target")
@@ -66,8 +72,7 @@ class NYUDepthMetricAccumulator:
         valid = (
             np.isfinite(target) & (target > self.MIN_DEPTH) & (target < self.MAX_DEPTH)
         )
-        valid_pixel_count = int(valid.sum())
-        if valid_pixel_count == 0:
+        if not valid.any():
             raise ValueError(
                 "NYU Depth sample has no valid pixels in the (0.001, 100.0) range."
             )
@@ -83,20 +88,22 @@ class NYUDepthMetricAccumulator:
         aligned = predicted * (median_target / median_prediction)
         aligned = np.clip(aligned, self.MIN_DEPTH, self.MAX_DEPTH)
         ratio = np.maximum(actual / aligned, aligned / actual)
-        self.delta1_sum += float(np.sum(ratio < 1.25))
-        self.abs_rel_sum += float(np.sum(np.abs(actual - aligned) / actual))
-        self.squared_error_sum += float(np.sum((actual - aligned) ** 2))
-        self.valid_pixel_count += valid_pixel_count
+        # Match Ultralytics' depth validator: median-align and calculate all
+        # metrics per image, then average validation images equally.
+        self.delta1_sum += float(np.mean(ratio < 1.25))
+        self.abs_rel_sum += float(np.mean(np.abs(actual - aligned) / actual))
+        self.rmse_sum += float(np.sqrt(np.mean((actual - aligned) ** 2)))
+        self.valid_sample_count += 1
 
     def result(self) -> NYUDepthResult:
-        """Return metrics pooled over all accumulated valid pixels."""
+        """Return mean per-image metrics."""
 
-        if self.valid_pixel_count == 0:
+        if self.valid_sample_count == 0:
             raise ValueError("NYU Depth evaluation received no valid pixels.")
         return NYUDepthResult(
-            delta1=self.delta1_sum / self.valid_pixel_count,
-            abs_rel=self.abs_rel_sum / self.valid_pixel_count,
-            rmse=float(np.sqrt(self.squared_error_sum / self.valid_pixel_count)),
+            delta1=self.delta1_sum / self.valid_sample_count,
+            abs_rel=self.abs_rel_sum / self.valid_sample_count,
+            rmse=self.rmse_sum / self.valid_sample_count,
         )
 
 
@@ -116,7 +123,7 @@ def _as_real_float32(values: np.ndarray, name: str) -> np.ndarray:
 def calculate_nyu_depth_metrics(
     prediction: np.ndarray, target: np.ndarray
 ) -> NYUDepthResult:
-    """Calculate official pooled metrics for one median-aligned NYU sample."""
+    """Calculate median-aligned NYU metrics for one sample."""
 
     accumulator = NYUDepthMetricAccumulator()
     accumulator.update(prediction, target)

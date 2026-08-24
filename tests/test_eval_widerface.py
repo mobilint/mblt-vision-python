@@ -14,6 +14,16 @@ eval_widerface_module = importlib.import_module(
 )
 
 
+def test_widerface_result_uses_hard_ap_as_primary() -> None:
+    """Rank by Hard AP and retain Medium then Easy as secondary metrics."""
+
+    result = eval_widerface_module.WiderFaceResult(0.8, 0.7, 0.6)
+
+    assert result.primary_score == 0.6
+    assert result.secondary_score == 0.7
+    assert result.secondary_scores == (0.7, 0.8)
+
+
 def test_widerface_evaluation_rejects_wrong_model_taxonomy() -> None:
     """Do not evaluate another detector taxonomy using WiderFace metadata."""
 

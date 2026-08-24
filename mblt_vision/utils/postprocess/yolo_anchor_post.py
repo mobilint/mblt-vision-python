@@ -99,15 +99,35 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
                 ``(batch, anchors, no)`` format, optionally paired with prototype masks in
                 segmentation subclasses.
         """
-        if len(x) != self.nl:
-            raise ValueError(f"Expected {self.nl} detection heads, got {len(x)}.")
+        # Decode-enabled MXQ artifacts prepend their already-decoded
+        # ``(batch, anchors, features)`` output to the raw detection heads.
+        # Only raw heads participate in anchor-grid decoding.
+        heads = [
+            tmp
+            for tmp in x
+            if (tmp.ndim == 4 and tmp.shape[3] == self.no * self.na)
+            or (tmp.ndim == 5 and tmp.shape[1] == self.na and tmp.shape[-1] == self.no)
+        ]
+        if len(heads) != self.nl:
+            shapes = ", ".join(str(tuple(tmp.shape)) for tmp in x)
+            raise ValueError(
+                f"Expected {self.nl} raw detection heads, got {len(heads)} "
+                f"from outputs: {shapes}."
+            )
         y = []
-        for i in range(self.nl):
-            tmp = x[i]
-            if tmp.shape[3] == self.no * self.na:
+        for tmp in heads:
+            if tmp.ndim == 4 and tmp.shape[3] == self.no * self.na:
                 y.append(
                     tmp.permute(0, 3, 1, 2)
                 )  # (b, 80, 80, 255) -> (b, 255, 80, 80)
+            elif tmp.ndim == 5 and tmp.shape[1] == self.na and tmp.shape[-1] == self.no:
+                # WongKinYiu YOLOv7 ONNX exports each head as
+                # (batch, anchors, height, width, features).
+                y.append(
+                    tmp.permute(0, 1, 4, 2, 3).reshape(
+                        tmp.shape[0], self.na * self.no, tmp.shape[2], tmp.shape[3]
+                    )
+                )
             else:
                 raise NotImplementedError(
                     f"Got unsupported shape for input: {tmp.shape}."

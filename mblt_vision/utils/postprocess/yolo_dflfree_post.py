@@ -4,6 +4,7 @@ from typing import Any, cast
 
 import torch
 
+from ..types import ListTensorLike, TensorLike
 from .base import YOLODetectionPostBase
 from .common import (
     YOLOOBBPostMixin,
@@ -14,6 +15,7 @@ from .common import (
     dist2bbox,
     dist2rbox,
     dual_topk,
+    non_max_suppression,
     rotated_nms,
     yolo_multilabel_candidates,
 )
@@ -553,6 +555,41 @@ class YOLODFLFreeSegPost(YOLOSegPostMixin, YOLODFLFreeDetectionPost):
 
 class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
     """Postprocessing for YOLO NMS-free pose estimation models."""
+
+    def extract_final_outputs(
+        self, x: TensorLike | ListTensorLike
+    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+        """Accept YOLO26's decode-enabled score, xyxy, and keypoint outputs."""
+        if self.e2e and isinstance(x, (list, tuple)) and len(x) == 4:
+            tensors = [
+                value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
+                for value in x
+            ]
+            converted_parts = self._collect_converted_parts(tensors, require_extra=True)
+            if converted_parts is not None:
+                converted, _ = converted_parts
+                boxes = converted[..., :4]
+                scores = converted[..., 4 : 4 + self.nc]
+                keypoints = converted[..., 4 + self.nc :]
+                keypoints = keypoints.reshape(*keypoints.shape[:2], -1, 3).clone()
+                if not bool(torch.isfinite(keypoints[..., 2]).all()):
+                    raise ValueError("Decoded pose visibility logits must be finite.")
+                keypoints[..., 2] = keypoints[..., 2].sigmoid()
+                labels = torch.zeros_like(scores)
+                detections = torch.cat(
+                    (boxes, scores, labels, keypoints.flatten(2)), dim=-1
+                )
+                retained_batches = self._final_detection_batches(detections)
+                selected_batches = []
+                for batch in retained_batches:
+                    order = torch.argsort(batch[:, 4], descending=True)
+                    ordered = batch[order]
+                    keep = non_max_suppression(
+                        ordered[:, :4], ordered[:, 4], self.iou_thres, max_output=300
+                    )
+                    selected_batches.append(ordered[keep])
+                return selected_batches, None
+        return super().extract_final_outputs(x)
 
     def non_e2e(self, x: list[torch.Tensor]) -> torch.Tensor | list[torch.Tensor]:
         """Return export-style pose outputs for both converted and raw split heads."""

@@ -195,7 +195,7 @@ class YOLODetectionPostBase(PostBase):
         conf_thres: float | None = None,
         iou_thres: float | None = None,
         multi_label: bool = False,
-    ) -> list[Any]:
+    ) -> Any:
         """Executes YOLO postprocessing.
 
         Includes rearranging, decoding, and NMS.
@@ -214,6 +214,10 @@ class YOLODetectionPostBase(PostBase):
         final_detections, proto_outs = self.extract_final_outputs(x)
         if final_detections is not None:
             if proto_outs is not None:
+                if not isinstance(final_detections, list):
+                    raise TypeError(
+                        "Mask prototypes require detections as a per-image list."
+                    )
                 return self.masking(final_detections, proto_outs)
             return final_detections
         checked_input = self.check_input(x)
@@ -291,7 +295,7 @@ class YOLODetectionPostBase(PostBase):
     def extract_final_outputs(
         self,
         x: TensorLike | ListTensorLike,
-    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+    ) -> tuple[list[torch.Tensor] | torch.Tensor | None, torch.Tensor | None]:
         """Extract already-decoded ONNX-style detections when present.
 
         Args:

@@ -73,6 +73,11 @@ The current ownership boundary is deliberate:
   non-finite, fractional, or out-of-range baked semantic IDs before casting.
 - Keep hardware-specific runtime access behind mblt-npu-python. Optional ONNX Runtime imports
   must remain lazy and report the appropriate package extra when unavailable.
+- For WiderFace evaluation, rank results by Hard-set AP and retain Medium-set
+  then Easy-set AP as secondary metrics. Do not compute a mean across splits.
+- For NYU Depth evaluation, rank results by delta1 and retain abs_rel then
+  RMSE (m) as secondary metrics. Median-align each image and average every
+  metric per image, following Ultralytics' depth-validation convention.
 
 ## Python-First Architecture
 

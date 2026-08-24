@@ -9,6 +9,7 @@ from typing import Literal
 
 import torch
 
+from ..types import ListTensorLike, TensorLike
 from .base import YOLODetectionPostBase
 from .common import (
     YOLOOBBPostMixin,
@@ -562,6 +563,62 @@ class YOLOAnchorlessSegPost(YOLOSegPostMixin, YOLOAnchorlessDetectionPost):
 
 class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
     """Postprocessing for YOLO pose estimation models without anchors."""
+
+    def extract_final_outputs(
+        self, x: TensorLike | ListTensorLike
+    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+        """Accept QBCompiler's decode-enabled candidate-first pose output.
+
+        Decode-enabled MXQs emit ``(B, anchors, 5 + keypoints)`` containing
+        ``xywh`` boxes, confidence, and decoded keypoint coordinates. Add the
+        single-class label column and convert the boxes once. QBCompiler leaves
+        visibility as near-zero logits in this layout, so normalize them as the
+        split-head pose decoder does.
+        """
+        if self.e2e and isinstance(x, (list, tuple)) and len(x) == 1:
+            value = x[0]
+            if isinstance(value, torch.Tensor):
+                tensor = value
+            else:
+                try:
+                    tensor = torch.as_tensor(value)
+                except (TypeError, ValueError):
+                    tensor = None
+            expected_dim = 5 + self.n_extra
+            if (
+                tensor is not None
+                and tensor.ndim == 3
+                and tensor.shape[-1] == expected_dim
+                # P6 decode-enabled artifacts do not preserve a valid
+                # keypoint-to-candidate association. Fall back to the legacy
+                # path (boxes only) rather than draw misleading skeletons.
+                and self.nl != 4
+            ):
+                labels = torch.zeros_like(tensor[..., :1])
+                boxes = tensor[..., :4].clone()
+                boxes[..., :2] -= boxes[..., 2:] / 2
+                boxes[..., 2:] += boxes[..., :2]
+                keypoints = tensor[..., 5:].reshape(*tensor.shape[:2], -1, 3).clone()
+                if not bool(torch.isfinite(keypoints[..., 2]).all()):
+                    raise ValueError("Decoded pose visibility logits must be finite.")
+                keypoints[..., 2] = keypoints[..., 2].sigmoid()
+                detections = torch.cat(
+                    (boxes, tensor[..., 4:5], labels, keypoints.flatten(2)), dim=-1
+                )
+                # Final-output extraction normally bypasses ``nms``.  These
+                # compiler candidates are dense, so retain the standard
+                # confidence-sorted NMS step before rendering pose skeletons.
+                retained_batches = self._final_detection_batches(detections)
+                selected_batches = []
+                for batch in retained_batches:
+                    order = torch.argsort(batch[:, 4], descending=True)
+                    ordered = batch[order]
+                    keep = non_max_suppression(
+                        ordered[:, :4], ordered[:, 4], self.iou_thres, max_output=300
+                    )
+                    selected_batches.append(ordered[keep])
+                return selected_batches, None
+        return super().extract_final_outputs(x)
 
     def rearrange(self, x: list[torch.Tensor]) -> torch.Tensor:
         """Rearranges model output tensors for pose estimation tasks.

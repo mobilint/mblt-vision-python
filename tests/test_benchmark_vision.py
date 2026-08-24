@@ -16,6 +16,7 @@ from mblt_vision.utils.evaluation import (
     ImageNetResult,
     NYUDepthResult,
     SemanticSegmentationResult,
+    WiderFaceResult,
 )
 
 
@@ -158,6 +159,39 @@ def test_benchmark_accepts_obb_model_task(
 
     assert (score, score_name) == (0.5, "map50_95")
     assert metrics == {"map50_95": 0.5, "map50": 0.7}
+
+
+def test_benchmark_ranks_widerface_by_hard_ap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Record Hard AP as primary while retaining Medium and Easy AP."""
+
+    class FakeModel:
+        post_cfg = {"task": "face_detection", "dataset": "widerface"}
+
+    import mblt_vision.utils.evaluation as evaluation_module
+
+    monkeypatch.setattr(
+        evaluation_module,
+        "eval_widerface",
+        lambda *args, **kwargs: WiderFaceResult(
+            easy_ap=0.8, medium_ap=0.7, hard_ap=0.6
+        ),
+    )
+    args = argparse.Namespace(
+        task="face_detection",
+        data_path=str(tmp_path),
+        batch_size=1,
+        conf_thres=None,
+        iou_thres=None,
+    )
+
+    score, score_name, metrics = benchmark_vision_models._evaluate(
+        FakeModel(), args, tmp_path
+    )
+
+    assert (score, score_name) == (0.6, "hard_ap")
+    assert metrics == {"easy_ap": 0.8, "medium_ap": 0.7, "hard_ap": 0.6}
 
 
 def test_benchmark_continues_after_evaluator_type_error(

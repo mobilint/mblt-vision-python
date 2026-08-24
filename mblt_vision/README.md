@@ -217,6 +217,19 @@ This section lists the publicly pre-trained models supported by the vision frame
 
 </details>
 
+### Face Detection
+
+WiderFace validation uses Hard-set AP as the primary metric. Medium-set AP and
+Easy-set AP are secondary metrics, in that order. Mean AP across the difficulty
+splits is not computed.
+
+### Depth Estimation
+
+NYU Depth V2 validation uses median-aligned delta1 as the primary metric.
+Absolute relative error (abs_rel) and RMSE in meters are the secondary metrics,
+in that order. Each metric is calculated per image, then averaged across the
+validation split, following Ultralytics' depth-validation convention.
+
 ### Object Detection
 
 | Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
