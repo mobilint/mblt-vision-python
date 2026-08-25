@@ -17,8 +17,6 @@ __all__: list[str] = [
     "YOLOv10m_face",
     "YOLOv10n_face",
     "YOLOv10s_face",
-    "YOLOv6m_face",
-    "YOLOv6n_face",
     "YOLOv8l_face",
     "YOLOv8m_face",
     "YOLOv8n_face",
@@ -36,8 +34,6 @@ YOLOv10l_face = create_model_class("YOLOv10l_face", __name__)
 YOLOv10m_face = create_model_class("YOLOv10m_face", __name__)
 YOLOv10n_face = create_model_class("YOLOv10n_face", __name__)
 YOLOv10s_face = create_model_class("YOLOv10s_face", __name__)
-YOLOv6m_face = create_model_class("YOLOv6m_face", __name__)
-YOLOv6n_face = create_model_class("YOLOv6n_face", __name__)
 YOLOv8l_face = create_model_class("YOLOv8l_face", __name__)
 YOLOv8m_face = create_model_class("YOLOv8m_face", __name__)
 YOLOv8n_face = create_model_class("YOLOv8n_face", __name__)

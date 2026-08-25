@@ -7,9 +7,11 @@ DEFAULT:
     Reader:
       style: numpy
     LetterBox:
+      # yolov8m-face.pt's own embedded train_args records imgsz: 960, unlike
+      # every other face-detection size/family, which train at 640.
       img_size:
-      - 640
-      - 640
+      - 960
+      - 960
     SetOrder:
       shape: HWC
     Normalize:
