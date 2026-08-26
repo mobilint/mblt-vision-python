@@ -12,6 +12,7 @@ import torch
 from ..types import ListTensorLike, TensorLike
 from .base import YOLODetectionPostBase
 from .common import (
+    YOLOFaceDetectionMixin,
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
     YOLOSegPostMixin,
@@ -566,7 +567,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
 
     def extract_final_outputs(
         self, x: TensorLike | ListTensorLike
-    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+    ) -> tuple[list[torch.Tensor] | torch.Tensor | None, torch.Tensor | None]:
         """Accept QBCompiler's decode-enabled candidate-first pose output.
 
         Decode-enabled MXQs emit ``(B, anchors, 5 + keypoints)`` containing
@@ -1004,6 +1005,12 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
     ) -> list[torch.Tensor]:
         """Preserve existing OBB NMS behavior outside the COCO validation scope."""
         return self.nms(x)
+
+
+class YOLOAnchorlessFaceDetectionPost(
+    YOLOFaceDetectionMixin, YOLOAnchorlessDetectionPost
+):
+    """Postprocessing for anchorless WiderFace face-detection models."""
 
 
 YOLOAnchorlessPost = YOLOAnchorlessDetectionPost

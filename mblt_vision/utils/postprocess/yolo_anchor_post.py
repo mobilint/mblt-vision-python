@@ -9,7 +9,7 @@ from typing import Any, cast
 import torch
 
 from .base import YOLODetectionPostBase
-from .common import YOLOSegPostMixin, non_max_suppression
+from .common import YOLOFaceDetectionMixin, YOLOSegPostMixin, non_max_suppression
 
 
 class YOLOAnchorDetectionPost(YOLODetectionPostBase):
@@ -487,3 +487,7 @@ class YOLOAnchorSegPost(YOLOSegPostMixin, YOLOAnchorDetectionPost):
         )
         masks = masks * conf.sigmoid()
         return xy, wh, conf, scores, masks
+
+
+class YOLOAnchorFaceDetectionPost(YOLOFaceDetectionMixin, YOLOAnchorDetectionPost):
+    """Postprocessing for anchor-based WiderFace face-detection models."""

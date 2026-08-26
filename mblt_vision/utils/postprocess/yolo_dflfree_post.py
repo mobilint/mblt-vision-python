@@ -7,6 +7,7 @@ import torch
 from ..types import ListTensorLike, TensorLike
 from .base import YOLODetectionPostBase
 from .common import (
+    YOLOFaceDetectionMixin,
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
     YOLOSegPostMixin,
@@ -558,7 +559,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
 
     def extract_final_outputs(
         self, x: TensorLike | ListTensorLike
-    ) -> tuple[list[torch.Tensor] | None, torch.Tensor | None]:
+    ) -> tuple[list[torch.Tensor] | torch.Tensor | None, torch.Tensor | None]:
         """Accept YOLO26's decode-enabled score, xyxy, and keypoint outputs."""
         if self.e2e and isinstance(x, (list, tuple)) and len(x) == 4:
             tensors = [
@@ -1015,6 +1016,10 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
             keep = rotated_nms(boxes, xi[:, 4], self.iou_thres)[:max_det]
             output.append(xi[keep])
         return output
+
+
+class YOLODFLFreeFaceDetectionPost(YOLOFaceDetectionMixin, YOLODFLFreeDetectionPost):
+    """Postprocessing for DFL-free WiderFace face-detection models."""
 
 
 YOLODFLFreePost = YOLODFLFreeDetectionPost

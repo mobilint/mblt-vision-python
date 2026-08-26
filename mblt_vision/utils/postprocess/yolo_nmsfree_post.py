@@ -10,7 +10,7 @@ from typing import Any, cast
 import numpy as np
 import torch
 
-from .common import dist2bbox, dual_topk
+from .common import YOLOFaceDetectionMixin, dist2bbox, dual_topk
 from .yolo_anchorless_post import YOLOAnchorlessDetectionPost, _AnchorlessNMSInput
 
 
@@ -268,6 +268,10 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         if isinstance(x, list):
             return x
         return [xi[xi[:, 4] > 0] for xi in x]
+
+
+class YOLONMSFreeFaceDetectionPost(YOLOFaceDetectionMixin, YOLONMSFreeDetectionPost):
+    """Postprocessing for NMS-free WiderFace face-detection models (for example, YOLOv10-face)."""
 
 
 YOLONMSFreePost = YOLONMSFreeDetectionPost
