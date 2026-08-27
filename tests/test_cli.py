@@ -193,12 +193,40 @@ def test_mask_generation_prompt_validation_fails_before_engine_construction(
         run_vision_inference(args, command="predict")
 
 
-def test_val_rejects_mask_generation_models() -> None:
-    """Point validation users at `predict` until the evaluation phase lands."""
+def test_val_parses_mask_generation_options() -> None:
+    """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
+
+    args = build_parser().parse_args(
+        [
+            "val",
+            "--model",
+            "sam2-hiera-large",
+            "--num-samples",
+            "20",
+            "--num-points",
+            "2",
+            "--seed",
+            "7",
+            "--encoder-mxq-path",
+            "encoder.mxq",
+            "--decoder-mxq-path",
+            "decoder.mxq",
+        ]
+    )
+    assert args.num_samples == 20
+    assert args.num_points == 2
+    assert args.seed == 7
+    assert args.encoder_mxq_path == "encoder.mxq"
+    assert args.decoder_mxq_path == "decoder.mxq"
+
+
+def test_val_defaults_match_the_reference_protocol() -> None:
+    """Default to the reference-validated 200-sample single-point protocol."""
 
     args = build_parser().parse_args(["val", "--model", "sam2-hiera-large"])
-    with pytest.raises(SystemExit, match="not supported for mask generation"):
-        val_module._run_validation(args)
+    assert args.num_samples == 200
+    assert args.num_points == 1
+    assert args.seed == 0
 
 
 def test_validation_default_dataset_path_uses_resolved_cache_root(

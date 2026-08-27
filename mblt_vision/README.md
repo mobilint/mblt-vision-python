@@ -402,21 +402,26 @@ result.plot("image.jpg", save_path="result.jpg")
 mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1
 ```
 
-| Model | Input Size<br>(H,W,C) | mIoU<br>(NPU)* | mIoU<br>(GPU)* | Source | Note |
-| --- | --- | --- | --- | --- | --- |
-| SAM2HieraLarge | (1024,1024,3) | 0.7757 | 0.7750 | [Link](https://ai.meta.com/sam2) | Point prompts only |
+Validate with the built-in SA-V evaluation (the dataset downloads and organizes
+automatically on the first run):
+
+```bash
+mblt-vision val --model sam2-hiera-large
+```
+
+| Model | Input Size<br>(H,W,C) | Source | Note |
+| --- | --- | --- | --- |
+| SAM2HieraLarge | (1024,1024,3) | [Link](https://ai.meta.com/sam2) | Point prompts only |
 
 <details>
-<summary>Mask Generation (SA-V)</summary>
+<summary>Mask Generation (SA-V val)</summary>
 
-- \*These numbers were measured by the `sam2-mxq-pipeline` reference this port is based on, on
-  the same encoder/decoder MXQ artifacts and the same official host-side math used here -- they
-  have not yet been independently re-measured by this port itself. Re-measuring against SA-V is
-  planned for the evaluation follow-up phase.
-- mIoU is each pipeline's own-selection mean IoU (`argmax` of the 3 predicted IoU scores) against
-  ground truth, measured over 200 single-point-prompt samples from the
-  [SA-V](https://ai.meta.com/datasets/segment-anything-video) validation set on real Aries2
-  hardware; mask agreement between the NPU and GPU pipelines was 0.983. A per-prompt-count and
-  per-dataset evaluation harness is planned as a follow-up.
+- Validation reports the own-selection mean IoU (`argmax` of the 3 predicted IoU scores) of the
+  predicted mask against ground truth as the primary metric, with the best-of-3 oracle IoU as
+  the secondary metric: 200 deterministic single-point-prompt samples by default (seed 0,
+  area-balanced) from the official
+  [SA-V](https://ai.meta.com/datasets/segment-anything-video) validation split
+  (155 videos, 293 masklets). Prompts are synthesized from the ground-truth mask
+  (distance-transform peak; `--num-points 2/3` adds negative and second positive points).
 
 </details>

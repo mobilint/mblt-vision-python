@@ -60,6 +60,8 @@ DOTAV1_CLASS_TO_IDX = {
 }
 COCO_DOWNLOAD_CONFIG = get_dataset_config("coco")["download"]
 ADE20K_DOWNLOAD_CONFIG = get_dataset_config("ade20k")["download"]
+SAV_DOWNLOAD_CONFIG = get_dataset_config("sa-v")["download"]
+SAV_URL = SAV_DOWNLOAD_CONFIG["url"]
 NYU_DEPTH_URL = (
     "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 )
@@ -74,6 +76,7 @@ PINNED_ARCHIVE_SHA256 = {
     COCO_DOWNLOAD_CONFIG["images"]: COCO_DOWNLOAD_CONFIG["images_sha256"],
     COCO_DOWNLOAD_CONFIG["annotations"]: COCO_DOWNLOAD_CONFIG["annotations_sha256"],
     ADE20K_DOWNLOAD_CONFIG["url"]: ADE20K_DOWNLOAD_CONFIG["sha256"],
+    SAV_DOWNLOAD_CONFIG["url"]: SAV_DOWNLOAD_CONFIG["sha256"],
 }
 
 
@@ -172,6 +175,7 @@ def _validate_staged_payloads(staged_root: Path, dataset: str) -> None:
         "dotav1": (staged_root / "images",),
         "ade20k": (staged_root / "images",),
         "cityscapes": (staged_root / "images",),
+        "sa-v": (staged_root / "images",),
     }
     for image_root in image_roots.get(dataset, ()):
         for image_path in image_root.rglob("*"):
@@ -195,6 +199,8 @@ def _validate_staged_payloads(staged_root: Path, dataset: str) -> None:
         _validate_staged_semantic_masks(staged_root, dataset)
     elif dataset == "dotav1":
         _validate_staged_dotav1_labels(staged_root)
+    elif dataset == "sa-v":
+        _validate_staged_sav_masks(staged_root)
 
 
 def _validate_staged_coco_image_geometry(staged_root: Path) -> None:
@@ -1354,6 +1360,193 @@ def organize_nyu_depth(
             return
 
         construct_nyu_depth(local_dataset_path, output_dir)
+
+
+def _resolve_sav_validation_root(dataset_dir: str) -> str:
+    """Resolves the extracted SA-V validation root containing the official layout.
+
+    Args:
+        dataset_dir: Directory containing the SA-V validation root or its parent.
+
+    Returns:
+        Directory containing ``sav_val.txt``, ``JPEGImages_24fps``, and
+        ``Annotations_6fps``.
+
+    Raises:
+        ValueError: If no directory with the official SA-V layout is found.
+    """
+
+    root = Path(dataset_dir)
+    candidates = [root, root / "sav_val"]
+    if root.is_dir():
+        candidates.extend(sorted(entry for entry in root.iterdir() if entry.is_dir()))
+    for candidate in candidates:
+        if (
+            (candidate / "sav_val.txt").is_file()
+            and (candidate / "JPEGImages_24fps").is_dir()
+            and (candidate / "Annotations_6fps").is_dir()
+        ):
+            return str(candidate)
+    raise ValueError(
+        "Unable to locate the SA-V validation layout (sav_val.txt, "
+        f"JPEGImages_24fps, Annotations_6fps) under: {dataset_dir}."
+    )
+
+
+def construct_sav(dataset_dir: str, output_dir: str) -> None:
+    """Constructs the SA-V validation layout from an extracted dataset directory.
+
+    Keeps only the annotated frames (annotations exist at 6fps, every fourth
+    24fps frame), matching the validation-only trimming used by the other
+    organizers; evaluation can only use annotated frames.
+
+    Args:
+        dataset_dir: Directory containing the SA-V validation root or its parent.
+        output_dir: Directory where the organized dataset will be stored.
+    """
+
+    output_dir = _validate_dense_output_root(
+        output_dir, "SA-V", ("images", "annotations", "video_ids.txt")
+    )
+    dataset_root = Path(_resolve_sav_validation_root(dataset_dir))
+    video_ids = [
+        line.strip()
+        for line in (dataset_root / "sav_val.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    if not video_ids or len(set(video_ids)) != len(video_ids):
+        raise ValueError(
+            f"SA-V id list is empty or contains duplicates: {dataset_root / 'sav_val.txt'}."
+        )
+    print(f"Constructing SA-V validation dataset from {dataset_dir} to {output_dir}")
+
+    output_parent_dir = os.path.dirname(output_dir)
+    os.makedirs(output_parent_dir, exist_ok=True)
+    total_masks = 0
+    with TemporaryDirectory(
+        dir=output_parent_dir, prefix=".sa-v-staging-"
+    ) as staging_dir:
+        staged_image_dir = os.path.join(staging_dir, "images")
+        staged_annotation_dir = os.path.join(staging_dir, "annotations")
+        os.makedirs(staged_image_dir)
+        os.makedirs(staged_annotation_dir)
+        for video_id in sorted(video_ids):
+            source_frame_dir = dataset_root / "JPEGImages_24fps" / video_id
+            source_annotation_dir = dataset_root / "Annotations_6fps" / video_id
+            if not source_frame_dir.is_dir() or not source_annotation_dir.is_dir():
+                raise ValueError(
+                    f"SA-V video '{video_id}' is missing its frame or annotation "
+                    f"directory under {dataset_root}."
+                )
+            annotated_stems: set[str] = set()
+            for object_dir in sorted(source_annotation_dir.iterdir()):
+                if not object_dir.is_dir():
+                    continue
+                staged_object_dir = os.path.join(
+                    staged_annotation_dir, video_id, object_dir.name
+                )
+                os.makedirs(staged_object_dir)
+                for mask_path in sorted(object_dir.glob("*.png")):
+                    shutil.copy2(
+                        mask_path, os.path.join(staged_object_dir, mask_path.name)
+                    )
+                    annotated_stems.add(mask_path.stem)
+                    total_masks += 1
+            if not annotated_stems:
+                raise ValueError(
+                    f"SA-V video '{video_id}' has no annotation masks under "
+                    f"{source_annotation_dir}."
+                )
+            staged_video_image_dir = os.path.join(staged_image_dir, video_id)
+            os.makedirs(staged_video_image_dir)
+            for stem in sorted(annotated_stems):
+                frame_path = source_frame_dir / f"{stem}.jpg"
+                if not frame_path.is_file():
+                    raise ValueError(
+                        f"SA-V video '{video_id}' is missing annotated frame "
+                        f"{stem}.jpg under {source_frame_dir}."
+                    )
+                shutil.copy2(
+                    frame_path, os.path.join(staged_video_image_dir, frame_path.name)
+                )
+
+        staged_ids_path = os.path.join(staging_dir, "video_ids.txt")
+        with open(staged_ids_path, "w", encoding="utf-8") as ids_file:
+            ids_file.write("\n".join(sorted(video_ids)) + "\n")
+
+        _validate_staged_dataset(staging_dir, "sa-v", ("mask_generation",))
+
+        replacements = (
+            (staged_image_dir, os.path.join(output_dir, "images")),
+            (staged_annotation_dir, os.path.join(output_dir, "annotations")),
+            (staged_ids_path, os.path.join(output_dir, "video_ids.txt")),
+        )
+        _replace_staged_directories(replacements, output_parent_dir, ".sa-v-backup-")
+    print(
+        f"Constructed SA-V validation dataset with {len(video_ids)} videos "
+        f"and {total_masks} annotation masks"
+    )
+
+
+def _validate_staged_sav_masks(staged_root: Path) -> None:
+    """Decode every staged SA-V mask before a structurally valid cache is replaced."""
+
+    annotation_root = staged_root / "annotations"
+    frame_shapes: dict[tuple[str, str], tuple[int, int]] = {}
+    for mask_path in sorted(annotation_root.rglob("*.png")):
+        video_id = mask_path.parent.parent.name
+        try:
+            with Image.open(mask_path) as mask_image:
+                mask = np.asarray(mask_image)
+        except OSError as exc:
+            raise ValueError(
+                f"Staged SA-V mask is unreadable: {mask_path}: {exc}."
+            ) from exc
+        if mask.ndim != 2 or len(np.unique(mask)) > 2:
+            raise ValueError(
+                f"Staged SA-V mask must be a single-object binary map: {mask_path}."
+            )
+        key = (video_id, mask_path.stem)
+        if key not in frame_shapes:
+            frame_path = staged_root / "images" / video_id / f"{mask_path.stem}.jpg"
+            with Image.open(frame_path) as frame_image:
+                frame_shapes[key] = (frame_image.height, frame_image.width)
+        if mask.shape != frame_shapes[key]:
+            raise ValueError(
+                "Staged SA-V mask and frame shapes must match: "
+                f"mask {mask.shape}, frame {frame_shapes[key]}: {mask_path}."
+            )
+
+
+def organize_sav(
+    dataset_path: str = SAV_URL,
+    output_dir: str | None = None,
+) -> None:
+    """Organizes SA-V validation, downloading and unpacking an archive when necessary.
+
+    Args:
+        dataset_path: Path or URL to the ``sav_val.tar`` archive or extracted
+            dataset directory.
+        output_dir: Directory to store the organized dataset. Defaults to the
+            resolved Mobilint cache directory.
+    """
+
+    output_dir = _resolve_organizer_output_dir(output_dir, "sa-v")
+    output_dir = _validate_dense_output_root(
+        output_dir, "SA-V", ("images", "annotations", "video_ids.txt")
+    )
+    with TemporaryDirectory() as temp_dir:
+        local_dataset_path = _resolve_source(dataset_path, temp_dir)
+        if local_dataset_path.endswith((".tar", ".tar.gz", ".tgz")):
+            print("Unpacking SA-V files to temporary directory...")
+            _safe_unpack_archive(local_dataset_path, temp_dir)
+            print("Unpacking completed")
+            construct_sav(temp_dir, output_dir)
+            return
+
+        construct_sav(local_dataset_path, output_dir)
 
 
 def _resolve_ade20k_validation_dirs(dataset_dir: str) -> tuple[str, str, str]:

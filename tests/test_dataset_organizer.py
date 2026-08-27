@@ -158,6 +158,7 @@ def test_dotav1_stage_requires_a_non_difficult_target(tmp_path: Path) -> None:
         (organizer.organize_ade20k, "ade20k"),
         (organizer.organize_cityscapes, "cityscapes"),
         (organizer.organize_dotav1, "dotav1"),
+        (organizer.organize_sav, "sa-v"),
     ],
 )
 def test_organizer_defaults_use_the_lazy_cache_resolver(
@@ -1680,3 +1681,85 @@ def test_dense_install_preserves_backups_when_rollback_fails(
     assert (
         backup_dirs[0] / "annotations" / "keep.png"
     ).read_bytes() == b"old annotation"
+
+
+def _write_sav_fixture_tree(root: Path, *, video_id: str = "sav_000001") -> None:
+    """Write a tiny official-layout SA-V validation tree with real payloads."""
+
+    frame = Image.new("RGB", (16, 12), color=(30, 60, 90))
+    mask = Image.new("L", (16, 12), color=0)
+    mask.paste(255, (4, 3, 12, 9))
+    (root / "sav_val.txt").write_text(f"{video_id}\n", encoding="utf-8")
+    frame_dir = root / "JPEGImages_24fps" / video_id
+    object_dir = root / "Annotations_6fps" / video_id / "000"
+    frame_dir.mkdir(parents=True)
+    object_dir.mkdir(parents=True)
+    for stem in ("00000", "00001", "00002", "00003", "00004"):
+        frame.save(frame_dir / f"{stem}.jpg")
+    for stem in ("00000", "00004"):
+        mask.save(object_dir / f"{stem}.png")
+
+
+def test_organize_sav_keeps_only_annotated_frames(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Install only annotated SA-V frames and masks through staged validation."""
+
+    monkeypatch.setattr(readiness_module, "SAV_VALIDATION_VIDEO_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "SAV_VALIDATION_MASKLET_COUNT", 1)
+    source_root = tmp_path / "source" / "sav_val"
+    source_root.mkdir(parents=True)
+    _write_sav_fixture_tree(source_root)
+    archive_path = tmp_path / "sav_val.tar"
+    with tarfile.open(archive_path, "w") as archive:
+        archive.add(source_root, arcname="sav_val")
+
+    output_dir = tmp_path / "organized"
+    organizer.organize_sav(str(archive_path), str(output_dir))
+
+    assert archive_path.is_file()
+    video_images = output_dir / "images" / "sav_000001"
+    assert sorted(path.name for path in video_images.iterdir()) == [
+        "00000.jpg",
+        "00004.jpg",
+    ]
+    masks = output_dir / "annotations" / "sav_000001" / "000"
+    assert sorted(path.name for path in masks.iterdir()) == ["00000.png", "00004.png"]
+    assert (output_dir / "video_ids.txt").read_text(encoding="utf-8") == "sav_000001\n"
+    assert readiness_module.dataset_ready(output_dir, "mask_generation", "sa-v")
+
+
+def test_construct_sav_rejects_missing_annotated_frame(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fail organization when an annotated frame has no matching JPEG."""
+
+    monkeypatch.setattr(readiness_module, "SAV_VALIDATION_VIDEO_COUNT", 1)
+    monkeypatch.setattr(readiness_module, "SAV_VALIDATION_MASKLET_COUNT", 1)
+    source_root = tmp_path / "sav_val"
+    source_root.mkdir(parents=True)
+    _write_sav_fixture_tree(source_root)
+    (source_root / "JPEGImages_24fps" / "sav_000001" / "00004.jpg").unlink()
+
+    with pytest.raises(ValueError, match="missing annotated frame 00004.jpg"):
+        organizer.construct_sav(str(source_root.parent), str(tmp_path / "organized"))
+
+
+def test_validate_staged_sav_masks_rejects_non_binary_masks(tmp_path: Path) -> None:
+    """Reject a staged SA-V mask carrying more than one object id."""
+
+    staged_root = tmp_path / "staged"
+    image_dir = staged_root / "images" / "sav_000001"
+    object_dir = staged_root / "annotations" / "sav_000001" / "000"
+    image_dir.mkdir(parents=True)
+    object_dir.mkdir(parents=True)
+    Image.new("RGB", (8, 8)).save(image_dir / "00000.jpg")
+    multi_object = Image.new("L", (8, 8), color=0)
+    multi_object.paste(1, (0, 0, 2, 2))
+    multi_object.paste(2, (4, 4, 6, 6))
+    multi_object.save(object_dir / "00000.png")
+
+    with pytest.raises(ValueError, match="single-object binary map"):
+        organizer._validate_staged_sav_masks(staged_root)

@@ -99,6 +99,17 @@ The current ownership boundary is deliberate:
   skips without a real `sam2` install). No added dependency: the input resize/normalize step
   is plain `torch` (`F.interpolate` bilinear with `antialias=True` reproduces torchvision's
   tensor `Resize` bit-for-bit), so mask_generation runs on the package's existing dependencies.
+- `mask_generation` evaluates on the SA-V validation split (155 videos, 293 masklets; JPEG
+  frames + per-object binary PNG masks, binarized as `> 0`). The registry entry
+  `datasets/sa-v.yaml` downloads the unmodified official `sav_val.tar` from the Mobilint Hub
+  mirror `datasets/mobilint/sa-v` (SA-V is CC BY 4.0 by Meta AI; keep the mirror README's
+  attribution intact and pin the archive sha256 in the YAML and `PINNED_ARCHIVE_SHA256`). The
+  organizer keeps only annotated frames. The evaluation protocol (`eval_sav`) is ported from the
+  validated `sam2-mxq-pipeline` reference: seed-deterministic area-balanced sampling, synthetic
+  point prompts from the GT mask (distance-transform peak, dilated-mask negatives), and
+  own-selection mean IoU as the primary metric with best-of-3 secondary. Numbers measured on
+  SA-V val are a different protocol from that reference's sav_train-sampled 0.7757 and are not
+  directly comparable.
 
 ## Python-First Architecture
 

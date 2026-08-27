@@ -1,0 +1,18 @@
+# SA-V (Segment Anything Video) validation split, used for point-prompted
+# mask generation evaluation. 155 videos / 293 manually annotated masklets,
+# distributed as extracted JPEG frames (24fps) and per-object binary PNG
+# masks (6fps). Organized paths are relative to `path`.
+#
+# The archive is the unmodified official `sav_val.tar`, mirrored with
+# attribution on the Mobilint Hugging Face organization because Meta's
+# download page is form-gated. SA-V is licensed CC BY 4.0 by Meta AI:
+# https://ai.meta.com/datasets/segment-anything-video/
+name: sa-v
+path: ~/.mblt_model_zoo/datasets/sa-v
+val: images
+tasks:
+  - mask_generation
+download:
+  url: https://huggingface.co/datasets/mobilint/sa-v/resolve/main/sav_val.tar
+  sha256: 81b83d9a24aec921e39e532e933a86496d12c001ebb733591c9f29a3f205a83b
+  source: https://ai.meta.com/datasets/segment-anything-video/

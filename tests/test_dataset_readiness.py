@@ -1013,3 +1013,91 @@ def test_dense_readiness_rejects_symlinked_root_ancestors(
     assert not readiness.dataset_ready(
         symlink_traversed_parent / "ade20k", "semantic_segmentation", "ade20k"
     )
+
+
+def _write_sav_layout(root: Path, *, video_id: str = "sav_000001") -> None:
+    """Create a minimal organized SA-V validation layout with one masklet."""
+
+    (root / "video_ids.txt").parent.mkdir(parents=True, exist_ok=True)
+    (root / "video_ids.txt").write_text(f"{video_id}\n", encoding="utf-8")
+    image_dir = root / "images" / video_id
+    object_dir = root / "annotations" / video_id / "000"
+    image_dir.mkdir(parents=True)
+    object_dir.mkdir(parents=True)
+    frame = Image.new("RGB", (16, 12))
+    mask = Image.new("L", (16, 12), color=0)
+    mask.paste(255, (4, 3, 12, 9))
+    for stem in ("00000", "00004"):
+        frame.save(image_dir / f"{stem}.jpg")
+        mask.save(object_dir / f"{stem}.png")
+
+
+@pytest.fixture
+def sav_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scale the SA-V completeness constants down to the one-video fixture."""
+
+    monkeypatch.setattr(readiness, "SAV_VALIDATION_VIDEO_COUNT", 1)
+    monkeypatch.setattr(readiness, "SAV_VALIDATION_MASKLET_COUNT", 1)
+
+
+def test_sav_ready_accepts_complete_layout(sav_counts: None, tmp_path: Path) -> None:
+    """Accept an organized SA-V layout with matching ids, frames, and masks."""
+
+    _write_sav_layout(tmp_path)
+    assert readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_video_count_mismatch(
+    sav_counts: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject a layout whose id list disagrees with the expected video count."""
+
+    _write_sav_layout(tmp_path)
+    monkeypatch.setattr(readiness, "SAV_VALIDATION_VIDEO_COUNT", 2)
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_masklet_count_mismatch(
+    sav_counts: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject a layout whose object directories disagree with the masklet count."""
+
+    _write_sav_layout(tmp_path)
+    monkeypatch.setattr(readiness, "SAV_VALIDATION_MASKLET_COUNT", 2)
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_orphan_mask_stem(sav_counts: None, tmp_path: Path) -> None:
+    """Reject a mask annotating a frame that has no matching JPEG."""
+
+    _write_sav_layout(tmp_path)
+    (tmp_path / "images" / "sav_000001" / "00004.jpg").unlink()
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_symlinked_video_directory(
+    sav_counts: None, tmp_path: Path
+) -> None:
+    """Reject symlinked entries inside the managed SA-V layout."""
+
+    _write_sav_layout(tmp_path)
+    real_dir = tmp_path / "images" / "sav_000001"
+    moved = tmp_path / "moved"
+    real_dir.rename(moved)
+    real_dir.symlink_to(moved)
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_missing_id_list(sav_counts: None, tmp_path: Path) -> None:
+    """Reject a layout with no video_ids.txt identity file."""
+
+    _write_sav_layout(tmp_path)
+    (tmp_path / "video_ids.txt").unlink()
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_malformed_video_id(sav_counts: None, tmp_path: Path) -> None:
+    """Reject video ids that do not match the official sav_ pattern."""
+
+    _write_sav_layout(tmp_path, video_id="video01")
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
