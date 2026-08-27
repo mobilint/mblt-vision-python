@@ -28,6 +28,15 @@ description: >-
   Use file_cfg.filename for MXQ and derive the same-stem ONNX artifact unless
   onnx_filename is required.
 - Every post_cfg declares dataset; resolve output taxonomy from the dataset/task pair.
+- A promptable or multi-artifact model (see mask_generation/SAM2HieraLarge) bypasses
+  MBLT_Engine.__init__, build_preprocess/build_postprocess, and create_model_class entirely,
+  implementing its own preprocess/predict methods; it still subclasses MBLT_Engine only for
+  list_models() discovery. Reuse wrapper.download_hub_artifact for any additional Hub artifact
+  rather than duplicating Hub-resolution logic.
+- Never depend on the PyPI `sam2` package (unofficial third-party mirror) or a manually cloned
+  facebookresearch/sam2 checkout. mask_generation's host-side prompt encoding is a from-scratch
+  port verified bit-for-bit against the real predictor, backed by a small Hub-hosted weights
+  bundle, not package data.
 
 ## Processing and Results
 

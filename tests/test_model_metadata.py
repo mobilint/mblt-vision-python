@@ -16,6 +16,7 @@ DATASETS_BY_TASK = {
     "face_detection": {"widerface"},
     "image_classification": {"imagenet"},
     "instance_segmentation": {"coco"},
+    "mask_generation": {"sa-v"},
     "object_detection": {"coco"},
     "obb": {"dotav1"},
     "pose_estimation": {"coco"},

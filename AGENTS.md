@@ -78,6 +78,27 @@ The current ownership boundary is deliberate:
 - For NYU Depth evaluation, rank results by delta1 and retain abs_rel then
   RMSE (m) as secondary metrics. Median-align each image and average every
   metric per image, following Ultralytics' depth-validation convention.
+- `mask_generation` (`SAM2HieraLarge`) is the precedent for a promptable, multi-artifact model:
+  it loads two `MobilintNPUBackend` instances (encoder + decoder) and takes point prompts, so it
+  bypasses `MBLT_Engine.__init__`, `build_preprocess`/`build_postprocess`, and
+  `create_model_class`'s single-artifact legacy constructor entirely, implementing its own
+  `preprocess`/`predict`/`predict_preprocessed` instead. Its `models/SAM2HieraLarge.yaml` is
+  documentation/test-metadata only, not actually loaded. Reuse `wrapper.download_hub_artifact`
+  (extracted from `MBLT_Engine._download_hub_artifact`) for any future model needing more than
+  one Hub artifact, rather than duplicating Hub-resolution logic.
+- Never add the PyPI `sam2` package as a dependency of `mblt_vision` (it is an unofficial
+  third-party mirror, not Meta's) and never require a manually cloned
+  `facebookresearch/sam2` checkout. Host-side prompt encoding is instead a from-scratch,
+  dependency-free port of the official prompt encoder/mask-decoder token setup in
+  `mask_generation/_sam2_prompt.py` and `_sam2_host.py`, backed by a small (~16KB) bundle of
+  weight tensors extracted from the official checkpoint and hosted at
+  `mobilint/sam2-hiera-large`'s Hub repo root (`sam2_hiera_large_prompt_weights.pt`) --
+  downloaded the same way as the encoder/decoder MXQ artifacts, not shipped as package data.
+  Any change to that port must stay numerically verified against the real
+  `facebookresearch/sam2` predictor (`tests/test_mask_generation_prompt_encoding.py`, opt-in,
+  skips without a real `sam2` install). No added dependency: the input resize/normalize step
+  is plain `torch` (`F.interpolate` bilinear with `antialias=True` reproduces torchvision's
+  tensor `Resize` bit-for-bit), so mask_generation runs on the package's existing dependencies.
 
 ## Python-First Architecture
 

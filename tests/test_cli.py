@@ -86,6 +86,121 @@ def test_predict_help_explains_supported_workflows(
     assert "--target-device regulus-ra" in help_text
 
 
+def test_predict_parses_point_prompts_for_mask_generation() -> None:
+    """Accept repeated `--point X,Y,LABEL` prompts and mask-generation path overrides."""
+
+    args = build_parser().parse_args(
+        [
+            "predict",
+            "--source",
+            "image.jpg",
+            "--model",
+            "sam2-hiera-large",
+            "--point",
+            "320,240,1",
+            "--point",
+            "10.5,20.5,0",
+            "--encoder-mxq-path",
+            "encoder.mxq",
+            "--decoder-mxq-path",
+            "decoder.mxq",
+        ]
+    )
+    assert args.points == [(320.0, 240.0, 1), (10.5, 20.5, 0)]
+    assert args.encoder_mxq_path == "encoder.mxq"
+    assert args.decoder_mxq_path == "decoder.mxq"
+
+
+@pytest.mark.parametrize("bad_point", ["320,240", "320,240,2", "x,240,1"])
+def test_predict_rejects_malformed_point_prompts(bad_point: str) -> None:
+    """Fail argument parsing on malformed or out-of-range point prompts."""
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [
+                "predict",
+                "--source",
+                "image.jpg",
+                "--model",
+                "sam2-hiera-large",
+                "--point",
+                bad_point,
+            ]
+        )
+
+
+def test_predict_rejects_points_for_non_mask_generation_models(
+    synthetic_image_path: Path,
+) -> None:
+    """Reject `--point` before constructing an engine for a non-promptable model."""
+
+    from mblt_vision.cli._vision import run_vision_inference
+
+    args = build_parser().parse_args(
+        [
+            "predict",
+            "--source",
+            str(synthetic_image_path),
+            "--model",
+            "resnet50",
+            "--point",
+            "320,240,1",
+        ]
+    )
+    with pytest.raises(SystemExit, match="only supported for mask generation"):
+        run_vision_inference(args, command="predict")
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "match"),
+    [
+        ([], "1 to 3 point prompts"),
+        (
+            [
+                "--point",
+                "1,1,1",
+                "--point",
+                "2,2,1",
+                "--point",
+                "3,3,1",
+                "--point",
+                "4,4,0",
+            ],
+            "1 to 3 point prompts",
+        ),
+        (["--point", "1,1,1", "--mxq-path", "model.mxq"], "encoder-mxq-path"),
+        (["--point", "1,1,1", "--framework", "onnx"], "ONNX"),
+    ],
+)
+def test_mask_generation_prompt_validation_fails_before_engine_construction(
+    synthetic_image_path: Path, extra_args: list[str], match: str
+) -> None:
+    """Reject invalid mask-generation invocations without loading any backend."""
+
+    from mblt_vision.cli._vision import run_vision_inference
+
+    args = build_parser().parse_args(
+        [
+            "predict",
+            "--source",
+            str(synthetic_image_path),
+            "--model",
+            "sam2-hiera-large",
+            *extra_args,
+        ]
+    )
+    with pytest.raises(SystemExit, match=match):
+        run_vision_inference(args, command="predict")
+
+
+def test_val_rejects_mask_generation_models() -> None:
+    """Point validation users at `predict` until the evaluation phase lands."""
+
+    args = build_parser().parse_args(["val", "--model", "sam2-hiera-large"])
+    with pytest.raises(SystemExit, match="not supported for mask generation"):
+        val_module._run_validation(args)
+
+
 def test_validation_default_dataset_path_uses_resolved_cache_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

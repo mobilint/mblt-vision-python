@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -42,6 +42,7 @@ LW = 2  # line width
 RADIUS = 5  # circle radius
 ALPHA = 0.3  # alpha for overlay
 DENSE_OVERLAY_ALPHA = 0.6
+MASK_GENERATION_COLOR = (255, 144, 30)  # BGR dodgerblue, matches the reference overlay
 
 
 class Results:
@@ -51,7 +52,7 @@ class Results:
         self,
         pre_cfg: dict,
         post_cfg: dict,
-        output: TensorLike | ListTensorLike | NestedListTensorLike,
+        output: TensorLike | ListTensorLike | NestedListTensorLike | dict[str, Any],
         **kwargs,
     ) -> None:
         """
@@ -59,7 +60,7 @@ class Results:
         Args:
             pre_cfg (dict): Preprocessing configuration.
             post_cfg (dict): Postprocessing configuration.
-            output (TensorLike | ListTensorLike | NestedListTensorLike): Raw model output.
+            output: Raw model output, including a dictionary for mask generation.
             **kwargs: Additional arguments.
         """
         self.pre_cfg = pre_cfg
@@ -71,12 +72,20 @@ class Results:
         self.mask: torch.Tensor | np.ndarray | None = None
         self.depth: torch.Tensor | np.ndarray | list[TensorLike] | None = None
         self.semantic_mask: torch.Tensor | np.ndarray | list[TensorLike] | None = None
-        self.output: TensorLike | ListTensorLike | NestedListTensorLike | None = None
+        self.output: (
+            TensorLike | ListTensorLike | NestedListTensorLike | dict[str, Any] | None
+        ) = None
         self.labels: torch.Tensor | None = None
         self.scores: torch.Tensor | None = None
         self.boxes: torch.Tensor | None = None
         self.rboxes: torch.Tensor | None = None
         self.kpts: torch.Tensor | None = None
+        self.masks: np.ndarray | None = None
+        self.iou_predictions: np.ndarray | None = None
+        self.low_res_masks: np.ndarray | None = None
+        self.points: np.ndarray | None = None
+        self.point_labels: np.ndarray | None = None
+        self.selected: int | None = None
         self.set_output(output)
 
     def _read_image(
@@ -126,7 +135,8 @@ class Results:
             raise OSError(f"Failed to write result image: {path}")
 
     def set_output(
-        self, output: TensorLike | ListTensorLike | NestedListTensorLike
+        self,
+        output: TensorLike | ListTensorLike | NestedListTensorLike | dict[str, Any],
     ) -> None:
         """
         Sets variables from the raw model output based on the task.
@@ -140,6 +150,12 @@ class Results:
         self.mask = None
         self.depth = None
         self.semantic_mask = None
+        self.masks = None
+        self.iou_predictions = None
+        self.low_res_masks = None
+        self.points = None
+        self.point_labels = None
+        self.selected = None
         if self.task == "image_classification":
             if not isinstance(output, (np.ndarray, torch.Tensor)):
                 raise TypeError(
@@ -229,6 +245,23 @@ class Results:
                 raise TypeError(
                     f"Expected tensor semantic output for task {self.task}, got {type(output)}."
                 )
+        elif self.task == "mask_generation":
+            if not isinstance(output, dict):
+                raise TypeError(
+                    f"Expected dict output for task {self.task}, got {type(output).__name__}."
+                )
+            required_keys = {"masks", "iou_predictions"}
+            missing_keys = required_keys - output.keys()
+            if missing_keys:
+                raise ValueError(
+                    f"mask_generation output is missing key(s): {sorted(missing_keys)}."
+                )
+            self.masks = cast(TensorLike, output["masks"])
+            self.iou_predictions = cast(TensorLike, output["iou_predictions"])
+            self.low_res_masks = cast(TensorLike | None, output.get("low_res_masks"))
+            self.points = cast(TensorLike | None, output.get("points"))
+            self.point_labels = cast(TensorLike | None, output.get("point_labels"))
+            self.selected = output.get("selected")
         else:
             raise NotImplementedError(
                 f"Task {self.task} is not supported for plotting results."
@@ -268,6 +301,8 @@ class Results:
             return self._plot_pose_estimation(source_path, save_path, **kwargs)
         elif self.task == "obb":
             return self._plot_obb(source_path, save_path, **kwargs)
+        elif self.task == "mask_generation":
+            return self._plot_mask_generation(source_path, save_path, **kwargs)
         else:
             raise NotImplementedError(
                 f"Task {self.task} is not supported for plotting results."
@@ -693,6 +728,63 @@ class Results:
         if save_path is not None:
             self._save_image(save_path, img)
         return img
+
+    def _plot_mask_generation(
+        self,
+        source_path: str | Path | np.ndarray | Image.Image,
+        save_path: str | Path | None = None,
+        **kwargs,
+    ) -> np.ndarray:
+        """Overlay the selected mask and echoed point prompts on the source image."""
+
+        del kwargs
+        if self.masks is None:
+            raise ValueError("No mask_generation output found.")
+        img = self._read_image(source_path)
+        masks = (
+            self.masks.detach().cpu().numpy()
+            if isinstance(self.masks, torch.Tensor)
+            else np.asarray(self.masks)
+        )
+        if masks.ndim != 3:
+            raise ValueError(f"Expected masks shaped (N, H, W), got {masks.shape}.")
+        index = self.selected if self.selected is not None else 0
+        mask = masks[index] > 0
+        if tuple(mask.shape) != (img.shape[0], img.shape[1]):
+            raise ValueError(
+                f"Mask shape {mask.shape} does not match image shape {img.shape[:2]}."
+            )
+        overlay = np.zeros_like(img, dtype=np.uint8)
+        overlay[mask] = MASK_GENERATION_COLOR
+        blended = cv2.addWeighted(
+            img, 1.0 - DENSE_OVERLAY_ALPHA, overlay, DENSE_OVERLAY_ALPHA, 0
+        )
+        result = img.copy()
+        result[mask] = blended[mask]
+        if self.points is not None and self.point_labels is not None:
+            points = (
+                self.points.detach().cpu().numpy()
+                if isinstance(self.points, torch.Tensor)
+                else np.asarray(self.points)
+            )
+            labels = (
+                self.point_labels.detach().cpu().numpy()
+                if isinstance(self.point_labels, torch.Tensor)
+                else np.asarray(self.point_labels)
+            )
+            for (x, y), label in zip(points, labels):
+                color = (0, 255, 0) if int(label) == 1 else (0, 0, 255)
+                cv2.circle(
+                    result,
+                    (int(x), int(y)),
+                    RADIUS + 1,
+                    color,
+                    -1,
+                    lineType=cv2.LINE_AA,
+                )
+        if save_path is not None:
+            self._save_image(save_path, result)
+        return result
 
     def _box_cls_tensor(self) -> torch.Tensor:
         """Returns detection output as a torch tensor."""

@@ -53,6 +53,35 @@ def parse_target_clusters(value: str | None) -> list[int] | None:
     return clusters or None
 
 
+def parse_point(value: str) -> tuple[float, float, int]:
+    """Parses an `X,Y,LABEL` point prompt for mask generation models."""
+
+    parts = value.split(",")
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError("expected a point as X,Y,LABEL")
+    try:
+        x, y = float(parts[0]), float(parts[1])
+        label = int(parts[2])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "expected numeric X,Y coordinates and an integer LABEL"
+        ) from exc
+    if label not in (0, 1):
+        raise argparse.ArgumentTypeError(
+            "point LABEL must be 1 (positive) or 0 (negative)"
+        )
+    return (x, y, label)
+
+
+def resolve_cli_task(args: argparse.Namespace) -> str:
+    """Resolves the selected model's task without constructing a runtime."""
+
+    from mblt_vision.wrapper import resolve_model_config
+
+    config = resolve_model_config(args.model, args.model_type)
+    return normalize_vision_task(config["post_cfg"]["task"])
+
+
 def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
     """Adds arguments shared by all vision inference commands."""
 
@@ -275,6 +304,84 @@ def create_vision_engine(args: argparse.Namespace) -> Any:
     )
 
 
+def create_mask_generation_engine(args: argparse.Namespace) -> Any:
+    """Creates a promptable mask generation engine from shared CLI model options.
+
+    Mask generation models load two MXQ artifacts (encoder + decoder); the
+    shared NPU options (`--dev-no`, `--core-mode`, `--target-cores`,
+    `--target-clusters`) apply to both backends.
+    """
+
+    try:
+        import mblt_vision.mask_generation as mask_generation_module
+        from mblt_vision.wrapper import _model_name_aliasing
+    except ImportError as exc:
+        print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    class_name = Path(_model_name_aliasing(args.model)).stem
+    model_class = getattr(mask_generation_module, class_name, None)
+    if model_class is None:
+        raise SystemExit(
+            f"Mask generation model class '{class_name}' is not exported by "
+            "mblt_vision.mask_generation."
+        )
+    return model_class(
+        encoder_mxq_path=getattr(args, "encoder_mxq_path", None) or None,
+        decoder_mxq_path=getattr(args, "decoder_mxq_path", None) or None,
+        prompt_weights_path=getattr(args, "prompt_weights_path", None) or None,
+        encoder_dev_no=args.dev_no,
+        decoder_dev_no=args.dev_no,
+        encoder_core_mode=args.core_mode,
+        decoder_core_mode=args.core_mode,
+        encoder_target_cores=args.target_cores,
+        decoder_target_cores=args.target_cores,
+        encoder_target_clusters=args.target_clusters,
+        decoder_target_clusters=args.target_clusters,
+        target_device=args.target_device,
+    )
+
+
+def run_mask_generation_inference(
+    args: argparse.Namespace,
+    *,
+    command: str,
+) -> Any:
+    """Runs point-prompted mask generation for a CLI command."""
+
+    point_prompts = getattr(args, "points", None) or []
+    if not 1 <= len(point_prompts) <= 3:
+        raise SystemExit(
+            "Mask generation requires 1 to 3 point prompts; pass `--point X,Y,LABEL` "
+            "(LABEL 1 positive, 0 negative) up to three times."
+        )
+    if args.framework == "onnx" or args.onnx_path:
+        raise SystemExit("Mask generation models do not support ONNX inference.")
+    if args.model_path or args.mxq_path:
+        raise SystemExit(
+            "Mask generation models load two MXQ artifacts; use "
+            "`--encoder-mxq-path` and `--decoder-mxq-path` instead of "
+            "`--model-path`/`--mxq-path`."
+        )
+
+    points = [[x, y] for x, y, _ in point_prompts]
+    labels = [label for _, _, label in point_prompts]
+    model = create_mask_generation_engine(args)
+    try:
+        result = model.predict(args.source, points, labels)
+        save_path = resolve_output_path(args.output, command, args.source, args.model)
+        result.plot(source_path=args.source, save_path=save_path)
+        iou_text = ", ".join(f"{float(value):.4f}" for value in result.iou_predictions)
+        print(
+            f"Predicted IoU per mask candidate: [{iou_text}]; "
+            f"selected mask index: {result.selected}"
+        )
+        print(f"Saved result to {os.path.relpath(save_path)}")
+        return result
+    finally:
+        model.dispose()
+
+
 def run_vision_inference(
     args: argparse.Namespace,
     *,
@@ -283,6 +390,13 @@ def run_vision_inference(
     """Runs a complete vision inference pipeline for a CLI command."""
 
     require_source_file(args.source)
+    if resolve_cli_task(args) == "mask_generation":
+        return run_mask_generation_inference(args, command=command)
+    if getattr(args, "points", None):
+        raise SystemExit(
+            "`--point` is only supported for mask generation models such as "
+            "SAM2HieraLarge."
+        )
     model = create_vision_engine(args)
     try:
         actual_task = normalize_vision_task(model.post_cfg.get("task", ""))

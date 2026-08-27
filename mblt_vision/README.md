@@ -2,9 +2,12 @@
 
 `mblt-vision-python` provides Python access to pre-trained Mobilint Vision models:
 image classification, depth estimation, face and object detection, oriented bounding
-boxes (OBB), instance and semantic segmentation, and pose estimation. Each model
-configuration includes the artifact, preprocessing, output taxonomy, and
-postprocessing contract needed to produce task-specific results.
+boxes (OBB), instance and semantic segmentation, pose estimation, and promptable mask
+generation (SAM2). Each model configuration includes the artifact, preprocessing, output
+taxonomy, and postprocessing contract needed to produce task-specific results. Mask
+generation is the one exception: `SAM2HieraLarge` loads two NPU artifacts and takes point
+prompts rather than an image alone, so it has its own constructor -- see
+[Mask Generation](#mask-generation).
 
 ## Loading models
 
@@ -371,5 +374,49 @@ validation split, following Ultralytics' depth-validation convention.
   for single-model single-scale validation on the
   [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset. Validation also reports
   rotated mAP50 as the secondary metric.
+
+</details>
+
+### Mask Generation
+
+Promptable segmentation: given an image and 1-3 point prompts (positive/negative), returns 3
+candidate masks with IoU scores. Point prompts only for now -- no box prompts and no automatic
+"segment everything" mode. Unlike every other model here, `SAM2HieraLarge` downloads three
+artifacts from the Hub instead of one: an image encoder MXQ, a prompt-conditioned mask decoder
+MXQ, and a small (~16KB) bundle of host-side prompt-encoder weights. Host-side prompt encoding
+is a from-scratch, dependency-free port of the official
+[`facebookresearch/sam2`](https://github.com/facebookresearch/sam2) prompt encoder and mask-decoder
+token setup (numerically verified bit-for-bit against the real implementation) -- no `sam2`
+package, no `torchvision`, no manually cloned repository, and no extra to install: everything
+runs on the package's existing `torch` dependency. See `mblt_vision/mask_generation/`.
+
+```python
+from mblt_vision.mask_generation import SAM2HieraLarge
+
+model = SAM2HieraLarge()
+result = model.predict("image.jpg", points=[[320, 240]], labels=[1])
+result.plot("image.jpg", save_path="result.jpg")
+```
+
+```bash
+mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1
+```
+
+| Model | Input Size<br>(H,W,C) | mIoU<br>(NPU)* | mIoU<br>(GPU)* | Source | Note |
+| --- | --- | --- | --- | --- | --- |
+| SAM2HieraLarge | (1024,1024,3) | 0.7757 | 0.7750 | [Link](https://ai.meta.com/sam2) | Point prompts only |
+
+<details>
+<summary>Mask Generation (SA-V)</summary>
+
+- \*These numbers were measured by the `sam2-mxq-pipeline` reference this port is based on, on
+  the same encoder/decoder MXQ artifacts and the same official host-side math used here -- they
+  have not yet been independently re-measured by this port itself. Re-measuring against SA-V is
+  planned for the evaluation follow-up phase.
+- mIoU is each pipeline's own-selection mean IoU (`argmax` of the 3 predicted IoU scores) against
+  ground truth, measured over 200 single-point-prompt samples from the
+  [SA-V](https://ai.meta.com/datasets/segment-anything-video) validation set on real Aries2
+  hardware; mask agreement between the NPU and GPU pipelines was 0.983. A per-prompt-count and
+  per-dataset evaluation harness is planned as a follow-up.
 
 </details>

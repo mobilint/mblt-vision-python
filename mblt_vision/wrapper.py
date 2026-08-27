@@ -83,10 +83,50 @@ __all__ = [
     "core_modes_for_target_device",
     "MOBILINT_CACHE_DIR",
     "get_mobilint_cache_dir",
+    "download_hub_artifact",
     "normalize_core_mode",
     "resolve_model_config",
     "MBLT_Engine",
 ]
+
+
+def download_hub_artifact(
+    *,
+    repo_id: str,
+    filename: str,
+    revision: str,
+    subfolders: Sequence[str] | None = None,
+) -> str:
+    """Downloads a model artifact from Hugging Face Hub and returns its cache path.
+
+    Shared by :meth:`MBLT_Engine._download_hub_artifact` and any engine that
+    resolves Hub artifacts outside the single-artifact ``file_cfg`` flow (for
+    example a model that loads more than one compiled artifact).
+    """
+
+    last_error: Exception | None = None
+    normalized_subfolders = [""] if subfolders is None else list(subfolders)
+    for subfolder in normalized_subfolders:
+        kwargs: dict[str, Any] = {
+            "repo_id": repo_id,
+            "filename": filename,
+            "revision": revision,
+            "local_dir": get_mobilint_cache_dir(),
+        }
+        if subfolder:
+            kwargs["subfolder"] = subfolder
+        try:
+            return hf_hub_download(**kwargs)
+        except EntryNotFoundError as exc:
+            last_error = exc
+
+    attempted_paths = ", ".join(
+        f"{subfolder}/{filename}" if subfolder else filename
+        for subfolder in normalized_subfolders
+    )
+    raise RuntimeError(
+        f"Failed to download model from Hugging Face. Tried repo '{repo_id}' at: {attempted_paths}."
+    ) from last_error
 
 
 def _derive_onnx_filename(file_cfg: dict[str, Any]) -> str | None:
@@ -683,29 +723,12 @@ class MBLT_Engine:
     ) -> str:
         """Downloads a model artifact from Hugging Face Hub and returns its cache path."""
 
-        last_error: Exception | None = None
-        normalized_subfolders = [""] if subfolders is None else list(subfolders)
-        for subfolder in normalized_subfolders:
-            kwargs: dict[str, Any] = {
-                "repo_id": repo_id,
-                "filename": filename,
-                "revision": revision,
-                "local_dir": get_mobilint_cache_dir(),
-            }
-            if subfolder:
-                kwargs["subfolder"] = subfolder
-            try:
-                return hf_hub_download(**kwargs)
-            except EntryNotFoundError as exc:
-                last_error = exc
-
-        attempted_paths = ", ".join(
-            f"{subfolder}/{filename}" if subfolder else filename
-            for subfolder in normalized_subfolders
+        return download_hub_artifact(
+            repo_id=repo_id,
+            filename=filename,
+            revision=revision,
+            subfolders=subfolders,
         )
-        raise RuntimeError(
-            f"Failed to download model from Hugging Face. Tried repo '{repo_id}' at: {attempted_paths}."
-        ) from last_error
 
     def file_config_cleansing(self) -> None:
         """Validates and resolves the MXQ and ONNX model file paths in ``self.file_cfg``."""

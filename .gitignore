@@ -45,3 +45,5 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.egg
+
+runs/

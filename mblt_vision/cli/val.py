@@ -19,6 +19,7 @@ from ._vision import (
     create_vision_engine,
     parse_target_clusters,
     parse_target_cores,
+    resolve_cli_task,
 )
 
 DEFAULT_IMAGENET_IMAGE_SOURCE = get_dataset_config("imagenet")["download"]["images"]
@@ -340,6 +341,12 @@ def _run_validation(args: argparse.Namespace) -> float:
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
+
+    if resolve_cli_task(args) == "mask_generation":
+        raise SystemExit(
+            "Validation is not supported for mask generation models yet; "
+            "use `predict` with `--point X,Y,LABEL` for point-prompted inference."
+        )
 
     model = create_vision_engine(args)
     try:
