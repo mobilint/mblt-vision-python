@@ -20,6 +20,7 @@ import os
 import numpy as np
 import pytest
 
+from mblt_npu import MobilintNPUBackend
 from mblt_npu.pytest_plugin import NpuParams
 from mblt_vision.mask_generation import SAM2HieraLarge
 
@@ -49,6 +50,8 @@ def test_sam2_predicts_a_precise_mask_for_a_synthetic_rectangle(
             image, points=[[(x0 + x1) // 2, (y0 + y1) // 2]], labels=[1]
         )
         assert result.task == "mask_generation"
+        assert result.masks is not None
+        assert result.iou_predictions is not None
         assert result.masks.shape == (3, 480, 640)
         assert result.selected == int(np.argmax(result.iou_predictions))
 
@@ -75,6 +78,11 @@ def test_sam2_resolves_artifacts_from_huggingface_hub(npu_params: NpuParams) -> 
 
     engine = SAM2HieraLarge()
     try:
+        # This test constructs the default (mxq) framework, so both backends
+        # are MobilintNPUBackend -- narrow past the ONNXBackend/None union
+        # `_encoder_backend`/`_decoder_backend` carry for the mxq_path access.
+        assert isinstance(engine._encoder_backend, MobilintNPUBackend)
+        assert isinstance(engine._decoder_backend, MobilintNPUBackend)
         assert engine._encoder_backend.mxq_path.endswith("sam2_hiera_large_encoder.mxq")
         assert engine._decoder_backend.mxq_path.endswith("sam2_hiera_large_decoder.mxq")
         assert os.path.isfile(engine._encoder_backend.mxq_path)

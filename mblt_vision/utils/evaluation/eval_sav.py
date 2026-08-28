@@ -15,7 +15,7 @@ import math
 import random
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, Protocol
 
 import cv2
 import numpy as np
@@ -23,8 +23,43 @@ from tqdm import tqdm
 
 from ..datasets import CustomSAV
 
-if TYPE_CHECKING:
-    from ...mask_generation import SAM2HieraLarge
+
+class PromptedPrediction(Protocol):
+    """The two fields ``eval_sav`` actually reads off a ``predict()`` result.
+
+    A real ``SAM2HieraLarge.predict()`` call returns a full ``Results``, but
+    only ``masks`` and ``selected`` are used here -- narrower than ``Results``
+    so the lightweight test doubles in ``tests/test_eval_sav.py`` (structural
+    stand-ins, not real ``Results`` instances) satisfy it too.
+    """
+
+    # Read-only (never written), so declared as properties rather than plain
+    # attributes: a Protocol's plain attributes are matched invariantly, which
+    # would reject a real implementer's narrower concrete type (e.g. a mock's
+    # `selected: int` against `int | None`) even though it satisfies every
+    # actual read here.
+    @property
+    def masks(self) -> Any: ...
+    @property
+    def selected(self) -> int | None: ...
+
+
+class PointPromptedEngine(Protocol):
+    """Structural contract ``eval_sav`` needs from a mask generation engine.
+
+    ``SAM2HieraLarge`` satisfies this, but so do the lightweight test doubles
+    in ``tests/test_eval_sav.py`` (no real backend or download); the concrete
+    class is deliberately not required here.
+    """
+
+    post_cfg: dict[str, Any]
+
+    def predict(self, image: Any, points: Any, labels: Any, /) -> PromptedPrediction:
+        """Positional-only: every real caller here invokes this positionally,
+        and implementations use varying parameter names (``image`` vs.
+        ``frame``)."""
+        ...
+
 
 # Relative-mask-area bins used to balance sampling (reference dataset.py).
 AREA_BINS = ((0.0, 0.005), (0.005, 0.02), (0.02, 0.08), (0.08, 1.01))
@@ -317,7 +352,7 @@ class SAVMetricAccumulator:
 
 
 def eval_sav(
-    model: SAM2HieraLarge,
+    model: PointPromptedEngine,
     data_path: str,
     num_samples: int = 200,
     num_points: int = 1,
@@ -374,7 +409,10 @@ def eval_sav(
             candidate_ious = calculate_sav_sample_ious(
                 np.asarray(result.masks), gt_mask
             )
-            accumulator.update(candidate_ious, int(result.selected), video_id)
+            # Results.selected is Optional at the shared-class level (most tasks
+            # never set it), but SAM2HieraLarge.predict always populates it.
+            assert result.selected is not None
+            accumulator.update(candidate_ious, result.selected, video_id)
             progress.update(1)
     finally:
         progress.close()

@@ -79,13 +79,30 @@ The current ownership boundary is deliberate:
   RMSE (m) as secondary metrics. Median-align each image and average every
   metric per image, following Ultralytics' depth-validation convention.
 - `mask_generation` (`SAM2HieraLarge`) is the precedent for a promptable, multi-artifact model:
-  it loads two `MobilintNPUBackend` instances (encoder + decoder) and takes point prompts, so it
+  it loads two backend instances (encoder + decoder) and takes point prompts, so it
   bypasses `MBLT_Engine.__init__`, `build_preprocess`/`build_postprocess`, and
   `create_model_class`'s single-artifact legacy constructor entirely, implementing its own
   `preprocess`/`predict`/`predict_preprocessed` instead. Its `models/SAM2HieraLarge.yaml` is
   documentation/test-metadata only, not actually loaded. Reuse `wrapper.download_hub_artifact`
   (extracted from `MBLT_Engine._download_hub_artifact`) for any future model needing more than
   one Hub artifact, rather than duplicating Hub-resolution logic.
+- `mask_generation` supports both frameworks with `MBLT_Engine`-style semantics:
+  `framework="mxq"` (default, two `MobilintNPUBackend` MXQs from the board folder) or
+  `framework="onnx"` (two `ONNXBackend` sessions over the same-stem
+  `sam2_hiera_large_{encoder,decoder}.onnx` exports at the Hub repo root, board-agnostic).
+  Framework is inferred from explicit `encoder_onnx_path`/`decoder_onnx_path` vs
+  `encoder_mxq_path`/`decoder_mxq_path` suffixes and conflicts fail fast; NPU-only arguments are
+  ignored for ONNX. The two runtimes have different graph contracts, pinned in
+  `_sam2_contracts.py` and validated at construction: MXQ takes the six flattened positional
+  inputs (NHWC image and features), while the exported ONNX graphs are NCHW with five named
+  decoder inputs (`src_plus_pos_src` stays inside the graph) and a dynamic token axis. The
+  shared prompt-encoding host path and `classify_decoder_outputs` are framework-independent;
+  only the encoder-feed layout and decoder-feed builders differ
+  (`fpn_from_onnx`/`prepare_decoder_tensors_onnx` vs
+  `fpn_from_runtime`/`prepare_decoder_tensors`). The ONNX pipeline is numerically verified
+  against the official `facebookresearch/sam2` fp32 predictor (identical binary masks;
+  opt-in `tests/test_mask_generation_onnx.py` covers it end-to-end without NPU hardware),
+  and `eval_sav` works unchanged for both frameworks.
 - Never add the PyPI `sam2` package as a dependency of `mblt_vision` (it is an unofficial
   third-party mirror, not Meta's) and never require a manually cloned
   `facebookresearch/sam2` checkout. Host-side prompt encoding is instead a from-scratch,

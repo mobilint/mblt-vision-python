@@ -1078,16 +1078,22 @@ def _sav_ready(root: Path) -> bool:
             return False
         total_masklets += len(object_dirs)
 
-        first_mask_path: Path | None = None
+        # Paired into one variable (rather than two, set-together but separately
+        # declared) so the invariant that they are always assigned on the same
+        # branch is visible to a reader and provable by static analysis, not
+        # just true by construction (object_dirs and masks are both checked
+        # non-empty above, so the loop body always reaches this assignment on
+        # its first iteration if it does not already return False).
+        first_pair: tuple[Path, Path] | None = None
         for object_dir in object_dirs:
             masks = _files_by_stem(object_dir, {".png"}, reject_symlinks=True)
             if not masks or not set(masks) <= set(images):
                 return False
-            if first_mask_path is None:
+            if first_pair is None:
                 first_stem = sorted(masks)[0]
-                first_mask_path = masks[first_stem]
-                first_image_path = images[first_stem]
-        assert first_mask_path is not None
+                first_pair = (masks[first_stem], images[first_stem])
+        assert first_pair is not None
+        first_mask_path, first_image_path = first_pair
         try:
             with Image.open(first_image_path) as image:
                 image.load()

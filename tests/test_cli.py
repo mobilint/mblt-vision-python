@@ -104,11 +104,17 @@ def test_predict_parses_point_prompts_for_mask_generation() -> None:
             "encoder.mxq",
             "--decoder-mxq-path",
             "decoder.mxq",
+            "--encoder-onnx-path",
+            "encoder.onnx",
+            "--decoder-onnx-path",
+            "decoder.onnx",
         ]
     )
     assert args.points == [(320.0, 240.0, 1), (10.5, 20.5, 0)]
     assert args.encoder_mxq_path == "encoder.mxq"
     assert args.decoder_mxq_path == "decoder.mxq"
+    assert args.encoder_onnx_path == "encoder.onnx"
+    assert args.decoder_onnx_path == "decoder.onnx"
 
 
 @pytest.mark.parametrize("bad_point", ["320,240", "320,240,2", "x,240,1"])
@@ -169,7 +175,7 @@ def test_predict_rejects_points_for_non_mask_generation_models(
             "1 to 3 point prompts",
         ),
         (["--point", "1,1,1", "--mxq-path", "model.mxq"], "encoder-mxq-path"),
-        (["--point", "1,1,1", "--framework", "onnx"], "ONNX"),
+        (["--point", "1,1,1", "--onnx-path", "model.onnx"], "encoder-onnx-path"),
     ],
 )
 def test_mask_generation_prompt_validation_fails_before_engine_construction(
@@ -211,6 +217,10 @@ def test_val_parses_mask_generation_options() -> None:
             "encoder.mxq",
             "--decoder-mxq-path",
             "decoder.mxq",
+            "--encoder-onnx-path",
+            "encoder.onnx",
+            "--decoder-onnx-path",
+            "decoder.onnx",
         ]
     )
     assert args.num_samples == 20
@@ -218,6 +228,8 @@ def test_val_parses_mask_generation_options() -> None:
     assert args.seed == 7
     assert args.encoder_mxq_path == "encoder.mxq"
     assert args.decoder_mxq_path == "decoder.mxq"
+    assert args.encoder_onnx_path == "encoder.onnx"
+    assert args.decoder_onnx_path == "decoder.onnx"
 
 
 def test_val_defaults_match_the_reference_protocol() -> None:

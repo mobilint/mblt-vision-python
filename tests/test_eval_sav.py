@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import importlib
 import random
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -176,9 +176,22 @@ def test_accumulator_rejects_wrong_candidate_count() -> None:
 def test_eval_sav_rejects_wrong_taxonomy() -> None:
     """Refuse to score a model configured for a different dataset."""
 
-    model = SimpleNamespace(post_cfg={"task": "mask_generation", "dataset": "coco"})
+    # _PerfectModel (defined below) gives a real predict() the taxonomy check
+    # never reaches, unlike SimpleNamespace's synthesized-but-statically-invisible
+    # attributes.
+    model = _PerfectModel()
+    model.post_cfg = {"task": "mask_generation", "dataset": "coco"}
     with pytest.raises(ValueError, match="post_cfg.dataset to be 'sa-v'"):
         eval_sav(model, "/dataset")
+
+
+@dataclass
+class _MockPrediction:
+    """Structurally matches ``eval_sav``'s ``PromptedPrediction`` -- unlike
+    ``SimpleNamespace``, a dataclass's fields are visible to static typing."""
+
+    masks: np.ndarray
+    selected: int
 
 
 class _PerfectModel:
@@ -196,7 +209,7 @@ class _PerfectModel:
         gt = np.zeros((height, width), dtype=bool)
         gt[8:40, 8:40] = True
         masks = np.stack([np.zeros_like(gt), gt, np.ones_like(gt)])
-        return SimpleNamespace(masks=masks, selected=1)
+        return _MockPrediction(masks=masks, selected=1)
 
 
 def test_eval_sav_scores_a_mocked_engine_exactly(tmp_path: Path) -> None:

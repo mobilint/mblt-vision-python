@@ -47,8 +47,9 @@ choose the image destination. Use --framework onnx with --model-path or --onnx-p
 for ONNX Runtime inference; MXQ is the default framework.
 
 Mask generation models take 1-3 point prompts (--point X,Y,LABEL; LABEL 1 positive,
-0 negative) and load two MXQ artifacts, overridable with --encoder-mxq-path and
---decoder-mxq-path instead of --model-path/--mxq-path.
+0 negative) and load two artifacts: MXQ by default (overridable with
+--encoder-mxq-path/--decoder-mxq-path) or ONNX with --framework onnx (overridable
+with --encoder-onnx-path/--decoder-onnx-path) instead of --model-path/--mxq-path.
 
 Examples:
   mblt-vision predict --source image.jpg --model resnet50 --topk 3
@@ -56,6 +57,7 @@ Examples:
   mblt-vision predict --source image.jpg --model yolo11m --framework onnx
   mblt-vision predict --source image.jpg --model yolo11m-pose --target-device regulus-ra --core-mode single
   mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1
+  mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1 --framework onnx
 
 For export-style YOLO output, use --e2e false and optionally save it with --raw-output.""",
         handler=_cmd_predict,
@@ -89,6 +91,18 @@ For export-style YOLO output, use --e2e false and optionally save it with --raw-
         dest="decoder_mxq_path",
         default="",
         help="Optional local decoder MXQ path for mask generation models.",
+    )
+    parser.add_argument(
+        "--encoder-onnx-path",
+        dest="encoder_onnx_path",
+        default="",
+        help="Optional local encoder ONNX path for mask generation models.",
+    )
+    parser.add_argument(
+        "--decoder-onnx-path",
+        dest="decoder_onnx_path",
+        default="",
+        help="Optional local decoder ONNX path for mask generation models.",
     )
     parser.add_argument(
         "--prompt-weights-path",

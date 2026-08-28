@@ -256,11 +256,14 @@ class Results:
                 raise ValueError(
                     f"mask_generation output is missing key(s): {sorted(missing_keys)}."
                 )
-            self.masks = cast(TensorLike, output["masks"])
-            self.iou_predictions = cast(TensorLike, output["iou_predictions"])
-            self.low_res_masks = cast(TensorLike | None, output.get("low_res_masks"))
-            self.points = cast(TensorLike | None, output.get("points"))
-            self.point_labels = cast(TensorLike | None, output.get("point_labels"))
+            # mask_generation always hands numpy arrays here (SAM2HieraLarge's
+            # output dict), unlike the torch/numpy-either TensorLike fields
+            # above -- cast to what self.masks etc. are actually declared as.
+            self.masks = cast(np.ndarray, output["masks"])
+            self.iou_predictions = cast(np.ndarray, output["iou_predictions"])
+            self.low_res_masks = cast(np.ndarray | None, output.get("low_res_masks"))
+            self.points = cast(np.ndarray | None, output.get("points"))
+            self.point_labels = cast(np.ndarray | None, output.get("point_labels"))
             self.selected = output.get("selected")
         else:
             raise NotImplementedError(

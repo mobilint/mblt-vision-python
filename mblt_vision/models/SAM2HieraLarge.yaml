@@ -8,6 +8,9 @@ HIERA_LARGE:
     repo_id: mobilint/sam2-hiera-large
     encoder_filename: sam2_hiera_large_encoder.mxq
     decoder_filename: sam2_hiera_large_decoder.mxq
+    # ONNX artifacts derive the package-wide same-stem convention
+    # (sam2_hiera_large_{encoder,decoder}.onnx) and live at the Hub repo
+    # root (board-agnostic), unlike the board-folder MXQ artifacts above.
     target_device: aries-rb
   pre_cfg: {}
   post_cfg:

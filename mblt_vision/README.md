@@ -382,8 +382,9 @@ validation split, following Ultralytics' depth-validation convention.
 Promptable segmentation: given an image and 1-3 point prompts (positive/negative), returns 3
 candidate masks with IoU scores. Point prompts only for now -- no box prompts and no automatic
 "segment everything" mode. Unlike every other model here, `SAM2HieraLarge` downloads three
-artifacts from the Hub instead of one: an image encoder MXQ, a prompt-conditioned mask decoder
-MXQ, and a small (~16KB) bundle of host-side prompt-encoder weights. Host-side prompt encoding
+artifacts from the Hub instead of one: an image encoder, a prompt-conditioned mask decoder
+(MXQ by default, or the ONNX exports with `framework="onnx"`), and a small (~16KB) bundle of
+host-side prompt-encoder weights. Host-side prompt encoding
 is a from-scratch, dependency-free port of the official
 [`facebookresearch/sam2`](https://github.com/facebookresearch/sam2) prompt encoder and mask-decoder
 token setup (numerically verified bit-for-bit against the real implementation) -- no `sam2`
@@ -393,13 +394,14 @@ runs on the package's existing `torch` dependency. See `mblt_vision/mask_generat
 ```python
 from mblt_vision.mask_generation import SAM2HieraLarge
 
-model = SAM2HieraLarge()
+model = SAM2HieraLarge()  # framework="onnx" for ONNX Runtime inference
 result = model.predict("image.jpg", points=[[320, 240]], labels=[1])
 result.plot("image.jpg", save_path="result.jpg")
 ```
 
 ```bash
 mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1
+mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1 --framework onnx
 ```
 
 Validate with the built-in SA-V evaluation (the dataset downloads and organizes
@@ -407,7 +409,12 @@ automatically on the first run):
 
 ```bash
 mblt-vision val --model sam2-hiera-large
+mblt-vision val --model sam2-hiera-large --framework onnx
 ```
+
+Local artifact overrides follow the framework: `--encoder-mxq-path`/`--decoder-mxq-path` for
+MXQ and `--encoder-onnx-path`/`--decoder-onnx-path` for ONNX. The shared NPU options apply to
+both MXQ backends and are ignored for ONNX inference, as everywhere else in the CLI.
 
 | Model | Input Size<br>(H,W,C) | Source | Note |
 | --- | --- | --- | --- |

@@ -341,3 +341,288 @@ def test_sam2_hiera_large_is_discoverable_via_list_models() -> None:
         in mblt_vision.list_models("mask_generation")["mask_generation"]
     )
     assert mblt_vision.mask_generation.SAM2HieraLarge is SAM2HieraLarge
+
+
+class _FakeOnnxInput:
+    """Mirrors ONNX Runtime's ``NodeArg`` (name + shape with symbolic dims)."""
+
+    def __init__(self, name: str, shape: list[Any]) -> None:
+        self.name = name
+        self.shape = shape
+
+
+_ENCODER_ONNX_INPUTS = [_FakeOnnxInput("input_image", [1, 3, 1024, 1024])]
+_DECODER_ONNX_INPUTS = [
+    _FakeOnnxInput("tokens", [1, "num_tokens", 256]),
+    _FakeOnnxInput("src", [1, 256, 64, 64]),
+    _FakeOnnxInput("pos_src", [1, 256, 64, 64]),
+    _FakeOnnxInput("high_res_features_0", [1, 32, 256, 256]),
+    _FakeOnnxInput("high_res_features_1", [1, 64, 128, 128]),
+]
+
+
+class _FakeONNXBackend:
+    """Mirrors ``mblt_npu.ONNXBackend``'s minimal interface (dict-fed sessions)."""
+
+    instances: list["_FakeONNXBackend"] = []
+
+    def __init__(
+        self, model_path: str, *, providers: Any = None, ort_module: Any = None
+    ) -> None:
+        self.model_path = model_path
+        self.providers = providers
+        self.ort_module = ort_module
+        self.created = False
+        self.disposed = False
+        self.calls: list[dict[str, tuple[int, ...]]] = []
+        _FakeONNXBackend.instances.append(self)
+
+    @property
+    def _is_encoder(self) -> bool:
+        return self.model_path.endswith("encoder.onnx")
+
+    def create(self) -> None:
+        self.created = True
+
+    def get_inputs(self) -> list[_FakeOnnxInput]:
+        return _ENCODER_ONNX_INPUTS if self._is_encoder else _DECODER_ONNX_INPUTS
+
+    def __call__(self, feed: dict[str, np.ndarray]) -> list[np.ndarray]:
+        self.calls.append({name: np.asarray(x).shape for name, x in feed.items()})
+        if self._is_encoder:
+            # Batched NCHW FPN levels, exactly as the exported graph declares.
+            return [
+                np.zeros((1, 32, 256, 256), dtype=np.float32),
+                np.zeros((1, 64, 128, 128), dtype=np.float32),
+                np.zeros((1, 256, 64, 64), dtype=np.float32),
+            ]
+        return [
+            np.zeros((1, 3, 256, 256), dtype=np.float32),
+            np.arange(3, dtype=np.float32).reshape(1, 3),
+            np.ones((1, 3, 256), dtype=np.float32),
+            np.array([[0.5]], dtype=np.float32),
+        ]
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+class _DriftedDecoderONNXBackend(_FakeONNXBackend):
+    """Reports decoder input names that do not match the exported-graph contract."""
+
+    def get_inputs(self) -> list[_FakeOnnxInput]:
+        if self._is_encoder:
+            return _ENCODER_ONNX_INPUTS
+        return [_FakeOnnxInput("renamed_tokens", [1, "num_tokens", 256])]
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_onnx_backend_instances() -> None:
+    _FakeONNXBackend.instances.clear()
+
+
+def _make_onnx_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    backend_cls: type[_FakeONNXBackend] = _FakeONNXBackend,
+) -> tuple[Path, Path]:
+    encoder_path = tmp_path / "encoder.onnx"
+    decoder_path = tmp_path / "decoder.onnx"
+    encoder_path.write_bytes(b"onnx")
+    decoder_path.write_bytes(b"onnx")
+    weights_path = tmp_path / "prompt_weights.pt"
+    torch.save(_fake_prompt_weights(), weights_path)
+    monkeypatch.setattr(sam2_module, "ONNXBackend", backend_cls)
+    # A structurally-complete stand-in module: _resolve_onnx_providers only
+    # reads it when an explicit provider list is requested.
+    monkeypatch.setattr(sam2_module, "_load_onnxruntime", lambda: object())
+    monkeypatch.setattr(
+        sam2_module, "download_hub_artifact", lambda **kwargs: str(weights_path)
+    )
+    return encoder_path, decoder_path
+
+
+def test_sam2_onnx_framework_is_inferred_from_paths_and_disposes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Explicit .onnx paths select ONNX inference without an explicit framework."""
+
+    encoder_path, decoder_path = _make_onnx_engine(monkeypatch, tmp_path)
+
+    engine = SAM2HieraLarge(
+        encoder_onnx_path=str(encoder_path), decoder_onnx_path=str(decoder_path)
+    )
+    try:
+        assert engine.framework == "onnx"
+        assert len(_FakeONNXBackend.instances) == 2
+        encoder_backend, decoder_backend = _FakeONNXBackend.instances
+        assert encoder_backend.model_path == str(encoder_path)
+        assert decoder_backend.model_path == str(decoder_path)
+        assert encoder_backend.created and decoder_backend.created
+        assert encoder_backend.providers == ["CPUExecutionProvider"]
+    finally:
+        engine.close()
+
+    assert all(instance.disposed for instance in _FakeONNXBackend.instances)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        (
+            {"framework": "mxq", "encoder_onnx_path": "encoder.onnx"},
+            "conflicts with explicit encoder_onnx_path",
+        ),
+        (
+            {"framework": "onnx", "encoder_mxq_path": "encoder.mxq"},
+            "conflicts with explicit encoder_mxq_path",
+        ),
+        (
+            {
+                "encoder_mxq_path": "encoder.mxq",
+                "decoder_onnx_path": "decoder.onnx",
+            },
+            "without an explicit framework",
+        ),
+        ({"framework": "tflite"}, "must be 'mxq' or 'onnx'"),
+        ({"encoder_onnx_path": "encoder.mxq"}, "must end in '.onnx'"),
+        ({"decoder_mxq_path": "decoder.onnx"}, "must end in '.mxq'"),
+    ],
+)
+def test_sam2_framework_and_path_conflicts_fail_fast(
+    kwargs: dict[str, Any], match: str
+) -> None:
+    """Suffix and framework conflicts fail before any download or backend load."""
+
+    with pytest.raises(ValueError, match=match):
+        SAM2HieraLarge(**kwargs)
+
+
+def test_sam2_onnx_predict_preprocessed_uses_the_exported_graph_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """NHWC preprocess output is transposed to NCHW and fed by graph input name."""
+
+    encoder_path, decoder_path = _make_onnx_engine(monkeypatch, tmp_path)
+
+    with SAM2HieraLarge(
+        encoder_onnx_path=str(encoder_path), decoder_onnx_path=str(decoder_path)
+    ) as engine:
+        result = engine.predict_preprocessed(
+            np.zeros((1, 1024, 1024, 3), dtype=np.float32),
+            original_hw=(480, 640),
+            points=[[100.0, 200.0]],
+            labels=[1],
+        )
+        encoder_backend, decoder_backend = _FakeONNXBackend.instances
+        assert encoder_backend.calls == [{"input_image": (1, 3, 1024, 1024)}]
+        (decoder_call,) = decoder_backend.calls
+        assert decoder_call == {
+            "tokens": (1, 8, 256),  # 6 output tokens + 1 point + 1 pad
+            "src": (1, 256, 64, 64),
+            "pos_src": (1, 256, 64, 64),
+            "high_res_features_0": (1, 32, 256, 256),
+            "high_res_features_1": (1, 64, 128, 128),
+        }
+        assert result.task == "mask_generation"
+        assert result.masks is not None
+        assert result.masks.shape == (3, 480, 640)
+        assert result.masks.dtype == np.bool_
+        # The fake decoder's iou_pred is arange(3): argmax selection is index 2.
+        assert result.selected == 2
+
+
+def test_sam2_onnx_rejects_session_interface_drift_and_disposes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A re-exported decoder with different graph inputs must fail at construction."""
+
+    encoder_path, decoder_path = _make_onnx_engine(
+        monkeypatch, tmp_path, _DriftedDecoderONNXBackend
+    )
+
+    with pytest.raises(ValueError, match="decoder ONNX input names mismatch"):
+        SAM2HieraLarge(
+            encoder_onnx_path=str(encoder_path), decoder_onnx_path=str(decoder_path)
+        )
+
+    # The encoder session was fully constructed before the decoder validation
+    # failed; the constructor's except-clause must dispose it rather than leak it.
+    assert len(_FakeONNXBackend.instances) == 2
+    assert _FakeONNXBackend.instances[0].disposed
+
+
+def test_sam2_onnx_missing_onnxruntime_raises_before_any_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The optional-dependency error surfaces before any session is created."""
+
+    _make_onnx_engine(monkeypatch, tmp_path)
+
+    def _raise() -> Any:
+        raise ImportError("onnxruntime is not installed")
+
+    monkeypatch.setattr(sam2_module, "_load_onnxruntime", _raise)
+    with pytest.raises(ImportError, match="onnxruntime is not installed"):
+        SAM2HieraLarge(framework="onnx")
+    assert _FakeONNXBackend.instances == []
+
+
+def test_fpn_from_onnx_orders_levels_by_channel_and_rejects_other_layouts() -> None:
+    """Batched NCHW outputs are ordered 32/64/256 regardless of runtime order."""
+
+    from mblt_vision.mask_generation._sam2_host import fpn_from_onnx
+
+    outputs = [
+        np.zeros((1, 256, 64, 64), dtype=np.float32),
+        np.zeros((1, 32, 256, 256), dtype=np.float32),
+        np.zeros((1, 64, 128, 128), dtype=np.float32),
+    ]
+    levels = fpn_from_onnx(outputs, torch.device("cpu"))
+    assert [tuple(level.shape) for level in levels] == [
+        (1, 32, 256, 256),
+        (1, 64, 128, 128),
+        (1, 256, 64, 64),
+    ]
+
+    with pytest.raises(ValueError, match="Duplicate encoder output"):
+        fpn_from_onnx([outputs[0], outputs[0], outputs[1]], torch.device("cpu"))
+    # The MXQ runtime's batchless NHWC layout must be rejected, not guessed at.
+    with pytest.raises(ValueError, match="Unexpected encoder ONNX output shape"):
+        fpn_from_onnx([np.zeros((256, 256, 32), dtype=np.float32)], torch.device("cpu"))
+
+
+@pytest.mark.parametrize(("num_points", "num_tokens"), [(1, 8), (2, 9), (3, 10)])
+def test_prepare_decoder_tensors_onnx_builds_the_five_named_inputs(
+    num_points: int, num_tokens: int
+) -> None:
+    """The ONNX decoder feed keeps the traced pre-flattening shapes."""
+
+    from mblt_vision.mask_generation._sam2_contracts import DECODER_ONNX_INPUT_NAMES
+    from mblt_vision.mask_generation._sam2_host import (
+        build_backbone_features,
+        prepare_decoder_tensors_onnx,
+    )
+
+    weights = _fake_prompt_weights()
+    features = build_backbone_features(
+        weights,
+        [
+            torch.zeros(1, 32, 256, 256),
+            torch.zeros(1, 64, 128, 128),
+            torch.zeros(1, 256, 64, 64),
+        ],
+    )
+    points = np.arange(num_points * 2, dtype=np.float32).reshape(num_points, 2)
+    labels = np.ones(num_points, dtype=np.int64)
+    tensors = prepare_decoder_tensors_onnx(
+        weights, features, points, labels, (480, 640)
+    )
+
+    assert tuple(tensors) == DECODER_ONNX_INPUT_NAMES
+    assert tensors["tokens"].shape == (1, num_tokens, 256)
+    assert tensors["src"].shape == (1, 256, 64, 64)
+    assert tensors["pos_src"].shape == (1, 256, 64, 64)
+    assert tensors["high_res_features_0"].shape == (1, 32, 256, 256)
+    assert tensors["high_res_features_1"].shape == (1, 64, 128, 128)
+    assert all(array.dtype == np.float32 for array in tensors.values())

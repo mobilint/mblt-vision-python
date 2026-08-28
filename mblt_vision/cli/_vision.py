@@ -307,9 +307,10 @@ def create_vision_engine(args: argparse.Namespace) -> Any:
 def create_mask_generation_engine(args: argparse.Namespace) -> Any:
     """Creates a promptable mask generation engine from shared CLI model options.
 
-    Mask generation models load two MXQ artifacts (encoder + decoder); the
-    shared NPU options (`--dev-no`, `--core-mode`, `--target-cores`,
-    `--target-clusters`) apply to both backends.
+    Mask generation models load two artifacts (encoder + decoder): MXQ by
+    default, or ONNX with `--framework onnx`. The shared NPU options
+    (`--dev-no`, `--core-mode`, `--target-cores`, `--target-clusters`) apply
+    to both MXQ backends and are ignored for ONNX inference.
     """
 
     try:
@@ -339,6 +340,9 @@ def create_mask_generation_engine(args: argparse.Namespace) -> Any:
         encoder_target_clusters=args.target_clusters,
         decoder_target_clusters=args.target_clusters,
         target_device=args.target_device,
+        framework=args.framework,
+        encoder_onnx_path=getattr(args, "encoder_onnx_path", None) or None,
+        decoder_onnx_path=getattr(args, "decoder_onnx_path", None) or None,
     )
 
 
@@ -355,13 +359,12 @@ def run_mask_generation_inference(
             "Mask generation requires 1 to 3 point prompts; pass `--point X,Y,LABEL` "
             "(LABEL 1 positive, 0 negative) up to three times."
         )
-    if args.framework == "onnx" or args.onnx_path:
-        raise SystemExit("Mask generation models do not support ONNX inference.")
-    if args.model_path or args.mxq_path:
+    if args.model_path or args.mxq_path or args.onnx_path:
         raise SystemExit(
-            "Mask generation models load two MXQ artifacts; use "
-            "`--encoder-mxq-path` and `--decoder-mxq-path` instead of "
-            "`--model-path`/`--mxq-path`."
+            "Mask generation models load two artifacts; use "
+            "`--encoder-mxq-path`/`--decoder-mxq-path` (or "
+            "`--encoder-onnx-path`/`--decoder-onnx-path` with `--framework onnx`) "
+            "instead of `--model-path`/`--mxq-path`/`--onnx-path`."
         )
 
     points = [[x, y] for x, y, _ in point_prompts]

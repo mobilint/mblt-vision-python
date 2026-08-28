@@ -631,6 +631,18 @@ def add_val_parser(
         help="Optional local decoder MXQ path for mask generation models.",
     )
     parser.add_argument(
+        "--encoder-onnx-path",
+        dest="encoder_onnx_path",
+        default="",
+        help="Optional local encoder ONNX path for mask generation models.",
+    )
+    parser.add_argument(
+        "--decoder-onnx-path",
+        dest="decoder_onnx_path",
+        default="",
+        help="Optional local decoder ONNX path for mask generation models.",
+    )
+    parser.add_argument(
         "--prompt-weights-path",
         dest="prompt_weights_path",
         default="",

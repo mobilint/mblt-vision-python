@@ -1,7 +1,8 @@
 """Host-side SAM2 glue: feature-map bookkeeping, prompt encoding, and mask resizing.
 
-Only the two heavy backbone/mask-decoder networks run on the NPU (via
-``MobilintNPUBackend``, see ``sam2.py``). Everything here runs on the host with
+Only the two heavy backbone/mask-decoder networks run on a backend -- the NPU
+via ``MobilintNPUBackend`` or ONNX Runtime via ``ONNXBackend`` (see
+``sam2.py``). Everything here runs on the host with
 plain ``torch`` and the tiny prompt-encoder weights in ``_sam2_prompt.py`` --
 no dependency on the ``sam2`` package, no ``torchvision``, no manually cloned
 repository, and no ~900MB full checkpoint download. Ported from the validated
@@ -12,13 +13,27 @@ maps, weights) instead of mutating a live ``SAM2ImagePredictor``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, TypedDict
 
 import numpy as np
 import torch
 import torch.nn.functional as functional
 
 from . import _sam2_prompt as prompt
+
+
+class BackboneFeatures(TypedDict):
+    """``build_backbone_features``'s two differently-shaped outputs.
+
+    ``image_embed`` is a single deepest-level feature tensor; ``high_res_feats``
+    is the list of shallower skip-connection tensors -- a plain
+    ``dict[str, list[Tensor]]`` cannot express that the two keys hold different
+    types.
+    """
+
+    image_embed: torch.Tensor
+    high_res_feats: list[torch.Tensor]
+
 
 _FPN_CHANNELS = (32, 64, 256)
 
@@ -113,9 +128,47 @@ def fpn_from_runtime(
     return [features[32], features[64], features[256]]
 
 
+def fpn_from_onnx(
+    outputs: Sequence[np.ndarray], device: torch.device
+) -> list[torch.Tensor]:
+    """Convert the three batched-NCHW encoder-ONNX outputs into ordered FPN levels.
+
+    Returns ``[feat_32ch, feat_64ch, feat_256ch]`` like :func:`fpn_from_runtime`.
+    The exported graph declares batched NCHW outputs, so the channel axis is
+    fixed at axis 1 -- unlike the MXQ runtime path, a square spatial size can
+    never be mistaken for a channel count, and any other layout is rejected.
+    """
+
+    features: dict[int, torch.Tensor] = {}
+    shapes = [tuple(np.asarray(output).shape) for output in outputs]
+    for output in outputs:
+        array = np.asarray(output, dtype=np.float32)
+        if (
+            array.ndim != 4
+            or array.shape[0] != 1
+            or array.shape[1] not in _FPN_CHANNELS
+        ):
+            raise ValueError(
+                f"Unexpected encoder ONNX output shape {array.shape}; expected "
+                f"(1, C, H, W) with C in {_FPN_CHANNELS}. Got shapes {shapes}."
+            )
+        channel = int(array.shape[1])
+        if channel in features:
+            raise ValueError(f"Duplicate encoder output with {channel} channels.")
+        features[channel] = torch.from_numpy(np.ascontiguousarray(array)).to(device)
+
+    missing = [channel for channel in _FPN_CHANNELS if channel not in features]
+    if missing:
+        raise ValueError(
+            f"Encoder ONNX outputs are missing FPN channel count(s) {missing}; "
+            f"got shapes {shapes}."
+        )
+    return [features[32], features[64], features[256]]
+
+
 def build_backbone_features(
     weights: dict[str, torch.Tensor], feature_maps: Sequence[torch.Tensor]
-) -> dict[str, list[torch.Tensor]]:
+) -> BackboneFeatures:
     """Ported from SAM2's ``_prepare_backbone_features`` for a single image
     (no video memory: ``directly_add_no_mem_embed`` is always applied)."""
 
@@ -131,18 +184,36 @@ def build_backbone_features(
     return {"image_embed": features[-1], "high_res_feats": features[:-1]}
 
 
-def prepare_decoder_tensors(
+def _as_float32_arrays(tensors: dict[str, torch.Tensor]) -> dict[str, np.ndarray]:
+    """Convert named torch tensors into contiguous float32 numpy arrays."""
+
+    return {
+        name: np.ascontiguousarray(
+            value.detach().float().cpu().numpy(), dtype=np.float32
+        )
+        for name, value in tensors.items()
+    }
+
+
+def _decoder_prompt_tensors(
     weights: dict[str, torch.Tensor],
-    features: dict[str, list[torch.Tensor]],
+    features: BackboneFeatures,
     points: np.ndarray,
     labels: np.ndarray,
     original_hw: Sequence[int],
-) -> dict[str, np.ndarray]:
-    """Run only the host prompt encoder and build the six compiled decoder inputs."""
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[torch.Tensor]]:
+    """Run the host prompt encoder shared by the MXQ and ONNX decoder feeds.
+
+    Returns ``(tokens, src, pos_src, high_res)`` in the pre-flattening shapes
+    the mask decoder was traced with: ``tokens (1, N+7, 256)``,
+    ``src``/``pos_src`` NCHW ``(1, 256, 64, 64)``, and the two NCHW
+    high-resolution feature maps.
+    """
 
     points_tensor = torch.as_tensor(points, dtype=torch.float32)[None, ...]
     labels_tensor = torch.as_tensor(labels, dtype=torch.int64)[None, ...]
-    unnorm_coords = prompt.transform_points(points_tensor, tuple(original_hw))
+    height, width = original_hw
+    unnorm_coords = prompt.transform_points(points_tensor, (int(height), int(width)))
 
     sparse = prompt.embed_points(weights, unnorm_coords, labels_tensor)
     dense = prompt.dense_embeddings_for_no_mask(weights, batch_size=sparse.size(0))
@@ -154,6 +225,21 @@ def prepare_decoder_tensors(
         image_embeddings=image_embeddings.float(),
         dense_prompt_embeddings=dense.float(),
         sparse_prompt_embeddings=sparse.float(),
+    )
+    return tokens, src, pos_src, high_res
+
+
+def prepare_decoder_tensors(
+    weights: dict[str, torch.Tensor],
+    features: BackboneFeatures,
+    points: np.ndarray,
+    labels: np.ndarray,
+    original_hw: Sequence[int],
+) -> dict[str, np.ndarray]:
+    """Run only the host prompt encoder and build the six compiled decoder inputs."""
+
+    tokens, src, pos_src, high_res = _decoder_prompt_tensors(
+        weights, features, points, labels, original_hw
     )
 
     def sequence(value: torch.Tensor) -> torch.Tensor:
@@ -174,12 +260,35 @@ def prepare_decoder_tensors(
         "pos_src": pos_sequence,
         "src_plus_pos_src": src_sequence + pos_sequence,
     }
-    return {
-        name: np.ascontiguousarray(
-            value.detach().float().cpu().numpy(), dtype=np.float32
-        )
-        for name, value in tensors.items()
-    }
+    return _as_float32_arrays(tensors)
+
+
+def prepare_decoder_tensors_onnx(
+    weights: dict[str, torch.Tensor],
+    features: BackboneFeatures,
+    points: np.ndarray,
+    labels: np.ndarray,
+    original_hw: Sequence[int],
+) -> dict[str, np.ndarray]:
+    """Run the host prompt encoder and build the five named ONNX decoder inputs.
+
+    The exported decoder consumes the pre-flattening NCHW tensors the graph was
+    traced with; ``src + pos_src`` stays inside the graph, unlike the compiled
+    MXQ artifact's flattened six-input runtime signature.
+    """
+
+    tokens, src, pos_src, high_res = _decoder_prompt_tensors(
+        weights, features, points, labels, original_hw
+    )
+    return _as_float32_arrays(
+        {
+            "tokens": tokens.contiguous(),
+            "src": src.contiguous(),
+            "pos_src": pos_src.contiguous(),
+            "high_res_features_0": high_res[0].contiguous(),
+            "high_res_features_1": high_res[1].contiguous(),
+        }
+    )
 
 
 def postprocess_masks(

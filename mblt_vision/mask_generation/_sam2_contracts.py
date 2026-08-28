@@ -1,15 +1,22 @@
-"""Fixed contracts between the compiled SAM2 decoder MXQ artifact and its host glue.
+"""Fixed contracts between the SAM2 encoder/decoder artifacts and their host glue.
 
-Ported from the validated ``sam2-mxq-pipeline`` reference (real Aries2 SA-V-200
-accuracy: FP32 mIoU 0.7750 vs MXQ mIoU 0.7757, mask agreement 0.983). Compile
-and calibration are out of scope for this phase, so the decoder's compiled
-runtime input order is a single validated default rather than a configurable
-MBLT-input-name binding map.
+MXQ side: ported from the validated ``sam2-mxq-pipeline`` reference (real Aries2
+SA-V-200 accuracy: FP32 mIoU 0.7750 vs MXQ mIoU 0.7757, mask agreement 0.983).
+Compile and calibration are out of scope for this phase, so the decoder's
+compiled runtime input order is a single validated default rather than a
+configurable MBLT-input-name binding map.
+
+ONNX side: the graph interface written by the SDK tutorial's
+``sam2_export_onnx.py`` (``Sam2ImageEncoderWrapper``/``Sam2MaskDecoderWrapper``
+traces, verified numerically against the official ``facebookresearch/sam2``
+predictor). Unlike the compiled MXQ artifacts, the ONNX graphs are NCHW, keep
+the pre-flattening decoder tensor shapes, and take five named decoder inputs --
+``src_plus_pos_src`` stays inside the graph instead of being a sixth input.
 """
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -24,6 +31,19 @@ DECODER_RUNTIME_ORDER: tuple[str, ...] = (
     "pos_src",
     "tokens",
 )
+
+# Exported ONNX graph interface. ``-1`` marks the prompt-count-dependent
+# dynamic token axis (``6 output tokens + N points + 1 pad``).
+ENCODER_ONNX_INPUT_NAME = "input_image"
+ENCODER_ONNX_INPUT_SHAPE: tuple[int, ...] = (1, 3, 1024, 1024)
+DECODER_ONNX_INPUT_SHAPES: dict[str, tuple[int, ...]] = {
+    "tokens": (1, -1, 256),
+    "src": (1, 256, 64, 64),
+    "pos_src": (1, 256, 64, 64),
+    "high_res_features_0": (1, 32, 256, 256),
+    "high_res_features_1": (1, 64, 128, 128),
+}
+DECODER_ONNX_INPUT_NAMES: tuple[str, ...] = tuple(DECODER_ONNX_INPUT_SHAPES)
 
 MASK_SIDE = 256
 MASK_AREA = MASK_SIDE * MASK_SIDE
@@ -70,6 +90,41 @@ def validate_runtime_shapes(
         ):
             raise ValueError(
                 f"{label} input {index} shape mismatch: feed={got}, runtime={shape}."
+            )
+
+
+def normalize_onnx_dims(shape: Sequence[Any]) -> tuple[int, ...]:
+    """Map ONNX Runtime dims to ints, with symbolic/dynamic dims as ``-1``."""
+
+    return tuple(int(dim) if isinstance(dim, int) else -1 for dim in shape)
+
+
+def validate_onnx_session_inputs(
+    session_inputs: Sequence[Any], expected: Mapping[str, Sequence[int]], label: str
+) -> None:
+    """Fail loudly at construction time if a resolved ONNX artifact's graph drifts.
+
+    ``session_inputs`` is ONNX Runtime input metadata (``session.get_inputs()``).
+    ``-1`` in ``expected`` marks the dynamic token axis; an expected static
+    dimension must be declared statically by the graph as well.
+    """
+
+    actual = {item.name: normalize_onnx_dims(item.shape) for item in session_inputs}
+    if set(actual) != set(expected):
+        raise ValueError(
+            f"{label} ONNX input names mismatch: graph={sorted(actual)}, "
+            f"expected={sorted(expected)}."
+        )
+    for name, shape in expected.items():
+        want = tuple(int(dim) for dim in shape)
+        got = actual[name]
+        if len(got) != len(want) or any(
+            expected_dim != -1 and actual_dim != expected_dim
+            for actual_dim, expected_dim in zip(got, want)
+        ):
+            raise ValueError(
+                f"{label} ONNX input '{name}' shape mismatch: graph={got}, "
+                f"expected={want}."
             )
 
 
