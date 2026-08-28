@@ -33,6 +33,12 @@ ADE20K_VALIDATION_SAMPLE_COUNT = 2000
 CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
 SAV_VALIDATION_VIDEO_COUNT = 155
 SAV_VALIDATION_MASKLET_COUNT = 293
+# Total per-object annotated masks across every masklet, measured from the
+# organized sha256-pinned official `sav_val.tar` (see `datasets/sa-v.yaml` and
+# `PINNED_ARCHIVE_SHA256`). Masklet and video counts alone accept a truncated
+# source that keeps every masklet but only a few of its annotated frames,
+# which would silently change the evaluation corpus; this pins the inventory.
+SAV_VALIDATION_MASK_COUNT = 31967
 ADE20K_METADATA_FILES = ("objectInfo150.txt", "sceneCategories.txt")
 IMAGENET_CLASS_PATTERN = re.compile(r"n\d{8}")
 IMAGENET_IMAGE_PATTERN = re.compile(r"ILSVRC2012_val_\d{8}")
@@ -1059,6 +1065,7 @@ def _sav_ready(root: Path) -> bool:
             return False
 
     total_masklets = 0
+    total_masks = 0
     for video_id in video_ids:
         images = _files_by_stem(image_root / video_id, {".jpg"}, reject_symlinks=True)
         if not images:
@@ -1089,6 +1096,7 @@ def _sav_ready(root: Path) -> bool:
             masks = _files_by_stem(object_dir, {".png"}, reject_symlinks=True)
             if not masks or not set(masks) <= set(images):
                 return False
+            total_masks += len(masks)
             if first_pair is None:
                 first_stem = sorted(masks)[0]
                 first_pair = (masks[first_stem], images[first_stem])
@@ -1102,10 +1110,20 @@ def _sav_ready(root: Path) -> bool:
                 mask = np.asarray(mask_image)
         except OSError:
             return False
-        if mask.ndim != 2 or mask.shape != image_shape or len(np.unique(mask)) > 2:
+        # Counting unique values alone would accept a two-valued mask such as
+        # {1, 2}, which CustomSAV's `> 0` binarization turns entirely into
+        # foreground; require every non-zero value to be a single object ID.
+        if (
+            mask.ndim != 2
+            or mask.shape != image_shape
+            or len(set(np.unique(mask).tolist()) - {0}) > 1
+        ):
             return False
 
-    return total_masklets == SAV_VALIDATION_MASKLET_COUNT
+    return (
+        total_masklets == SAV_VALIDATION_MASKLET_COUNT
+        and total_masks == SAV_VALIDATION_MASK_COUNT
+    )
 
 
 def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) -> bool:

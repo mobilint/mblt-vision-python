@@ -40,7 +40,8 @@ pip install "mblt-vision-python[onnxruntime-gpu]"
 
 ## Quick start
 
-Each model includes its matching preprocess and postprocess behavior:
+Most models include matching `preprocess`/`postprocess` behavior around a raw
+call (mask generation is the exception -- see below):
 
 ```python
 from mblt_vision import ResNet50
@@ -70,6 +71,20 @@ code should use the task subpackages (for example,
 
 `obb` is the canonical oriented-bounding-box task name.
 
+Mask generation is promptable, so `SAM2HieraLarge` takes point prompts and
+returns candidate masks from a single `predict()` call instead of the separate
+`preprocess`/raw-call/`postprocess` steps above:
+
+```python
+from mblt_vision.mask_generation import SAM2HieraLarge
+
+model = SAM2HieraLarge()  # framework="onnx" for ONNX Runtime inference
+result = model.predict("image.jpg", points=[[320, 240]], labels=[1])
+```
+
+See the [mask generation section](mblt_vision/README.md#mask-generation) for the
+prompt contract, the two-artifact layout, and SA-V validation.
+
 ## Model Zoo migration
 
 Vision is now maintained in this package. `mblt-model-zoo` retains
@@ -87,17 +102,24 @@ mblt-vision predict --source image.jpg --model resnet50
 ```
 
 `predict` is the single inference command for classification, depth estimation,
-object and face detection, instance and semantic segmentation, OBB, and pose
-estimation. The selected model determines its task and processing pipeline.
+object and face detection, instance and semantic segmentation, OBB, pose
+estimation, and point-prompted mask generation. The selected model determines
+its task and processing pipeline.
 By default it downloads the model artifact and saves a plotted result under
 `runs/vision/predict/`. Use `--output` to choose the result-image path,
 `--topk` for classification labels, and `--conf-thres`/`--iou-thres` for
 detection-style tasks. `--framework onnx` selects ONNX Runtime inference;
 `--target-device` and `--core-mode` select the MXQ board/runtime mode.
 
+Mask generation models require 1-3 point prompts (`--point X,Y,LABEL`, where
+LABEL is 1 for positive and 0 for negative) and load two artifacts, overridden
+with `--encoder-mxq-path`/`--decoder-mxq-path` (or the `--encoder-onnx-path`/
+`--decoder-onnx-path` pair) rather than `--model-path`/`--mxq-path`/`--onnx-path`.
+
 ```bash
 mblt-vision predict --source image.jpg --model yolo11m --conf-thres 0.4 --output result.jpg
 mblt-vision predict --source image.jpg --model yolo11m-pose --target-device regulus-ra --core-mode single
+mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1
 ```
 
 The corresponding `mblt-model-zoo` commands use the same standalone handlers for

@@ -42,16 +42,24 @@ description: >-
   and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
   framework-independent; only fpn_from_onnx/prepare_decoder_tensors_onnx vs
   fpn_from_runtime/prepare_decoder_tensors differ. eval_sav works unchanged for both.
+  Load the optional runtime before downloading artifacts; dispose a backend that fails after
+  create() inside its builder (the caller assigns it only on success); validate point labels as
+  exactly 1/0; build host prompt tensors on the weights' device so device="cuda" works; and
+  reject single-artifact path options in every CLI command that builds the engine, not just
+  predict.
 - Never depend on the PyPI `sam2` package (unofficial third-party mirror) or a manually cloned
   facebookresearch/sam2 checkout. mask_generation's host-side prompt encoding is a from-scratch
   port verified bit-for-bit against the real predictor, backed by a small Hub-hosted weights
   bundle, not package data.
 - mask_generation validates on SA-V val via datasets/sa-v.yaml, auto-downloaded from the
   Mobilint Hub mirror datasets/mobilint/sa-v (unmodified official sav_val.tar; CC BY 4.0 by
-  Meta AI -- keep the mirror attribution and the pinned sha256). Registering a new dataset
-  requires readiness (`_*_ready` + `dataset_ready` map) before the organizer, since staged
-  validation calls `dataset_ready`; also register the organizer in the
-  test_dataset_organizer.py parametrize lists.
+  Meta AI -- keep the mirror attribution and the pinned sha256). Readiness pins all three
+  inventory counts (155 videos / 293 masklets / 31967 masks); video and masklet totals alone
+  accept a truncated source. Both the organizer and readiness require every non-zero mask value
+  to be one object ID, since `{1, 2}` survives a unique-value count but `> 0` binarization makes
+  it all foreground. Registering a new dataset requires readiness (`_*_ready` + `dataset_ready`
+  map) before the organizer, since staged validation calls `dataset_ready`; also register the
+  organizer in the test_dataset_organizer.py parametrize lists.
 
 ## Processing and Results
 

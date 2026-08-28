@@ -1504,7 +1504,10 @@ def _validate_staged_sav_masks(staged_root: Path) -> None:
             raise ValueError(
                 f"Staged SA-V mask is unreadable: {mask_path}: {exc}."
             ) from exc
-        if mask.ndim != 2 or len(np.unique(mask)) > 2:
+        # Counting unique values alone would accept a two-valued mask such as
+        # {1, 2}, which CustomSAV's `> 0` binarization turns entirely into
+        # foreground; require every non-zero value to be a single object ID.
+        if mask.ndim != 2 or len(set(np.unique(mask).tolist()) - {0}) > 1:
             raise ValueError(
                 f"Staged SA-V mask must be a single-object binary map: {mask_path}."
             )

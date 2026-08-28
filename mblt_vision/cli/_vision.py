@@ -304,6 +304,26 @@ def create_vision_engine(args: argparse.Namespace) -> Any:
     )
 
 
+def reject_single_artifact_paths(args: argparse.Namespace) -> None:
+    """Rejects single-artifact model paths for two-artifact mask generation models.
+
+    Raises:
+        SystemExit: If `--model-path`, `--mxq-path`, or `--onnx-path` is set.
+    """
+
+    if (
+        getattr(args, "model_path", "")
+        or getattr(args, "mxq_path", "")
+        or getattr(args, "onnx_path", "")
+    ):
+        raise SystemExit(
+            "Mask generation models load two artifacts; use "
+            "`--encoder-mxq-path`/`--decoder-mxq-path` (or "
+            "`--encoder-onnx-path`/`--decoder-onnx-path` with `--framework onnx`) "
+            "instead of `--model-path`/`--mxq-path`/`--onnx-path`."
+        )
+
+
 def create_mask_generation_engine(args: argparse.Namespace) -> Any:
     """Creates a promptable mask generation engine from shared CLI model options.
 
@@ -311,7 +331,14 @@ def create_mask_generation_engine(args: argparse.Namespace) -> Any:
     default, or ONNX with `--framework onnx`. The shared NPU options
     (`--dev-no`, `--core-mode`, `--target-cores`, `--target-clusters`) apply
     to both MXQ backends and are ignored for ONNX inference.
+
+    The single-artifact path options are rejected here rather than in one
+    command's handler, so every command that builds a mask generation engine
+    fails loudly instead of silently evaluating the downloaded default in
+    place of an explicitly requested local artifact.
     """
+
+    reject_single_artifact_paths(args)
 
     try:
         import mblt_vision.mask_generation as mask_generation_module
@@ -359,13 +386,7 @@ def run_mask_generation_inference(
             "Mask generation requires 1 to 3 point prompts; pass `--point X,Y,LABEL` "
             "(LABEL 1 positive, 0 negative) up to three times."
         )
-    if args.model_path or args.mxq_path or args.onnx_path:
-        raise SystemExit(
-            "Mask generation models load two artifacts; use "
-            "`--encoder-mxq-path`/`--decoder-mxq-path` (or "
-            "`--encoder-onnx-path`/`--decoder-onnx-path` with `--framework onnx`) "
-            "instead of `--model-path`/`--mxq-path`/`--onnx-path`."
-        )
+    reject_single_artifact_paths(args)
 
     points = [[x, y] for x, y, _ in point_prompts]
     labels = [label for _, _, label in point_prompts]

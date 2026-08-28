@@ -102,7 +102,14 @@ The current ownership boundary is deliberate:
   `fpn_from_runtime`/`prepare_decoder_tensors`). The ONNX pipeline is numerically verified
   against the official `facebookresearch/sam2` fp32 predictor (identical binary masks;
   opt-in `tests/test_mask_generation_onnx.py` covers it end-to-end without NPU hardware),
-  and `eval_sav` works unchanged for both frameworks.
+  and `eval_sav` works unchanged for both frameworks. Resolve the optional runtime before
+  downloading any artifact, so a missing `onnxruntime` reports the package extra rather than a
+  network failure. Build each backend so it disposes itself when `launch()`/graph validation
+  fails after `create()`: the caller only assigns it on success, so the constructor's cleanup
+  cannot otherwise reach it. Point prompts are validated as 1-3 points with labels of exactly
+  `1`/`0` before any backend call, and host prompt tensors are built on the weights' device so
+  `device="cuda"` works. Mask generation models reject `--model-path`/`--mxq-path`/`--onnx-path`
+  in every CLI command that builds one, never only in `predict`.
 - Never add the PyPI `sam2` package as a dependency of `mblt_vision` (it is an unofficial
   third-party mirror, not Meta's) and never require a manually cloned
   `facebookresearch/sam2` checkout. Host-side prompt encoding is instead a from-scratch,
@@ -116,12 +123,17 @@ The current ownership boundary is deliberate:
   skips without a real `sam2` install). No added dependency: the input resize/normalize step
   is plain `torch` (`F.interpolate` bilinear with `antialias=True` reproduces torchvision's
   tensor `Resize` bit-for-bit), so mask_generation runs on the package's existing dependencies.
-- `mask_generation` evaluates on the SA-V validation split (155 videos, 293 masklets; JPEG
-  frames + per-object binary PNG masks, binarized as `> 0`). The registry entry
-  `datasets/sa-v.yaml` downloads the unmodified official `sav_val.tar` from the Mobilint Hub
+- `mask_generation` evaluates on the SA-V validation split (155 videos, 293 masklets, 31967
+  annotated masks; JPEG frames + per-object binary PNG masks, binarized as `> 0`). The registry
+  entry `datasets/sa-v.yaml` downloads the unmodified official `sav_val.tar` from the Mobilint Hub
   mirror `datasets/mobilint/sa-v` (SA-V is CC BY 4.0 by Meta AI; keep the mirror README's
   attribution intact and pin the archive sha256 in the YAML and `PINNED_ARCHIVE_SHA256`). The
-  organizer keeps only annotated frames. The evaluation protocol (`eval_sav`) is ported from the
+  organizer keeps only annotated frames. Readiness pins all three counts
+  (`SAV_VALIDATION_MASK_COUNT` alongside the video/masklet counts), since video and masklet totals
+  alone accept a source truncated to a few annotated frames per masklet and would silently
+  evaluate a different corpus. Both the organizer's staged-mask check and the readiness check
+  require every non-zero mask value to be one object ID: counting unique values alone accepts a
+  `{1, 2}` mask that `> 0` binarization turns entirely into foreground. The evaluation protocol (`eval_sav`) is ported from the
   validated `sam2-mxq-pipeline` reference: seed-deterministic area-balanced sampling, synthetic
   point prompts from the GT mask (distance-transform peak, dilated-mask negatives), and
   own-selection mean IoU as the primary metric with best-of-3 secondary. Numbers measured on

@@ -292,6 +292,40 @@ def test_predict_preprocessed_rejects_out_of_range_point_counts(
         engine.close()
 
 
+def test_predict_preprocessed_rejects_unsupported_point_labels(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Only 1 (positive) and 0 (negative) carry a learned embedding.
+
+    Any other value would receive neither and silently produce a plausible but
+    semantically meaningless mask, so reject it before any backend call.
+    """
+
+    encoder_path, decoder_path = _make_engine(monkeypatch, tmp_path)
+    engine = SAM2HieraLarge(
+        encoder_mxq_path=str(encoder_path), decoder_mxq_path=str(decoder_path)
+    )
+    try:
+        encoder_input = np.zeros((1024, 1024, 3), dtype=np.float32)
+        with pytest.raises(ValueError, match=r"must be 1 \(positive\) or 0"):
+            engine.predict_preprocessed(
+                encoder_input, (100, 100), points=[[10.0, 10.0]], labels=[2]
+            )
+        with pytest.raises(ValueError, match=r"must be 1 \(positive\) or 0"):
+            engine.predict_preprocessed(
+                encoder_input,
+                (100, 100),
+                points=[[10.0, 10.0], [20.0, 20.0]],
+                labels=[1, -1],
+            )
+        with pytest.raises(ValueError, match=r"labels shaped \(N,\)"):
+            engine.predict_preprocessed(
+                encoder_input, (100, 100), points=[[10.0, 10.0]], labels=[[1]]
+            )
+    finally:
+        engine.close()
+
+
 def test_predict_preprocessed_rejects_encoder_artifact_shape_drift(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -550,22 +584,39 @@ def test_sam2_onnx_rejects_session_interface_drift_and_disposes(
     # failed; the constructor's except-clause must dispose it rather than leak it.
     assert len(_FakeONNXBackend.instances) == 2
     assert _FakeONNXBackend.instances[0].disposed
+    # The decoder session is created before validation rejects it, and is never
+    # assigned to the engine -- so only _build_onnx_backend itself can dispose
+    # it. Without that, the constructor's cleanup cannot reach it and it leaks.
+    assert _FakeONNXBackend.instances[1].disposed
 
 
 def test_sam2_onnx_missing_onnxruntime_raises_before_any_backend(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The optional-dependency error surfaces before any session is created."""
+    """The optional-dependency error surfaces before any session or download.
+
+    In an offline environment a Hub fetch attempted first would surface a
+    network/cache failure instead of the documented package-extra install
+    error -- and the download would have been useless anyway.
+    """
 
     _make_onnx_engine(monkeypatch, tmp_path)
 
     def _raise() -> Any:
         raise ImportError("onnxruntime is not installed")
 
+    downloads: list[str] = []
+
+    def _record_download(**kwargs: Any) -> str:
+        downloads.append(str(kwargs.get("filename")))
+        raise AssertionError("no artifact may be downloaded before onnxruntime loads")
+
     monkeypatch.setattr(sam2_module, "_load_onnxruntime", _raise)
+    monkeypatch.setattr(sam2_module, "download_hub_artifact", _record_download)
     with pytest.raises(ImportError, match="onnxruntime is not installed"):
         SAM2HieraLarge(framework="onnx")
     assert _FakeONNXBackend.instances == []
+    assert downloads == []
 
 
 def test_fpn_from_onnx_orders_levels_by_channel_and_rejects_other_layouts() -> None:

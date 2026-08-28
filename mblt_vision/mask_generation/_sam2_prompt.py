@@ -118,8 +118,15 @@ def embed_points(
     """
 
     points = points + 0.5  # shift to center of pixel
-    padding_point = torch.zeros((points.shape[0], 1, 2), dtype=points.dtype)
-    padding_label = -torch.ones((labels.shape[0], 1), dtype=labels.dtype)
+    # Built on the incoming tensors' own device (not the implicit CPU default),
+    # so the concatenation below still works when the engine was constructed
+    # with device="cuda". Numerically identical to the upstream port.
+    padding_point = torch.zeros(
+        (points.shape[0], 1, 2), dtype=points.dtype, device=points.device
+    )
+    padding_label = -torch.ones(
+        (labels.shape[0], 1), dtype=labels.dtype, device=labels.device
+    )
     points = torch.cat([points, padding_point], dim=1)
     labels = torch.cat([labels, padding_label], dim=1)
 

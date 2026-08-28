@@ -199,6 +199,30 @@ def test_mask_generation_prompt_validation_fails_before_engine_construction(
         run_vision_inference(args, command="predict")
 
 
+@pytest.mark.parametrize(
+    ("path_arg", "match"),
+    [
+        (["--model-path", "model.mxq"], "encoder-mxq-path"),
+        (["--mxq-path", "model.mxq"], "encoder-mxq-path"),
+        (["--onnx-path", "model.onnx"], "encoder-onnx-path"),
+    ],
+)
+def test_val_rejects_single_artifact_paths_for_mask_generation(
+    path_arg: list[str], match: str
+) -> None:
+    """Refuse to silently evaluate the downloaded default instead of the request.
+
+    Validation accepting and ignoring a single-artifact path would invalidate
+    experiment results, so it must fail the same way prediction does.
+    """
+
+    from mblt_vision.cli._vision import create_mask_generation_engine
+
+    args = build_parser().parse_args(["val", "--model", "sam2-hiera-large", *path_arg])
+    with pytest.raises(SystemExit, match=match):
+        create_mask_generation_engine(args)
+
+
 def test_val_parses_mask_generation_options() -> None:
     """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
 

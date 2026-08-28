@@ -210,8 +210,15 @@ def _decoder_prompt_tensors(
     high-resolution feature maps.
     """
 
-    points_tensor = torch.as_tensor(points, dtype=torch.float32)[None, ...]
-    labels_tensor = torch.as_tensor(labels, dtype=torch.int64)[None, ...]
+    # Prompts arrive as host numpy arrays, so place them on the same device the
+    # weights live on: the prompt encoder combines them with the Gaussian
+    # position-encoding matrix and the learned embeddings, which torch requires
+    # to share a device once the engine was constructed with (or moved to) CUDA.
+    device = weights["positional_encoding_gaussian_matrix"].device
+    points_tensor = torch.as_tensor(points, dtype=torch.float32, device=device)[
+        None, ...
+    ]
+    labels_tensor = torch.as_tensor(labels, dtype=torch.int64, device=device)[None, ...]
     height, width = original_hw
     unnorm_coords = prompt.transform_points(points_tensor, (int(height), int(width)))
 

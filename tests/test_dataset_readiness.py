@@ -1038,6 +1038,8 @@ def sav_counts(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(readiness, "SAV_VALIDATION_VIDEO_COUNT", 1)
     monkeypatch.setattr(readiness, "SAV_VALIDATION_MASKLET_COUNT", 1)
+    # _write_sav_layout writes two annotated frames for its single masklet.
+    monkeypatch.setattr(readiness, "SAV_VALIDATION_MASK_COUNT", 2)
 
 
 def test_sav_ready_accepts_complete_layout(sav_counts: None, tmp_path: Path) -> None:
@@ -1064,6 +1066,33 @@ def test_sav_ready_rejects_masklet_count_mismatch(
 
     _write_sav_layout(tmp_path)
     monkeypatch.setattr(readiness, "SAV_VALIDATION_MASKLET_COUNT", 2)
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_truncated_annotated_frames(
+    sav_counts: None, tmp_path: Path
+) -> None:
+    """Reject a source keeping every masklet but only some annotated frames.
+
+    Video and masklet counts alone cannot see this truncation, which would
+    silently evaluate a different corpus than the pinned official split.
+    """
+
+    _write_sav_layout(tmp_path)
+    (tmp_path / "annotations" / "sav_000001" / "000" / "00004.png").unlink()
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_two_valued_mask_without_background(
+    sav_counts: None, tmp_path: Path
+) -> None:
+    """Reject a {1, 2} mask that `> 0` binarization would make all-foreground."""
+
+    _write_sav_layout(tmp_path)
+    mask_path = tmp_path / "annotations" / "sav_000001" / "000" / "00000.png"
+    corrupted = np.full((12, 16), 1, dtype=np.uint8)
+    corrupted[3:9, 4:12] = 2
+    Image.fromarray(corrupted).save(mask_path)
     assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
 
 

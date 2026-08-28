@@ -170,6 +170,12 @@ class SAM2HieraLarge(MBLT_Engine):
         resolved_revision = revision or "main"
 
         try:
+            # Resolve the optional runtime before any download: a missing
+            # onnxruntime must surface as the documented package-extra install
+            # error rather than as a network/cache failure from an artifact
+            # fetch that would have been useless anyway.
+            ort = _load_onnxruntime() if self.framework == "onnx" else None
+
             resolved_prompt_weights_path = prompt_weights_path or download_hub_artifact(
                 repo_id=_REPO_ID,
                 filename=_PROMPT_WEIGHTS_FILENAME,
@@ -177,7 +183,6 @@ class SAM2HieraLarge(MBLT_Engine):
             )
 
             if self.framework == "onnx":
-                ort = _load_onnxruntime()
                 providers = _resolve_onnx_providers(ort, onnx_providers)
                 resolved_encoder_path = encoder_onnx_path or download_hub_artifact(
                     repo_id=_REPO_ID,
@@ -298,8 +303,15 @@ class SAM2HieraLarge(MBLT_Engine):
             else None,
             target_device=target_device,
         )
-        backend.create()
-        backend.launch()
+        # Dispose here rather than leaving it to the constructor's cleanup: the
+        # caller only assigns the return value to self._*_backend on success, so
+        # a backend that fails after create() is unreachable from close().
+        try:
+            backend.create()
+            backend.launch()
+        except Exception:
+            backend.dispose()
+            raise
         return backend
 
     @staticmethod
@@ -322,8 +334,15 @@ class SAM2HieraLarge(MBLT_Engine):
         backend = ONNXBackend(
             onnx_path, providers=list(providers), ort_module=ort_module
         )
-        backend.create()
-        validate_onnx_session_inputs(backend.get_inputs(), expected_inputs, label)
+        # Dispose here rather than leaving it to the constructor's cleanup: the
+        # caller only assigns the return value to self._*_backend on success, so
+        # a session that fails validation is unreachable from close().
+        try:
+            backend.create()
+            validate_onnx_session_inputs(backend.get_inputs(), expected_inputs, label)
+        except Exception:
+            backend.dispose()
+            raise
         return backend
 
     def preprocess(self, x: Any, **kwargs: Any) -> np.ndarray:
@@ -383,8 +402,19 @@ class SAM2HieraLarge(MBLT_Engine):
             )
         if not (1 <= len(points_array) <= 3):
             raise ValueError(f"Expected 1 to 3 point prompts, got {len(points_array)}.")
+        if labels_array.ndim != 1:
+            raise ValueError(f"Expected labels shaped (N,), got {labels_array.shape}.")
         if len(labels_array) != len(points_array):
             raise ValueError("points and labels must have the same length.")
+        # Any other value silently receives neither the positive nor the
+        # negative learned embedding in embed_points, which would return a
+        # plausible but semantically meaningless mask instead of an error.
+        invalid_labels = sorted(set(labels_array.tolist()) - {0, 1})
+        if invalid_labels:
+            raise ValueError(
+                "Point labels must be 1 (positive) or 0 (negative), got "
+                f"{invalid_labels}."
+            )
 
         weights = self._require_weights()
         if self.framework == "onnx":

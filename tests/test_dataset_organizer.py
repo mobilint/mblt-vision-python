@@ -1708,6 +1708,8 @@ def test_organize_sav_keeps_only_annotated_frames(
 
     monkeypatch.setattr(readiness_module, "SAV_VALIDATION_VIDEO_COUNT", 1)
     monkeypatch.setattr(readiness_module, "SAV_VALIDATION_MASKLET_COUNT", 1)
+    # _write_sav_fixture_tree annotates 2 of its 5 frames for the one masklet.
+    monkeypatch.setattr(readiness_module, "SAV_VALIDATION_MASK_COUNT", 2)
     source_root = tmp_path / "source" / "sav_val"
     source_root.mkdir(parents=True)
     _write_sav_fixture_tree(source_root)
@@ -1738,6 +1740,8 @@ def test_construct_sav_rejects_missing_annotated_frame(
 
     monkeypatch.setattr(readiness_module, "SAV_VALIDATION_VIDEO_COUNT", 1)
     monkeypatch.setattr(readiness_module, "SAV_VALIDATION_MASKLET_COUNT", 1)
+    # _write_sav_fixture_tree annotates 2 of its 5 frames for the one masklet.
+    monkeypatch.setattr(readiness_module, "SAV_VALIDATION_MASK_COUNT", 2)
     source_root = tmp_path / "sav_val"
     source_root.mkdir(parents=True)
     _write_sav_fixture_tree(source_root)
