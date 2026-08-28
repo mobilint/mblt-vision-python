@@ -187,7 +187,12 @@ The current ownership boundary is deliberate:
   contents, package metadata, install-from-wheel, import, and a minimal API smoke test. Do not
   upload from a developer environment as the only validation.
 - Keep optional dependencies genuinely optional and avoid importing them from package top level.
-  Do not add model weights, caches, test assets, or compiled build artifacts to source control.
+  Do not add model weights, caches, or compiled build artifacts to source control. The one
+  deliberate exception is `assets/`: a small fixed set of sample images kept in git as inputs for
+  manual QA and the documented CLI examples. They are development-only and must never reach a
+  distributed artifact -- only `mblt_vision*` packages are built, and `MANIFEST.in` prunes
+  `assets` to pin that intent. Do not grow this directory for new one-off inputs, and do not
+  reintroduce downloaded datasets, weights, or generated outputs under it.
 
 ## Compatibility Migration and Tests
 

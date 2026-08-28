@@ -59,6 +59,19 @@ def test_classify_decoder_outputs_identifies_by_shape_not_position() -> None:
         assert np.array_equal(classified["iou"], iou)
 
 
+def test_classify_decoder_outputs_rejects_wrong_candidate_count() -> None:
+    """A stale/differently exported decoder must not reach the caller.
+
+    Two or four masks with consistently sized iou/token outputs would otherwise
+    classify cleanly and return a Results.masks shape violating the documented
+    fixed three-candidate contract.
+    """
+
+    for num_masks in (2, 4):
+        with pytest.raises(ValueError, match="3 decoder mask candidates"):
+            classify_decoder_outputs(_decoder_output_set(num_masks))
+
+
 def test_classify_decoder_outputs_rejects_ambiguous_mask_candidates() -> None:
     """Two same-sized mask-shaped outputs cannot be told apart -- fail loudly."""
 
@@ -322,6 +335,39 @@ def test_predict_preprocessed_rejects_unsupported_point_labels(
             engine.predict_preprocessed(
                 encoder_input, (100, 100), points=[[10.0, 10.0]], labels=[[1]]
             )
+        # Casting to int64 first would truncate these into valid 0/1 labels.
+        for truncating in ([0.5], [1.9], [-0.1]):
+            with pytest.raises(ValueError, match="must be whole numbers"):
+                engine.predict_preprocessed(
+                    encoder_input, (100, 100), points=[[10.0, 10.0]], labels=truncating
+                )
+        with pytest.raises(ValueError, match="labels must be finite"):
+            engine.predict_preprocessed(
+                encoder_input,
+                (100, 100),
+                points=[[10.0, 10.0]],
+                labels=[float("nan")],
+            )
+    finally:
+        engine.close()
+
+
+def test_predict_preprocessed_rejects_non_finite_point_coordinates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """NaN/Inf coordinates would contaminate tokens, masks, and IoU scores."""
+
+    encoder_path, decoder_path = _make_engine(monkeypatch, tmp_path)
+    engine = SAM2HieraLarge(
+        encoder_mxq_path=str(encoder_path), decoder_mxq_path=str(decoder_path)
+    )
+    try:
+        encoder_input = np.zeros((1024, 1024, 3), dtype=np.float32)
+        for bad in ([[float("nan"), 10.0]], [[10.0, float("inf")]]):
+            with pytest.raises(ValueError, match="coordinates must be finite"):
+                engine.predict_preprocessed(
+                    encoder_input, (100, 100), points=bad, labels=[1]
+                )
     finally:
         engine.close()
 

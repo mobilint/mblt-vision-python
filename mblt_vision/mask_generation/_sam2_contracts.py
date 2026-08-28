@@ -47,6 +47,10 @@ DECODER_ONNX_INPUT_NAMES: tuple[str, ...] = tuple(DECODER_ONNX_INPUT_SHAPES)
 
 MASK_SIDE = 256
 MASK_AREA = MASK_SIDE * MASK_SIDE
+# SAM2's multimask output (4 mask tokens minus the single-mask token), baked
+# into both compiled artifacts. `eval_sav.CANDIDATES_PER_PROMPT` is the same
+# fixed contract seen from the evaluation side.
+MASK_CANDIDATE_COUNT = 3
 
 
 def strip_runtime_batch(value: np.ndarray) -> np.ndarray:
@@ -154,6 +158,16 @@ def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndar
         )
     masks = mask_matches[0].reshape(-1, MASK_SIDE, MASK_SIDE)
     num_masks = masks.shape[0]
+    # The compiled artifacts bake in SAM2's multimask slice, so a stale or
+    # differently exported decoder emitting 2 or 4 masks (with consistently
+    # sized iou/token outputs) would otherwise be accepted here and reach the
+    # caller as a Results.masks shape that violates the documented fixed
+    # three-candidate contract. Mirrors eval_sav.CANDIDATES_PER_PROMPT.
+    if num_masks != MASK_CANDIDATE_COUNT:
+        raise ValueError(
+            f"Expected exactly {MASK_CANDIDATE_COUNT} decoder mask candidates, "
+            f"got {num_masks} (mask output shape {mask_matches[0].shape})."
+        )
 
     def unique(label: str, size: int) -> np.ndarray:
         matches = [

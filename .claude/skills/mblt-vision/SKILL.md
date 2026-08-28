@@ -87,7 +87,8 @@ description: >-
   compilation metadata must resolve only from the selected board folder, never a core-mode path or
   a fallback board folder.
 - Include model and dataset YAML files as package data. Build a wheel and inspect it after
-  changing metadata or assets.
+  changing metadata or assets. `assets/` holds development-only sample images: tracked in git by
+  deliberate exception, pruned from distribution via MANIFEST.in, never grown for one-off inputs.
 - Do not require native bindings, GStreamer, hardware, downloaded models, or caches for normal
   imports and unit tests.
 

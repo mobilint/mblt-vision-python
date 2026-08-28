@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
@@ -66,6 +67,10 @@ def parse_point(value: str) -> tuple[float, float, int]:
         raise argparse.ArgumentTypeError(
             "expected numeric X,Y coordinates and an integer LABEL"
         ) from exc
+    # `float()` accepts "nan"/"inf", which would otherwise reach Fourier prompt
+    # encoding and contaminate the resulting tokens, masks, and IoU scores.
+    if not (math.isfinite(x) and math.isfinite(y)):
+        raise argparse.ArgumentTypeError("expected finite X,Y coordinates")
     if label not in (0, 1):
         raise argparse.ArgumentTypeError(
             "point LABEL must be 1 (positive) or 0 (negative)"

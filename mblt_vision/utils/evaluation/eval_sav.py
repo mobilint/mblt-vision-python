@@ -410,8 +410,16 @@ def eval_sav(
                 np.asarray(result.masks), gt_mask
             )
             # Results.selected is Optional at the shared-class level (most tasks
-            # never set it), but SAM2HieraLarge.predict always populates it.
-            assert result.selected is not None
+            # never set it), but a mask generation engine must populate it. Raise
+            # rather than assert: this is a public evaluator documented to report
+            # prediction-contract violations as ValueError, and an assert would
+            # vanish under `python -O` and resurface as an opaque comparison
+            # TypeError inside accumulator.update().
+            if result.selected is None:
+                raise ValueError(
+                    "Mask generation prediction is missing a selected mask index; "
+                    "predict() must report which candidate it chose."
+                )
             accumulator.update(candidate_ious, result.selected, video_id)
             progress.update(1)
     finally:

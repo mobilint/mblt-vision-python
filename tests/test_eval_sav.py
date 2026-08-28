@@ -191,7 +191,7 @@ class _MockPrediction:
     ``SimpleNamespace``, a dataclass's fields are visible to static typing."""
 
     masks: np.ndarray
-    selected: int
+    selected: int | None
 
 
 class _PerfectModel:
@@ -224,6 +224,25 @@ def test_eval_sav_scores_a_mocked_engine_exactly(tmp_path: Path) -> None:
     assert result.miou_best_of_3 == pytest.approx(1.0)
     assert result.num_samples == 4
     assert model.calls == 4
+
+
+def test_eval_sav_rejects_prediction_without_selected_index(tmp_path: Path) -> None:
+    """Report a missing selection as ValueError, not a bare assert.
+
+    The PromptedPrediction protocol permits `selected=None`, and an assert
+    would vanish under `python -O` and resurface as an opaque comparison
+    TypeError inside the accumulator.
+    """
+
+    _write_sav_root(tmp_path, videos=3, frames_per_video=4)
+
+    class _NoSelectionModel(_PerfectModel):
+        def predict(self, frame, points, labels):
+            prediction = super().predict(frame, points, labels)
+            return _MockPrediction(masks=prediction.masks, selected=None)
+
+    with pytest.raises(ValueError, match="missing a selected mask index"):
+        eval_sav(_NoSelectionModel(), str(tmp_path), num_samples=1, per_video=2)
 
 
 def test_eval_sav_raises_when_samples_run_out(tmp_path: Path) -> None:

@@ -1100,7 +1100,12 @@ def _sav_ready(root: Path) -> bool:
             if first_pair is None:
                 first_stem = sorted(masks)[0]
                 first_pair = (masks[first_stem], images[first_stem])
-        assert first_pair is not None
+        # Return rather than assert: object_dirs is non-empty above so this is
+        # unreachable, but an assert vanishes under `python -O` and would then
+        # raise TypeError unpacking None out of a function documented to answer
+        # with False.
+        if first_pair is None:
+            return False
         first_mask_path, first_image_path = first_pair
         try:
             with Image.open(first_image_path) as image:

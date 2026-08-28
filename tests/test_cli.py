@@ -117,7 +117,12 @@ def test_predict_parses_point_prompts_for_mask_generation() -> None:
     assert args.decoder_onnx_path == "decoder.onnx"
 
 
-@pytest.mark.parametrize("bad_point", ["320,240", "320,240,2", "x,240,1"])
+@pytest.mark.parametrize(
+    "bad_point",
+    # nan/inf parse fine as floats, so they must be rejected explicitly:
+    # they would otherwise contaminate Fourier prompt encoding downstream.
+    ["320,240", "320,240,2", "x,240,1", "nan,240,1", "320,inf,1", "-inf,240,0"],
+)
 def test_predict_rejects_malformed_point_prompts(bad_point: str) -> None:
     """Fail argument parsing on malformed or out-of-range point prompts."""
 

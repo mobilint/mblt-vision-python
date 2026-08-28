@@ -395,17 +395,40 @@ class SAM2HieraLarge(MBLT_Engine):
 
         self._ensure_open()
         points_array = np.asarray(points, dtype=np.float32)
-        labels_array = np.asarray(labels, dtype=np.int64)
+        # Read labels without an integer cast first: casting to int64 truncates,
+        # so 0.5/1.9/-0.1 would silently become valid 0/1 labels and pass the
+        # exact-label check below.
+        raw_labels = np.asarray(labels)
         if points_array.ndim != 2 or points_array.shape[1] != 2:
             raise ValueError(
                 f"Expected points shaped (N, 2), got {points_array.shape}."
             )
         if not (1 <= len(points_array) <= 3):
             raise ValueError(f"Expected 1 to 3 point prompts, got {len(points_array)}.")
-        if labels_array.ndim != 1:
-            raise ValueError(f"Expected labels shaped (N,), got {labels_array.shape}.")
-        if len(labels_array) != len(points_array):
+        # float32 preserves NaN/Inf, so this catches them before Fourier prompt
+        # encoding turns them into contaminated tokens, masks, and IoU scores.
+        if not bool(np.isfinite(points_array).all()):
+            raise ValueError(
+                f"Point coordinates must be finite, got {points_array.tolist()}."
+            )
+        if raw_labels.ndim != 1:
+            raise ValueError(f"Expected labels shaped (N,), got {raw_labels.shape}.")
+        if len(raw_labels) != len(points_array):
             raise ValueError("points and labels must have the same length.")
+        if not np.issubdtype(raw_labels.dtype, np.integer):
+            if not np.issubdtype(raw_labels.dtype, np.floating):
+                raise ValueError(
+                    f"Point labels must be integers, got dtype {raw_labels.dtype}."
+                )
+            if not bool(np.isfinite(raw_labels).all()):
+                raise ValueError(
+                    f"Point labels must be finite, got {raw_labels.tolist()}."
+                )
+            if not bool((raw_labels == np.floor(raw_labels)).all()):
+                raise ValueError(
+                    f"Point labels must be whole numbers, got {raw_labels.tolist()}."
+                )
+        labels_array = raw_labels.astype(np.int64)
         # Any other value silently receives neither the positive nor the
         # negative learned embedding in embed_points, which would return a
         # plausible but semantically meaningless mask instead of an error.

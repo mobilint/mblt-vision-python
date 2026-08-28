@@ -1,0 +1,6 @@
+# Sample images under assets/ are development-only inputs for manual QA and
+# documented CLI examples. They are deliberately tracked in git but must never
+# reach a distributed artifact. setuptools already excludes them (only
+# `mblt_vision*` packages are built), so this prunes them explicitly to pin the
+# intent against future packaging changes rather than to fix a current leak.
+prune assets
