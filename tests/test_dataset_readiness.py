@@ -1015,7 +1015,9 @@ def test_dense_readiness_rejects_symlinked_root_ancestors(
     )
 
 
-def _write_sav_layout(root: Path, *, video_id: str = "sav_000001") -> None:
+def _write_sav_layout(
+    root: Path, *, video_id: str = "sav_000001", mask_mode: str = "L"
+) -> None:
     """Create a minimal organized SA-V validation layout with one masklet."""
 
     (root / "video_ids.txt").parent.mkdir(parents=True, exist_ok=True)
@@ -1025,8 +1027,8 @@ def _write_sav_layout(root: Path, *, video_id: str = "sav_000001") -> None:
     image_dir.mkdir(parents=True)
     object_dir.mkdir(parents=True)
     frame = Image.new("RGB", (16, 12))
-    mask = Image.new("L", (16, 12), color=0)
-    mask.paste(255, (4, 3, 12, 9))
+    mask = Image.new(mask_mode, (16, 12), color=0)
+    mask.paste(255 if mask_mode == "L" else 1, (4, 3, 12, 9))
     for stem in ("00000", "00004"):
         frame.save(image_dir / f"{stem}.jpg")
         mask.save(object_dir / f"{stem}.png")
@@ -1080,6 +1082,53 @@ def test_sav_ready_rejects_truncated_annotated_frames(
 
     _write_sav_layout(tmp_path)
     (tmp_path / "annotations" / "sav_000001" / "000" / "00004.png").unlink()
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_validates_every_mask_not_only_the_first(
+    sav_counts: None, tmp_path: Path
+) -> None:
+    """A later mask must be checked too, not just the first pair per video.
+
+    A cache whose first mask is valid but whose second is {1, 2} would
+    otherwise pass and be turned entirely to foreground by CustomSAV's `> 0`.
+    """
+
+    _write_sav_layout(tmp_path)
+    later_mask = tmp_path / "annotations" / "sav_000001" / "000" / "00004.png"
+    corrupted = np.full((12, 16), 1, dtype=np.uint8)
+    corrupted[3:9, 4:12] = 2
+    Image.fromarray(corrupted).save(later_mask)
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_later_mask_with_wrong_geometry(
+    sav_counts: None, tmp_path: Path
+) -> None:
+    """Geometry is compared per mask against that mask's own frame."""
+
+    _write_sav_layout(tmp_path)
+    later_mask = tmp_path / "annotations" / "sav_000001" / "000" / "00004.png"
+    Image.new("L", (8, 6), color=0).save(later_mask)
+    assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_accepts_bilevel_masks(sav_counts: None, tmp_path: Path) -> None:
+    """The official split is 1-bit bilevel, where the format itself rules out
+    a non-zero background, so those masks validate from the header."""
+
+    _write_sav_layout(tmp_path, mask_mode="1")
+    assert readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
+
+
+def test_sav_ready_rejects_bilevel_mask_with_wrong_geometry(
+    sav_counts: None, tmp_path: Path
+) -> None:
+    """The header path still enforces geometry, not only the value constraint."""
+
+    _write_sav_layout(tmp_path, mask_mode="1")
+    later_mask = tmp_path / "annotations" / "sav_000001" / "000" / "00004.png"
+    Image.new("1", (8, 6), color=0).save(later_mask)
     assert not readiness.dataset_ready(tmp_path, "mask_generation", "sa-v")
 
 

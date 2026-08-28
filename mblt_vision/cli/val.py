@@ -57,12 +57,21 @@ def _candidate_search_roots(data_path: str) -> list[Path]:
 
 
 def _find_existing_source(data_path: str, candidate_names: list[str]) -> str | None:
-    """Finds a nearby raw archive or extracted dataset directory."""
+    """Finds a nearby raw archive or extracted dataset directory.
 
+    Never returns the organized output directory itself. Several datasets use a
+    cache directory whose name also appears in their source-candidate list (for
+    example `sa-v` and `nyu-depth`), so `data_path.parent / name` can resolve
+    back to `data_path`. Handing that to an organizer as a raw source makes
+    source resolution fail on the incomplete cache instead of downloading the
+    default archive and repairing it.
+    """
+
+    organized_root = Path(data_path).expanduser().resolve()
     for root in _candidate_search_roots(data_path):
         for name in candidate_names:
             candidate = root / name
-            if candidate.exists():
+            if candidate.exists() and candidate.resolve() != organized_root:
                 return str(candidate)
     return None
 

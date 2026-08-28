@@ -1732,6 +1732,35 @@ def test_organize_sav_keeps_only_annotated_frames(
     assert readiness_module.dataset_ready(output_dir, "mask_generation", "sa-v")
 
 
+@pytest.mark.parametrize(
+    "malicious_id", ["../../escape", "sav_000001/../../escape", "/abs/escape"]
+)
+def test_construct_sav_rejects_traversal_video_ids(
+    tmp_path: Path, malicious_id: str
+) -> None:
+    """Reject ids that would resolve outside staging, before any file is written.
+
+    `sav_val.txt` is file content rather than a directory listing, so an entry
+    like `../../escape` could otherwise copy attacker-controlled PNGs into the
+    output parent before organization failed.
+    """
+
+    source_root = tmp_path / "source" / "sav_val"
+    source_root.mkdir(parents=True)
+    _write_sav_fixture_tree(source_root)
+    (source_root / "sav_val.txt").write_text(f"{malicious_id}\n", encoding="utf-8")
+    escaped = source_root / "JPEGImages_24fps" / malicious_id
+    output_dir = tmp_path / "organized"
+    before = sorted(p.name for p in tmp_path.iterdir())
+
+    with pytest.raises(ValueError, match="unsupported video ids|escapes the staging"):
+        organizer.construct_sav(str(source_root), str(output_dir))
+
+    del escaped
+    # Nothing was written outside the intended output directory.
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+
+
 def test_construct_sav_rejects_missing_annotated_frame(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

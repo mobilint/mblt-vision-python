@@ -106,9 +106,12 @@ The current ownership boundary is deliberate:
   downloading any artifact, so a missing `onnxruntime` reports the package extra rather than a
   network failure. Build each backend so it disposes itself when `launch()`/graph validation
   fails after `create()`: the caller only assigns it on success, so the constructor's cleanup
-  cannot otherwise reach it. Point prompts are validated as 1-3 points with labels of exactly
-  `1`/`0` before any backend call, and host prompt tensors are built on the weights' device so
-  `device="cuda"` works. Mask generation models reject `--model-path`/`--mxq-path`/`--onnx-path`
+  cannot otherwise reach it. Point prompts are validated as 1-3 points with finite
+  coordinates and labels of exactly `1`/`0` (checked before the integer cast, which would
+  otherwise truncate `0.5` into a valid label) before any backend call, and host prompt tensors
+  are built on the weights' device so `device="cuda"` works. `classify_decoder_outputs` requires
+  exactly three mask candidates and rejects non-finite decoder outputs, so a NaN cannot reach
+  `argmax` over the IoU scores or the `> 0` mask threshold. Mask generation models reject `--model-path`/`--mxq-path`/`--onnx-path`
   in every CLI command that builds one, never only in `predict`.
 - Never add the PyPI `sam2` package as a dependency of `mblt_vision` (it is an unofficial
   third-party mirror, not Meta's) and never require a manually cloned
@@ -133,7 +136,16 @@ The current ownership boundary is deliberate:
   alone accept a source truncated to a few annotated frames per masklet and would silently
   evaluate a different corpus. Both the organizer's staged-mask check and the readiness check
   require every non-zero mask value to be one object ID: counting unique values alone accepts a
-  `{1, 2}` mask that `> 0` binarization turns entirely into foreground. The evaluation protocol (`eval_sav`) is ported from the
+  `{1, 2}` mask that `> 0` binarization turns entirely into foreground. Readiness checks geometry
+  and values for *every* cached mask, not the first per video. The official split is 1-bit
+  bilevel, a format that cannot encode a non-zero background, so those masks are validated from
+  the header and only non-bilevel masks are decoded -- complete validation at header cost
+  (~3s for 31967 masks; decoding them all would be ~380s on every `val`).
+- SA-V video ids come from `sav_val.txt` file contents rather than a directory listing, so
+  `construct_sav` must reject ids failing `SAV_VIDEO_ID_PATTERN` and must confirm every staged
+  path resolves inside the staging tree, both *before* any `makedirs`/`copy`. COCO applies the
+  equivalent guard to its JSON-declared file names; organizers that build paths only from
+  directory listings do not need it. The evaluation protocol (`eval_sav`) is ported from the
   validated `sam2-mxq-pipeline` reference: seed-deterministic area-balanced sampling, synthetic
   point prompts from the GT mask (distance-transform peak, dilated-mask negatives), and
   own-selection mean IoU as the primary metric with best-of-3 secondary. Numbers measured on

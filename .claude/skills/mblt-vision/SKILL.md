@@ -57,7 +57,9 @@ description: >-
   inventory counts (155 videos / 293 masklets / 31967 masks); video and masklet totals alone
   accept a truncated source. Both the organizer and readiness require every non-zero mask value
   to be one object ID, since `{1, 2}` survives a unique-value count but `> 0` binarization makes
-  it all foreground. Registering a new dataset requires readiness (`_*_ready` + `dataset_ready`
+  it all foreground. Readiness validates every mask (not just the first per video); bilevel masks
+  are validated from the header, since a 1-bit PNG cannot hold a non-zero background. Reject
+  `sav_val.txt` ids that fail SAV_VIDEO_ID_PATTERN or escape staging, before any write. Registering a new dataset requires readiness (`_*_ready` + `dataset_ready`
   map) before the organizer, since staged validation calls `dataset_ready`; also register the
   organizer in the test_dataset_organizer.py parametrize lists.
 

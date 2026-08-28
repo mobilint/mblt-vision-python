@@ -72,6 +72,22 @@ def test_classify_decoder_outputs_rejects_wrong_candidate_count() -> None:
             classify_decoder_outputs(_decoder_output_set(num_masks))
 
 
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_classify_decoder_outputs_rejects_non_finite_values(bad: float) -> None:
+    """A numerical/runtime failure must be reported, not silently absorbed.
+
+    A NaN IoU would participate in argmax and select the wrong candidate, and
+    non-finite mask logits become plausible booleans under the later `> 0`.
+    """
+
+    for index in range(4):
+        outputs = _decoder_output_set()
+        outputs[index] = outputs[index].copy()
+        outputs[index].flat[0] = bad
+        with pytest.raises(ValueError, match="must be finite"):
+            classify_decoder_outputs(outputs)
+
+
 def test_classify_decoder_outputs_rejects_ambiguous_mask_candidates() -> None:
     """Two same-sized mask-shaped outputs cannot be told apart -- fail loudly."""
 

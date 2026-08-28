@@ -146,6 +146,16 @@ def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndar
     arrays = [
         np.ascontiguousarray(np.asarray(value), dtype=np.float32) for value in outputs
     ]
+    # A NaN from a numerical/runtime failure would otherwise reach argmax over
+    # the IoU scores (silently selecting the wrong candidate) and the `> 0`
+    # mask threshold (turning non-finite logits into plausible booleans),
+    # corrupting predictions and SA-V metrics instead of reporting the failure.
+    for index, array in enumerate(arrays):
+        if not bool(np.isfinite(array).all()):
+            raise ValueError(
+                f"Decoded mask generation outputs must be finite; output {index} "
+                f"with shape {array.shape} contains NaN or infinity."
+            )
     mask_matches = [
         array
         for array in arrays

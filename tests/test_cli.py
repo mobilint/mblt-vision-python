@@ -228,6 +228,35 @@ def test_val_rejects_single_artifact_paths_for_mask_generation(
         create_mask_generation_engine(args)
 
 
+@pytest.mark.parametrize(
+    ("cache_name", "candidates"),
+    [
+        ("sa-v", ["sav_val.tar", "sa-v", "sav_val"]),
+        ("nyu-depth", ["nyu-depth.zip", "nyu-depth"]),
+    ],
+)
+def test_find_existing_source_never_returns_the_organized_cache(
+    tmp_path: Path, cache_name: str, candidates: list[str]
+) -> None:
+    """An incomplete cache must not be handed back as its own raw source.
+
+    Several datasets use a cache directory whose name is also a source
+    candidate, so `data_path.parent / name` resolves back to `data_path`;
+    organizing from it fails instead of downloading the default archive.
+    """
+
+    from mblt_vision.cli.val import _find_existing_source
+
+    data_path = tmp_path / "datasets" / cache_name
+    data_path.mkdir(parents=True)
+    assert _find_existing_source(str(data_path), candidates) is None
+
+    # A genuine sibling source is still discovered.
+    real_source = data_path.parent / candidates[0]
+    real_source.write_bytes(b"archive")
+    assert _find_existing_source(str(data_path), candidates) == str(real_source)
+
+
 def test_val_parses_mask_generation_options() -> None:
     """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
 

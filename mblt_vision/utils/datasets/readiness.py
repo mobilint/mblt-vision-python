@@ -1022,6 +1022,30 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     return False
 
 
+def _sav_mask_is_valid(mask_path: Path, frame_shape: tuple[int, int]) -> bool:
+    """Return whether one cached SA-V mask matches its frame and is single-object.
+
+    Both properties are checked for every mask. The value constraint is
+    discharged from the image mode when the file is bilevel: a 1-bit PNG can
+    only encode two values with zero as background, so it cannot hold the
+    ``{1, 2}`` case that ``CustomSAV``'s ``> 0`` binarization would turn
+    entirely into foreground. Any other mode is decoded and checked directly.
+    The official split is bilevel throughout, so this reads headers rather
+    than decoding ~32k full-resolution masks on every readiness call.
+    """
+
+    try:
+        with Image.open(mask_path) as mask_image:
+            if (mask_image.height, mask_image.width) != frame_shape:
+                return False
+            if mask_image.mode == "1":
+                return True
+            mask = np.asarray(mask_image)
+    except OSError:
+        return False
+    return mask.ndim == 2 and len(set(np.unique(mask).tolist()) - {0}) <= 1
+
+
 def _sav_ready(root: Path) -> bool:
     """Return whether an organized SA-V validation split is complete.
 
@@ -1085,45 +1109,29 @@ def _sav_ready(root: Path) -> bool:
             return False
         total_masklets += len(object_dirs)
 
-        # Paired into one variable (rather than two, set-together but separately
-        # declared) so the invariant that they are always assigned on the same
-        # branch is visible to a reader and provable by static analysis, not
-        # just true by construction (object_dirs and masks are both checked
-        # non-empty above, so the loop body always reaches this assignment on
-        # its first iteration if it does not already return False).
-        first_pair: tuple[Path, Path] | None = None
+        # Frame geometry for every annotated stem, read from image headers so
+        # the per-mask comparison below covers the whole video rather than only
+        # its first mask.
+        try:
+            frame_shapes: dict[str, tuple[int, int]] = {}
+            for stem, image_path in images.items():
+                with Image.open(image_path) as image:
+                    frame_shapes[stem] = (image.height, image.width)
+            # One full decode per video still catches a truncated JPEG, which a
+            # header-only read cannot see.
+            with Image.open(images[sorted(images)[0]]) as image:
+                image.load()
+        except OSError:
+            return False
+
         for object_dir in object_dirs:
             masks = _files_by_stem(object_dir, {".png"}, reject_symlinks=True)
             if not masks or not set(masks) <= set(images):
                 return False
             total_masks += len(masks)
-            if first_pair is None:
-                first_stem = sorted(masks)[0]
-                first_pair = (masks[first_stem], images[first_stem])
-        # Return rather than assert: object_dirs is non-empty above so this is
-        # unreachable, but an assert vanishes under `python -O` and would then
-        # raise TypeError unpacking None out of a function documented to answer
-        # with False.
-        if first_pair is None:
-            return False
-        first_mask_path, first_image_path = first_pair
-        try:
-            with Image.open(first_image_path) as image:
-                image.load()
-                image_shape = (image.height, image.width)
-            with Image.open(first_mask_path) as mask_image:
-                mask = np.asarray(mask_image)
-        except OSError:
-            return False
-        # Counting unique values alone would accept a two-valued mask such as
-        # {1, 2}, which CustomSAV's `> 0` binarization turns entirely into
-        # foreground; require every non-zero value to be a single object ID.
-        if (
-            mask.ndim != 2
-            or mask.shape != image_shape
-            or len(set(np.unique(mask).tolist()) - {0}) > 1
-        ):
-            return False
+            for stem, mask_path in masks.items():
+                if not _sav_mask_is_valid(mask_path, frame_shapes[stem]):
+                    return False
 
     return (
         total_masklets == SAV_VALIDATION_MASKLET_COUNT

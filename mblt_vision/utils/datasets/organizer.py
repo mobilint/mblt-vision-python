@@ -40,6 +40,7 @@ from .readiness import (
     DOTAV1_VALIDATION_SAMPLE_COUNT,
     IMAGE_SUFFIXES,
     NYU_DEPTH_VALIDATION_SAMPLE_COUNT,
+    SAV_VIDEO_ID_PATTERN,
     _canonicalize_quadrilateral,
     _path_has_symlink_component,
     _polygon_has_positive_image_overlap,
@@ -1420,6 +1421,21 @@ def construct_sav(dataset_dir: str, output_dir: str) -> None:
         raise ValueError(
             f"SA-V id list is empty or contains duplicates: {dataset_root / 'sav_val.txt'}."
         )
+    # These ids come from file contents, not a directory listing, so an entry
+    # such as `../../escape` would otherwise resolve outside the staging tree
+    # and copy attacker-controlled files there before organization failed.
+    # Rejected up front, before any makedirs/copy, and mirroring the same
+    # containment guard COCO applies to its JSON-declared file names.
+    invalid_ids = [
+        video_id
+        for video_id in video_ids
+        if SAV_VIDEO_ID_PATTERN.fullmatch(video_id) is None
+    ]
+    if invalid_ids:
+        raise ValueError(
+            f"SA-V id list contains unsupported video ids: {sorted(invalid_ids)[:5]}. "
+            "Ids must match the official `sav_<6 digits>` format."
+        )
     print(f"Constructing SA-V validation dataset from {dataset_dir} to {output_dir}")
 
     output_parent_dir = os.path.dirname(output_dir)
@@ -1432,7 +1448,17 @@ def construct_sav(dataset_dir: str, output_dir: str) -> None:
         staged_annotation_dir = os.path.join(staging_dir, "annotations")
         os.makedirs(staged_image_dir)
         os.makedirs(staged_annotation_dir)
+        staging_root = Path(staging_dir).resolve()
         for video_id in sorted(video_ids):
+            # Belt-and-braces containment on top of the id-pattern check above:
+            # every staged path must resolve inside the staging tree, so no
+            # future relaxation of that pattern can reintroduce an escape.
+            for staged_root in (staged_image_dir, staged_annotation_dir):
+                staged_video_path = Path(staged_root, video_id).resolve()
+                if not staged_video_path.is_relative_to(staging_root):
+                    raise ValueError(
+                        f"SA-V video id '{video_id}' escapes the staging directory."
+                    )
             source_frame_dir = dataset_root / "JPEGImages_24fps" / video_id
             source_annotation_dir = dataset_root / "Annotations_6fps" / video_id
             if not source_frame_dir.is_dir() or not source_annotation_dir.is_dir():
