@@ -43,8 +43,10 @@ description: >-
   outputs) and bridged (prompt-encoder raw inputs, two outputs; sam_tokens/object_score are
   optional in classify_decoder_outputs); the ONNX graphs are NCHW with five named decoder
   inputs and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
-  framework-independent; only fpn_from_onnx/prepare_decoder_tensors_onnx vs
-  fpn_from_runtime/prepare_decoder_tensors differ. eval_sav works unchanged for both.
+  framework-independent; only the feed builders differ
+  (fpn_from_onnx/prepare_decoder_tensors_onnx vs
+  fpn_from_runtime/prepare_decoder_tensors/prepare_decoder_tensors_bridged).
+  eval_sav works unchanged for both.
   Load the optional runtime before downloading artifacts; validate explicit artifact paths
   (prompt weights included) with FileNotFoundError before any download; dispose a backend that
   fails after create() inside its builder (the caller assigns it only on success) while

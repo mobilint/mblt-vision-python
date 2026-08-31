@@ -662,6 +662,9 @@ def test_predict_preprocessed_drives_the_bridged_decoder_contract(
         )
         assert result.masks.shape == (3, 480, 640)
         assert result.iou_predictions.shape == (3,)
+        # The bridged decoder emits no object score; the key must be absent,
+        # not present with a synthetic None.
+        assert "object_score" not in result.output
 
         decoder = next(b for b in _DualContractBackend.instances if b.is_decoder)
         (feed,) = decoder.received_feeds
@@ -698,6 +701,7 @@ def test_predict_preprocessed_drives_the_assembled_decoder_contract(
             labels=[1, 1, 0],
         )
         assert result.masks.shape == (3, 480, 640)
+        assert result.output["object_score"].shape == (1,)
 
         decoder = next(b for b in _AssembledContractBackend.instances if b.is_decoder)
         (feed,) = decoder.received_feeds

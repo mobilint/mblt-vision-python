@@ -539,13 +539,16 @@ class SAM2HieraLarge(MBLT_Engine):
             "low_res_masks": decoder_outputs["masks"],
             "full_logits": full_logits,
             "iou_predictions": decoder_outputs["iou"],
-            # Present on assembled-contract decoders; the bridged contract's
-            # output_meta keeps only masks and IoU.
-            "object_score": decoder_outputs.get("object_score"),
             "points": points_array,
             "point_labels": labels_array,
             "selected": selected,
         }
+        # Assembled-contract decoders emit an object score; the bridged
+        # contract's output_meta keeps only masks and IoU. The key is added
+        # only when the output exists, so membership tests see the artifact's
+        # real contract rather than a synthetic None.
+        if "object_score" in decoder_outputs:
+            output["object_score"] = decoder_outputs["object_score"]
         return Results(self.pre_cfg, self.post_cfg, output)
 
     def predict(
