@@ -97,16 +97,25 @@ The current ownership boundary is deliberate:
   `sam2_hiera_large_{encoder,decoder}.onnx` exports at the Hub repo root, board-agnostic).
   Framework is inferred from explicit `encoder_onnx_path`/`decoder_onnx_path` vs
   `encoder_mxq_path`/`decoder_mxq_path` suffixes and conflicts fail fast; NPU-only arguments are
-  ignored for ONNX. The two runtimes have different graph contracts, pinned in
-  `_sam2_contracts.py` and validated at construction: MXQ takes the six flattened positional
-  inputs (NHWC image and features), while the exported ONNX graphs are NCHW with five named
+  ignored for ONNX. The runtimes have different graph contracts, pinned in
+  `_sam2_contracts.py` and validated at construction. Two MXQ decoder generations exist and
+  both are supported, identified from the loaded artifact's declared input shapes
+  (`detect_decoder_contract`, run while the engine is built so a drifted artifact fails before
+  any inference is spent): the *assembled* contract takes six host-flattened positional inputs
+  (tokens pre-concatenated, `image_embeddings + dense` pre-summed; four outputs), while the
+  *bridged* contract -- the SDK tutorial's legacy-parser decoder, whose MBLT carries that
+  assembly as an in-graph host-bridge subgraph -- takes the prompt encoder's raw outputs
+  (two outputs: `classify_decoder_outputs` keeps `masks`/`iou` required and treats
+  `sam_tokens`/`object_score` as optional). The exported ONNX graphs are NCHW with five named
   decoder inputs (`src_plus_pos_src` stays inside the graph) and a dynamic token axis. The
   shared prompt-encoding host path and `classify_decoder_outputs` are framework-independent;
-  only the encoder-feed layout and decoder-feed builders differ
-  (`fpn_from_onnx`/`prepare_decoder_tensors_onnx` vs
-  `fpn_from_runtime`/`prepare_decoder_tensors`). The ONNX pipeline is numerically verified
-  against the official `facebookresearch/sam2` fp32 predictor (identical binary masks;
-  opt-in `tests/test_mask_generation_onnx.py` covers it end-to-end without NPU hardware),
+  the feed builders differ (`fpn_from_onnx`/`prepare_decoder_tensors_onnx` vs
+  `fpn_from_runtime`/`prepare_decoder_tensors`/`prepare_decoder_tensors_bridged`). The ONNX
+  pipeline is numerically verified against the official `facebookresearch/sam2` fp32 predictor
+  (identical binary masks; opt-in `tests/test_mask_generation_onnx.py` covers it end-to-end
+  without NPU hardware); the bridged MXQ contract is numerically verified on real hardware by
+  the opt-in `test_sam2_bridged_contract_predicts_numerically` (ground-truth mask IoU across
+  1-3-point prompts, artifacts supplied via `MBLT_VISION_SAM2_BRIDGED_{ENCODER,DECODER}_MXQ`),
   and `eval_sav` works unchanged for both frameworks. Resolve the optional runtime before
   downloading any artifact, so a missing `onnxruntime` reports the package extra rather than a
   network failure. Build each backend so it disposes itself when `launch()`/graph validation

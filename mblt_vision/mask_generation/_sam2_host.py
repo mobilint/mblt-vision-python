@@ -247,6 +247,33 @@ def _decoder_prompt_tensors(
     high-resolution feature maps.
     """
 
+    sparse, dense, image_embeddings, high_res = _prompt_encoder_outputs(
+        weights, features, points, labels, original_hw
+    )
+    tokens, src, pos_src = prompt.decoder_token_prep(
+        weights,
+        image_embeddings=image_embeddings.float(),
+        dense_prompt_embeddings=dense.float(),
+        sparse_prompt_embeddings=sparse.float(),
+    )
+    return tokens, src, pos_src, high_res
+
+
+def _prompt_encoder_outputs(
+    weights: dict[str, torch.Tensor],
+    features: BackboneFeatures,
+    points: np.ndarray,
+    labels: np.ndarray,
+    original_hw: Sequence[int],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[torch.Tensor]]:
+    """Run the host prompt encoder and return its raw outputs, pre-assembly.
+
+    ``(sparse, dense, image_embeddings, high_res)`` -- the stage *before*
+    ``decoder_token_prep``, which is what the bridged decoder contract consumes:
+    its MBLT carries a host-bridge subgraph that does the token concatenation
+    and the ``image_embeddings + dense`` sum inside the graph.
+    """
+
     # Prompts arrive as host numpy arrays, so place them on the same device the
     # weights live on: the prompt encoder combines them with the Gaussian
     # position-encoding matrix and the learned embeddings, which torch requires
@@ -261,16 +288,38 @@ def _decoder_prompt_tensors(
 
     sparse = prompt.embed_points(weights, unnorm_coords, labels_tensor)
     dense = prompt.dense_embeddings_for_no_mask(weights, batch_size=sparse.size(0))
-
     image_embeddings = features["image_embed"][-1].unsqueeze(0)
     high_res = [value[-1].unsqueeze(0) for value in features["high_res_feats"]]
-    tokens, src, pos_src = prompt.decoder_token_prep(
-        weights,
-        image_embeddings=image_embeddings.float(),
-        dense_prompt_embeddings=dense.float(),
-        sparse_prompt_embeddings=sparse.float(),
+    return sparse, dense, image_embeddings, high_res
+
+
+def prepare_decoder_tensors_bridged(
+    weights: dict[str, torch.Tensor],
+    features: BackboneFeatures,
+    points: np.ndarray,
+    labels: np.ndarray,
+    original_hw: Sequence[int],
+) -> dict[str, np.ndarray]:
+    """Build the six bridged-contract decoder inputs from the prompt encoder.
+
+    Keyed by semantic role because three of the six share the shape
+    ``(1, 256, 64, 64)`` -- ``image_embeddings``, ``dense_prompt_embeddings``,
+    and ``image_pe`` -- so a positional guess would silently swap them.
+    """
+
+    sparse, dense, image_embeddings, high_res = _prompt_encoder_outputs(
+        weights, features, points, labels, original_hw
     )
-    return tokens, src, pos_src, high_res
+    tensors = {
+        "image_embeddings": image_embeddings.float(),
+        "dense_prompt_embeddings": dense.float(),
+        "image_pe": prompt.get_dense_pe(weights).float(),
+        # (1, N+1, 256) -> (1, 1, N+1, 256); axis 2 is the dynamic prompt axis.
+        "sparse_prompt_embeddings": sparse.float().unsqueeze(1).contiguous(),
+        "hrf0_nhwc": high_res[0].permute(0, 2, 3, 1).contiguous(),
+        "hrf1_nhwc": high_res[1].permute(0, 2, 3, 1).contiguous(),
+    }
+    return _as_float32_arrays(tensors)
 
 
 def prepare_decoder_tensors(

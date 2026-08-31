@@ -68,6 +68,69 @@ def test_sam2_predicts_a_precise_mask_for_a_synthetic_rectangle(
         engine.close()
 
 
+_BRIDGED_ENCODER_ENV = "MBLT_VISION_SAM2_BRIDGED_ENCODER_MXQ"
+_BRIDGED_DECODER_ENV = "MBLT_VISION_SAM2_BRIDGED_DECODER_MXQ"
+
+
+def _bridged_artifact_paths() -> tuple[str, str]:
+    """Explicit bridged-contract artifact paths, or skip.
+
+    The Hub-hosted artifacts are the assembled contract, so bridged coverage
+    needs locally compiled artifacts (the SDK tutorial's
+    ``sam2_decoder_to_mblt.py`` output), pointed at via environment variables.
+    """
+
+    encoder = os.environ.get(_BRIDGED_ENCODER_ENV)
+    decoder = os.environ.get(_BRIDGED_DECODER_ENV)
+    if not encoder or not decoder:
+        pytest.skip(
+            f"Set {_BRIDGED_ENCODER_ENV} and {_BRIDGED_DECODER_ENV} to locally "
+            "compiled bridged-contract artifacts to run this test."
+        )
+    return encoder, decoder
+
+
+def test_sam2_bridged_contract_predicts_numerically() -> None:
+    """Numerical verification of the bridged decoder contract on real hardware.
+
+    Shape checks alone cannot catch swapped semantic roles among the three
+    identically shaped ``(1, 256, 64, 64)`` decoder inputs -- a swap produces
+    plausible but wrong masks. A near-perfect ground-truth IoU on a synthetic
+    rectangle can only happen when the roles reached the graph correctly, so
+    this asserts mask *values*, not tensor plumbing. Runs 1-, 2-, and 3-point
+    prompts to also prove the dynamic prompt axis on hardware.
+    """
+
+    encoder_path, decoder_path = _bridged_artifact_paths()
+    image, (x0, y0, x1, y1) = _synthetic_rectangle_image()
+    ground_truth = np.zeros((480, 640), dtype=bool)
+    ground_truth[y0:y1, x0:x1] = True
+    center = ((x0 + x1) // 2, (y0 + y1) // 2)
+    prompts = [
+        ([center], [1]),
+        ([center, (x0 + 30, y0 + 30)], [1, 1]),
+        ([center, (x0 + 30, y0 + 30), (20, 20)], [1, 1, 0]),
+    ]
+
+    engine = SAM2HieraLarge(
+        encoder_mxq_path=encoder_path, decoder_mxq_path=decoder_path
+    )
+    try:
+        assert engine._decoder_contract == "bridged"
+        for points, labels in prompts:
+            result = engine.predict(image, points=points, labels=labels)
+            predicted = result.masks[result.selected]
+            intersection = np.logical_and(predicted, ground_truth).sum()
+            union = np.logical_or(predicted, ground_truth).sum()
+            iou = intersection / union
+            assert iou > 0.95, (
+                f"{len(points)}-point prompt: expected a near-perfect mask for "
+                f"a flat rectangle, got IoU={iou:.4f}."
+            )
+    finally:
+        engine.close()
+
+
 def test_sam2_resolves_artifacts_from_huggingface_hub(npu_params: NpuParams) -> None:
     """Construct with no explicit paths and confirm all three artifacts resolve from Hub."""
 

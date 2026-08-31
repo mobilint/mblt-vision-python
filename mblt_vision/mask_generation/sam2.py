@@ -49,10 +49,12 @@ from ._sam2_contracts import (
     DECODER_ONNX_INPUT_NAMES,
     DECODER_ONNX_INPUT_SHAPES,
     DECODER_RUNTIME_ORDER,
+    DECODER_RUNTIME_ORDER_BRIDGED,
     ENCODER_ONNX_INPUT_NAME,
     ENCODER_ONNX_INPUT_SHAPE,
     build_decoder_runtime_feed,
     classify_decoder_outputs,
+    detect_decoder_contract,
     strip_runtime_batch,
     validate_onnx_session_inputs,
     validate_runtime_shapes,
@@ -66,6 +68,7 @@ from ._sam2_host import (
     postprocess_masks,
     preprocess_encoder_input,
     prepare_decoder_tensors,
+    prepare_decoder_tensors_bridged,
     prepare_decoder_tensors_onnx,
 )
 
@@ -151,6 +154,7 @@ class SAM2HieraLarge(MBLT_Engine):
         self._closed = False
         self._encoder_backend: MobilintNPUBackend | ONNXBackend | None = None
         self._decoder_backend: MobilintNPUBackend | ONNXBackend | None = None
+        self._decoder_contract: str | None = None
         self.weights: dict[str, torch.Tensor] | None = None
 
         for label, path, suffix in (
@@ -266,6 +270,13 @@ class SAM2HieraLarge(MBLT_Engine):
                     target_cores=decoder_target_cores,
                     target_clusters=decoder_target_clusters,
                     target_device=resolved_target_device,
+                )
+                # Identify the decoder generation now, not on first decode: an
+                # artifact matching neither contract must fail while the engine
+                # is being built (the enclosing except disposes both backends),
+                # not after predict has already spent an encoder inference.
+                self._decoder_contract = detect_decoder_contract(
+                    self._backend_input_shapes(self._decoder_backend)
                 )
 
             weights = prompt.load_prompt_weights(resolved_prompt_weights_path)
@@ -528,11 +539,16 @@ class SAM2HieraLarge(MBLT_Engine):
             "low_res_masks": decoder_outputs["masks"],
             "full_logits": full_logits,
             "iou_predictions": decoder_outputs["iou"],
-            "object_score": decoder_outputs["object_score"],
             "points": points_array,
             "point_labels": labels_array,
             "selected": selected,
         }
+        # Assembled-contract decoders emit an object score; the bridged
+        # contract's output_meta keeps only masks and IoU. The key is added
+        # only when the output exists, so membership tests see the artifact's
+        # real contract rather than a synthetic None.
+        if "object_score" in decoder_outputs:
+            output["object_score"] = decoder_outputs["object_score"]
         return Results(self.pre_cfg, self.post_cfg, output)
 
     def predict(
@@ -596,15 +612,27 @@ class SAM2HieraLarge(MBLT_Engine):
         labels: np.ndarray,
         original_hw: Sequence[int],
     ) -> list[np.ndarray]:
-        """Run the decoder MXQ on the compiled artifact's positional feed."""
+        """Run the decoder MXQ on the compiled artifact's positional feed.
 
-        decoder_tensors = prepare_decoder_tensors(
-            weights, features, points, labels, original_hw
-        )
-        decoder_feed = build_decoder_runtime_feed(
-            decoder_tensors, DECODER_RUNTIME_ORDER
-        )
+        Two decoder generations exist (see ``_sam2_contracts``): the assembled
+        contract takes host-flattened tensors, the bridged contract takes the
+        prompt encoder's raw outputs. Which one is loaded was identified at
+        construction from the artifact's declared shapes, so a mismatched feed
+        is impossible rather than merely checked.
+        """
+
         decoder_backend = self._require_decoder_backend()
+        if self._decoder_contract == "bridged":
+            decoder_tensors = prepare_decoder_tensors_bridged(
+                weights, features, points, labels, original_hw
+            )
+            runtime_order = DECODER_RUNTIME_ORDER_BRIDGED
+        else:
+            decoder_tensors = prepare_decoder_tensors(
+                weights, features, points, labels, original_hw
+            )
+            runtime_order = DECODER_RUNTIME_ORDER
+        decoder_feed = build_decoder_runtime_feed(decoder_tensors, runtime_order)
         validate_runtime_shapes(
             decoder_feed, self._backend_input_shapes(decoder_backend), "decoder"
         )
@@ -702,13 +730,15 @@ class SAM2HieraLarge(MBLT_Engine):
 
     @staticmethod
     def _backend_input_shapes(backend: MobilintNPUBackend) -> list[tuple[int, ...]]:
-        """Read the loaded artifact's declared input shapes for a fail-loud shape check.
+        """Read the loaded artifact's declared input shapes.
 
-        A resolved encoder/decoder artifact that does not match
-        ``DECODER_RUNTIME_ORDER`` (for example one compiled from a different
-        quantizer revision than the validated reference) must fail here rather
-        than silently produce wrong masks. ``backend.mxq_model`` is the
-        slot-zero compatibility handle every mblt_npu backend preserves.
+        These identify which decoder contract is loaded
+        (:func:`detect_decoder_contract`) and gate every feed with a fail-loud
+        shape check: an artifact matching neither known contract (for example
+        one compiled from a different quantizer revision than the validated
+        references) must fail here rather than silently produce wrong masks.
+        ``backend.mxq_model`` is the slot-zero compatibility handle every
+        mblt_npu backend preserves.
         """
 
         return [

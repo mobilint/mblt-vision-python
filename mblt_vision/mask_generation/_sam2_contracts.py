@@ -1,10 +1,24 @@
 """Fixed contracts between the SAM2 encoder/decoder artifacts and their host glue.
 
-MXQ side: ported from the validated ``sam2-mxq-pipeline`` reference (real Aries2
-SA-V-200 accuracy: FP32 mIoU 0.7750 vs MXQ mIoU 0.7757, mask agreement 0.983).
-Compile and calibration are out of scope for this phase, so the decoder's
-compiled runtime input order is a single validated default rather than a
-configurable MBLT-input-name binding map.
+MXQ side: two decoder generations exist, distinguished by where SAM2's token
+assembly runs, and both are supported. The loaded artifact's declared input
+shapes identify which one it is (:func:`detect_decoder_contract`):
+
+* **assembled** -- the host concatenates the output tokens and sums
+  ``image_embeddings + dense_prompt_embeddings``, feeding six flattened
+  tensors. Ported from the validated ``sam2-mxq-pipeline`` reference (real
+  Aries2 SA-V-200 accuracy: FP32 mIoU 0.7750 vs MXQ mIoU 0.7757, mask
+  agreement 0.983). Emits four outputs.
+* **bridged** -- the decoder MBLT carries a host-bridge subgraph that does the
+  token concat and the embedding sum itself, so the artifact takes the prompt
+  encoder's raw outputs. Produced by the SDK tutorial's
+  ``sam2_decoder_to_mblt.py`` (legacy-parser route). Emits two outputs
+  (masks and IoU; the parse's ``output_meta`` drops the SAM tokens and
+  object score).
+
+Compile and calibration are out of scope for this phase, so each contract is
+a fixed validated signature rather than a configurable MBLT-input-name
+binding map.
 
 ONNX side: the graph interface written by the SDK tutorial's
 ``sam2_export_onnx.py`` (``Sam2ImageEncoderWrapper``/``Sam2MaskDecoderWrapper``
@@ -21,8 +35,8 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 # Decoder runtime input order as fed to ``MobilintNPUBackend`` / ``qbruntime.Model.infer``.
-# This is the positional signature of the compiled SAM2 Hiera-Large decoder MXQ,
-# which differs from the MBLT graph's declared input names.
+# This is the positional signature of the assembled-contract SAM2 Hiera-Large
+# decoder MXQ, which differs from that MBLT graph's declared input names.
 DECODER_RUNTIME_ORDER: tuple[str, ...] = (
     "hrf0_nhwc",
     "src_plus_pos_src",
@@ -31,6 +45,69 @@ DECODER_RUNTIME_ORDER: tuple[str, ...] = (
     "pos_src",
     "tokens",
 )
+
+# Bridged-contract runtime order. Unlike the assembled artifact, this one
+# matches the MBLT input-name order, because the graph's own bridge subgraph
+# consumes the prompt encoder's raw outputs directly.
+DECODER_RUNTIME_ORDER_BRIDGED: tuple[str, ...] = (
+    "image_embeddings",
+    "dense_prompt_embeddings",
+    "image_pe",
+    "sparse_prompt_embeddings",
+    "hrf0_nhwc",
+    "hrf1_nhwc",
+)
+
+# Declared input signatures (batch stripped, as qbruntime reports them).
+# ``-1`` is the prompt-dependent dynamic axis. These are what
+# :func:`detect_decoder_contract` matches against.
+DECODER_MXQ_INPUT_SHAPES: dict[str, tuple[tuple[int, ...], ...]] = {
+    "assembled": (
+        (256, 256, 32),
+        (1, 4096, 256),
+        (128, 128, 64),
+        (1, 4096, 256),
+        (1, 4096, 256),
+        (1, -1, 256),
+    ),
+    "bridged": (
+        (256, 64, 64),
+        (256, 64, 64),
+        (256, 64, 64),
+        (1, -1, 256),
+        (256, 256, 32),
+        (128, 128, 64),
+    ),
+}
+
+
+def detect_decoder_contract(shapes: Sequence[Sequence[int]]) -> str:
+    """Identify which decoder generation a loaded artifact is, from its shapes.
+
+    The two signatures share no prefix -- input 0 is ``(256, 256, 32)`` versus
+    ``(256, 64, 64)`` -- so declared shapes are sufficient. A ``-1`` in the
+    signature accepts any value there (the artifact may declare the axis
+    dynamic or, if compiled for a single prompt length, fixed). Anything
+    matching neither raises rather than guessing, since a wrong contract feeds
+    tensors whose *roles* are wrong even where shapes coincide.
+    """
+
+    got = [tuple(int(dim) for dim in shape) for shape in shapes]
+    for name, signature in DECODER_MXQ_INPUT_SHAPES.items():
+        if len(got) != len(signature):
+            continue
+        if all(
+            len(have) == len(want)
+            and all(w == -1 or h == w for h, w in zip(have, want))
+            for have, want in zip(got, signature)
+        ):
+            return name
+    raise ValueError(
+        f"Decoder artifact input shapes {got} match neither known contract: "
+        f"assembled {list(DECODER_MXQ_INPUT_SHAPES['assembled'])} nor "
+        f"bridged {list(DECODER_MXQ_INPUT_SHAPES['bridged'])}."
+    )
+
 
 # Exported ONNX graph interface. ``-1`` marks the prompt-count-dependent
 # dynamic token axis (``6 output tokens + N points + 1 pad``).
@@ -149,7 +226,7 @@ def validate_onnx_session_inputs(
 
 
 def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndarray]:
-    """Name the four Hiera decoder outputs by their unambiguous element counts.
+    """Name the Hiera decoder outputs by their unambiguous element counts.
 
     qbruntime does not guarantee that the runtime output order matches the
     compiled graph's declared order, so each output is identified by its
@@ -157,6 +234,11 @@ def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndar
     whose size is a multiple of ``256*256``; among the rest, ``iou`` has size
     ``num_masks``, ``sam_tokens`` has size ``num_masks*256``, and
     ``object_score`` has size 1.
+
+    ``masks`` and ``iou`` are required. ``sam_tokens`` and ``object_score``
+    exist only on assembled-contract artifacts; a bridged-contract decoder is
+    parsed with an ``output_meta`` that keeps just masks and IoU, so those two
+    keys are simply absent from its result rather than an error.
     """
 
     arrays = [
@@ -223,21 +305,25 @@ def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndar
             f"got {num_masks} (mask output shape {mask_matches[0].shape})."
         )
 
-    def unique(label: str, size: int) -> np.ndarray:
+    def unique(label: str, size: int, required: bool) -> np.ndarray | None:
         matches = [
             array
             for array in arrays
             if array is not mask_matches[0] and array.size == size
         ]
-        if len(matches) != 1:
+        if len(matches) > 1 or (required and not matches):
             raise ValueError(
                 f"Expected exactly one '{label}' output of size {size}, found {len(matches)}."
             )
-        return matches[0]
+        return matches[0] if matches else None
 
-    return {
-        "masks": masks,
-        "iou": unique("iou", num_masks).reshape(num_masks),
-        "sam_tokens": unique("sam_tokens", num_masks * 256).reshape(num_masks, 256),
-        "object_score": unique("object_score", 1).reshape(1),
-    }
+    iou = unique("iou", num_masks, required=True)
+    assert iou is not None  # narrowed by required=True
+    result = {"masks": masks, "iou": iou.reshape(num_masks)}
+    sam_tokens = unique("sam_tokens", num_masks * 256, required=False)
+    if sam_tokens is not None:
+        result["sam_tokens"] = sam_tokens.reshape(num_masks, 256)
+    object_score = unique("object_score", 1, required=False)
+    if object_score is not None:
+        result["object_score"] = object_score.reshape(1)
+    return result
