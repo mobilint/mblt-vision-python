@@ -14,7 +14,7 @@ exercised end-to-end on real hardware only by the opt-in
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pytest
@@ -22,9 +22,11 @@ import torch
 
 import mblt_vision.mask_generation.sam2 as sam2_module
 from mblt_vision.mask_generation._sam2_contracts import (
+    DECODER_MXQ_INPUT_SHAPES,
     DECODER_RUNTIME_ORDER,
     build_decoder_runtime_feed,
     classify_decoder_outputs,
+    detect_decoder_contract,
     strip_runtime_batch,
     validate_runtime_shapes,
 )
@@ -40,6 +42,42 @@ def _decoder_output_set(num_masks: int = 3) -> list[np.ndarray]:
         np.ones((num_masks, 256), dtype=np.float32),
         np.array([0.5], dtype=np.float32),
     ]
+
+
+def _bridged_decoder_output_set() -> list[np.ndarray]:
+    """The two outputs a bridged-contract decoder MXQ declares: IoU and masks."""
+
+    return [
+        np.zeros((1, 1, 3), dtype=np.float32),
+        np.zeros((1, 3, 65536), dtype=np.float32),
+    ]
+
+
+def test_detect_decoder_contract_identifies_both_generations() -> None:
+    assert detect_decoder_contract(DECODER_MXQ_INPUT_SHAPES["assembled"]) == "assembled"
+    assert detect_decoder_contract(DECODER_MXQ_INPUT_SHAPES["bridged"]) == "bridged"
+    # A single-prompt-length compile declares the dynamic axis fixed; the
+    # signature's -1 must accept it.
+    fixed = [
+        (1, 10, 256) if shape == (1, -1, 256) else shape
+        for shape in DECODER_MXQ_INPUT_SHAPES["assembled"]
+    ]
+    assert detect_decoder_contract(fixed) == "assembled"
+
+
+def test_detect_decoder_contract_rejects_unknown_signatures() -> None:
+    with pytest.raises(ValueError, match="neither known contract"):
+        detect_decoder_contract([(1, 2, 3)])
+    # Same length as a known contract but different shapes must not pass either.
+    with pytest.raises(ValueError, match="neither known contract"):
+        detect_decoder_contract([(64, 64, 256)] * 6)
+
+
+def test_classify_decoder_outputs_accepts_bridged_two_output_form() -> None:
+    classified = classify_decoder_outputs(_bridged_decoder_output_set())
+    assert sorted(classified) == ["iou", "masks"]
+    assert classified["masks"].shape == (3, 256, 256)
+    assert classified["iou"].shape == (3,)
 
 
 def test_classify_decoder_outputs_identifies_by_shape_not_position() -> None:
@@ -209,6 +247,43 @@ class _FakeBackend:
 
     def dispose(self) -> None:
         self.disposed = True
+
+
+class _DualContractBackend(_FakeBackend):
+    """Encoder/decoder pair for driving predict end to end without hardware.
+
+    Selects declared shapes and outputs by which artifact path it was built
+    for, and records the decoder feed so a test can assert what was sent.
+    """
+
+    decoder_input_shape: ClassVar[list[tuple[int, ...]]] = list(
+        DECODER_MXQ_INPUT_SHAPES["bridged"]
+    )
+    decoder_outputs: staticmethod = staticmethod(_bridged_decoder_output_set)
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.is_decoder = kwargs["mxq_path"].endswith("decoder.mxq")
+        if self.is_decoder:
+            self.mxq_model = _FakeModelHandle(list(self.decoder_input_shape))
+        self.received_feeds: list[list[np.ndarray]] = []
+
+    def __call__(self, feed: list[np.ndarray]) -> list[np.ndarray]:
+        self.received_feeds.append(feed)
+        if self.is_decoder:
+            return self.decoder_outputs()
+        return [
+            np.zeros((256, 256, 32), dtype=np.float32),
+            np.zeros((128, 128, 64), dtype=np.float32),
+            np.zeros((64, 64, 256), dtype=np.float32),
+        ]
+
+
+class _AssembledContractBackend(_DualContractBackend):
+    decoder_input_shape: ClassVar[list[tuple[int, ...]]] = list(
+        DECODER_MXQ_INPUT_SHAPES["assembled"]
+    )
+    decoder_outputs = staticmethod(_decoder_output_set)
 
 
 class _FailingDecoderBackend(_FakeBackend):
@@ -524,6 +599,84 @@ def test_predict_preprocessed_rejects_encoder_artifact_shape_drift(
             engine.predict_preprocessed(
                 encoder_input, (100, 100), points=np.array([[1.0, 1.0]]), labels=[1]
             )
+    finally:
+        engine.close()
+
+
+def test_predict_preprocessed_drives_the_bridged_decoder_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """End-to-end shape flow for a bridged-contract artifact (SDK tutorial MXQ).
+
+    The engine must detect the contract from the declared shapes, feed the
+    prompt encoder's raw outputs in bridged order, and classify the two-output
+    result -- with ``object_score`` absent rather than an error.
+    """
+
+    encoder_path, decoder_path = _make_engine(
+        monkeypatch, tmp_path, _DualContractBackend
+    )
+    engine = SAM2HieraLarge(
+        encoder_mxq_path=str(encoder_path), decoder_mxq_path=str(decoder_path)
+    )
+    try:
+        encoder_input = np.zeros((1024, 1024, 3), dtype=np.float32)
+        result = engine.predict_preprocessed(
+            encoder_input,
+            (480, 640),
+            points=np.array([[10.0, 20.0], [30.0, 40.0]]),
+            labels=[1, 0],
+        )
+        assert result.masks.shape == (3, 480, 640)
+        assert result.iou_predictions.shape == (3,)
+
+        decoder = next(b for b in _DualContractBackend.instances if b.is_decoder)
+        (feed,) = decoder.received_feeds
+        # Bridged order: three (256, 64, 64) prompt-encoder tensors, the dynamic
+        # prompt axis (2 points + 1 pad), then the two NHWC feature maps.
+        assert [tuple(t.shape) for t in feed] == [
+            (256, 64, 64),
+            (256, 64, 64),
+            (256, 64, 64),
+            (1, 3, 256),
+            (256, 256, 32),
+            (128, 128, 64),
+        ]
+    finally:
+        engine.close()
+
+
+def test_predict_preprocessed_drives_the_assembled_decoder_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The validated assembled-contract path must keep working unchanged."""
+
+    encoder_path, decoder_path = _make_engine(
+        monkeypatch, tmp_path, _AssembledContractBackend
+    )
+    engine = SAM2HieraLarge(
+        encoder_mxq_path=str(encoder_path), decoder_mxq_path=str(decoder_path)
+    )
+    try:
+        result = engine.predict_preprocessed(
+            np.zeros((1024, 1024, 3), dtype=np.float32),
+            (480, 640),
+            points=np.array([[10.0, 20.0], [30.0, 40.0], [50.0, 60.0]]),
+            labels=[1, 1, 0],
+        )
+        assert result.masks.shape == (3, 480, 640)
+
+        decoder = next(b for b in _AssembledContractBackend.instances if b.is_decoder)
+        (feed,) = decoder.received_feeds
+        # Assembled order: flattened host-side tensors, tokens = 3 points + 7.
+        assert [tuple(t.shape) for t in feed] == [
+            (256, 256, 32),
+            (1, 4096, 256),
+            (128, 128, 64),
+            (1, 4096, 256),
+            (1, 4096, 256),
+            (1, 10, 256),
+        ]
     finally:
         engine.close()
 
