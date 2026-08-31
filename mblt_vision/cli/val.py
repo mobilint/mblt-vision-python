@@ -201,11 +201,18 @@ def _resolve_sav_source(args: argparse.Namespace, data_path: str) -> str:
         SystemExit: If the archive or extracted directory cannot be found.
     """
 
-    dataset_path = args.annotation_dir or args.image_dir
-    if not args.force_organize:
-        dataset_path = dataset_path or _find_existing_source(
-            data_path, [SAV_DOWNLOAD_CONFIG["archive"], "sav_val"]
-        )
+    # Discovery runs even under --force-organize, unlike the auto-downloading
+    # datasets. There the flag skips discovery so a rebuild re-fetches from the
+    # canonical URL; SA-V has no such fallback, so skipping it would fail on a
+    # manual archive sitting in the documented discovery location -- the very
+    # place the error below tells the user to put it. `_find_existing_source`
+    # already refuses to return the organized output, so this cannot resolve to
+    # the stale cache that --force-organize exists to rebuild.
+    dataset_path = (
+        args.annotation_dir
+        or args.image_dir
+        or _find_existing_source(data_path, [SAV_DOWNLOAD_CONFIG["archive"], "sav_val"])
+    )
     if not dataset_path:
         raise SystemExit(
             "SA-V organization requires the official validation archive, which Meta "

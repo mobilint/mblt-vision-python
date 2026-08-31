@@ -182,6 +182,34 @@ def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndar
             f"Expected exactly one mask output, found {len(mask_matches)} "
             f"among shapes {[array.shape for array in arrays]}."
         )
+    # Reshaping blindly would silently interleave the candidates' pixels for a
+    # decoder that emits NHWC `(1, 256, 256, 3)` instead of the expected layout:
+    # that size is also a multiple of MASK_AREA and also yields three
+    # candidates, so neither the size match above nor the count check below can
+    # see it, and the result is plausible but corrupted masks. Pin the layout to
+    # the two the supported artifacts actually produce -- the MXQ runtime's
+    # flattened `(3, 65536)` and the ONNX graph's `(3, 256, 256)` -- ignoring
+    # leading batch axes. Checked here rather than against ONNX session output
+    # metadata so the MXQ path is covered by the same guard.
+    mask_shape = tuple(int(dim) for dim in mask_matches[0].shape)
+    unbatched_layout = (
+        tuple(dim for dim in mask_shape[:-2] if dim != 1) + mask_shape[-2:]
+    )
+    # Structure only -- the candidate count is checked separately below, so a
+    # decoder emitting the right layout with the wrong number of candidates
+    # still reports that rather than a layout error.
+    is_flattened = len(unbatched_layout) == 2 and unbatched_layout[-1] == MASK_AREA
+    is_spatial = len(unbatched_layout) == 3 and unbatched_layout[-2:] == (
+        MASK_SIDE,
+        MASK_SIDE,
+    )
+    if not (is_flattened or is_spatial):
+        raise ValueError(
+            f"Decoder mask output has an unsupported layout {mask_shape}; expected "
+            f"candidates as (N, {MASK_AREA}) or (N, {MASK_SIDE}, {MASK_SIDE}), "
+            "optionally batched. A channels-last layout would interleave the "
+            "candidates into corrupted masks."
+        )
     masks = mask_matches[0].reshape(-1, MASK_SIDE, MASK_SIDE)
     num_masks = masks.shape[0]
     # The compiled artifacts bake in SAM2's multimask slice, so a stale or

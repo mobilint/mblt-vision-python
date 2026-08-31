@@ -284,6 +284,49 @@ def test_val_requires_a_manually_downloaded_sav_archive(tmp_path: Path) -> None:
     assert _resolve_sav_source(args, str(data_path)) == str(archive)
 
 
+def test_val_finds_the_sav_archive_even_under_force_organize(tmp_path: Path) -> None:
+    """--force-organize rebuilds the dataset, it does not ignore the source.
+
+    SA-V has no fallback download URL, so skipping discovery would fail on a
+    manual archive sitting in the very location the error message recommends.
+    """
+
+    from mblt_vision.cli.val import _resolve_sav_source
+
+    data_path = tmp_path / "datasets" / "sa-v"
+    data_path.mkdir(parents=True)
+    archive = data_path.parent / "sav_val.tar"
+    archive.write_bytes(b"archive")
+
+    args = build_parser().parse_args(
+        ["val", "--model", "sam2-hiera-large", "--force-organize"]
+    )
+    assert args.force_organize is True
+    assert _resolve_sav_source(args, str(data_path)) == str(archive)
+
+
+def test_benchmark_runner_excludes_unsupported_mask_generation() -> None:
+    """The unified runner cannot build SAM2's engine or dispatch eval_sav.
+
+    Offering the task would accept `--task mask_generation` and then produce an
+    error row for every model.
+    """
+
+    from benchmark import benchmark_vision_models
+    from mblt_vision._tasks import VISION_TASKS
+
+    assert "mask_generation" in VISION_TASKS  # still a canonical Vision task
+    assert "mask_generation" not in benchmark_vision_models.TASK_CHOICES
+    assert set(benchmark_vision_models.TASK_CHOICES) == set(VISION_TASKS) - {
+        "mask_generation"
+    }
+
+    with pytest.raises(SystemExit):
+        benchmark_vision_models._parse_args(
+            ["--models", "ResNet50", "--task", "mask_generation"]
+        )
+
+
 def test_val_parses_mask_generation_options() -> None:
     """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
 

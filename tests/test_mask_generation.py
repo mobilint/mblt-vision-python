@@ -88,6 +88,34 @@ def test_classify_decoder_outputs_rejects_non_finite_values(bad: float) -> None:
             classify_decoder_outputs(outputs)
 
 
+@pytest.mark.parametrize(
+    ("shape", "accepted"),
+    [
+        ((1, 3, 256 * 256), True),  # MXQ runtime, flattened
+        ((3, 256, 256), True),  # MXQ runtime, batch already stripped
+        ((1, 3, 256, 256), True),  # exported ONNX graph, NCHW
+        ((1, 256, 256, 3), False),  # channels-last re-export
+        ((256, 256, 3), False),
+    ],
+)
+def test_classify_decoder_outputs_pins_the_mask_layout(
+    shape: tuple[int, ...], accepted: bool
+) -> None:
+    """A channels-last mask output must not be reshaped into interleaved masks.
+
+    Its size is also a multiple of 256*256 and it also yields three candidates,
+    so neither the size match nor the candidate-count check can catch it.
+    """
+
+    outputs = _decoder_output_set()
+    outputs[0] = np.zeros(shape, dtype=np.float32)
+    if accepted:
+        assert classify_decoder_outputs(outputs)["masks"].shape == (3, 256, 256)
+    else:
+        with pytest.raises(ValueError, match="unsupported layout"):
+            classify_decoder_outputs(outputs)
+
+
 def test_classify_decoder_outputs_rejects_ambiguous_mask_candidates() -> None:
     """Two same-sized mask-shaped outputs cannot be told apart -- fail loudly."""
 

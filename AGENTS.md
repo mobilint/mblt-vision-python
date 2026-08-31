@@ -188,6 +188,14 @@ The current ownership boundary is deliberate:
 
 ## Benchmark and Compilation Tooling
 
+- The unified benchmark runner's `TASK_CHOICES` is the subset of `VISION_TASKS` it can actually
+  execute. `mask_generation` is excluded because `_run_target` builds a generic `MBLT_Engine` and
+  `_evaluate` has no `eval_sav` branch; benchmark it with `mblt-vision val` instead. Do not wire a
+  new canonical task into the runner's choices before its engine and evaluator paths exist.
+- `classify_decoder_outputs` pins the decoder mask layout to `(N, 65536)` or `(N, 256, 256)`,
+  optionally batched, before reshaping. A channels-last `(1, 256, 256, 3)` output has a matching
+  element count and candidate count, so only the layout check catches it; without it the reshape
+  interleaves the candidates into plausible but corrupted masks.
 - Keep executable benchmark organizers, the unified benchmark runner, and result comparison scripts
   directly under `benchmark/`. Put reusable benchmark reporting helpers in `mblt_vision.benchmark`.
 - Keep executable compilation helpers and their guide directly under `compile/`. Do not recreate a
