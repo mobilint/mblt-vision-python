@@ -10,8 +10,8 @@ removed. Use the unified runner and the organizer that matches your dataset.
 
 ## Organize a dataset
 
-Public datasets can use their default download sources. ImageNet, DOTA, and
-Cityscapes require the appropriate source archives or credentials.
+Public datasets can use their default download sources. ImageNet, DOTA,
+Cityscapes, and SA-V require the appropriate source archives or credentials.
 
 ```bash
 python benchmark/organize_coco.py
@@ -25,6 +25,44 @@ For Cityscapes, provide the official archives:
 python benchmark/organize_cityscapes.py \
   --image-dir path/to/leftImg8bit_trainvaltest.zip \
   --annotation-dir path/to/gtFine_trainvaltest.zip
+```
+
+### SA-V (mask generation)
+
+Meta distributes SA-V through a
+[form-gated download portal](https://ai.meta.com/datasets/segment-anything-video-downloads/)
+and this package does not mirror it, so `--dataset-path` is required. Download
+`sav_val.tar` (about 15 GB), then:
+
+```bash
+python benchmark/organize_sav.py --dataset-path path/to/sav_val.tar
+```
+
+An already-extracted `sav_val` directory is accepted in place of the archive.
+The expected source layout is documented in the
+[SAM 2 `sav_dataset` README](https://github.com/facebookresearch/sam2/blob/main/sav_dataset/README.md):
+
+```text
+sav_val
+|-- sav_val.txt                                       # 155 video ids
+|-- JPEGImages_24fps/{video_id}/{frame:05d}.jpg       # frames at 24fps
+`-- Annotations_6fps/{video_id}/{object_id:03d}/{frame:05d}.png  # masks at 6fps
+```
+
+The organizer installs only the annotated frames, since annotations exist at
+6fps while frames are extracted at 24fps and evaluation can only use annotated
+frames. The result is validated before it replaces any existing cache: 155
+videos, 293 masklets, and 31967 annotated masks, with every mask checked for
+matching geometry and single-object values.
+
+Organizing needs roughly 20 GB of free space for the unpacked archive plus the
+installed copy; the archive itself can be deleted afterwards. Raw dataset
+archives are gitignored — never commit them.
+
+Once organized, validation reuses the cache and needs no further flags:
+
+```bash
+mblt-vision val --model sam2-hiera-large
 ```
 
 ## Run a benchmark
