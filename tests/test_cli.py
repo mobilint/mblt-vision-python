@@ -327,6 +327,55 @@ def test_benchmark_runner_excludes_unsupported_mask_generation() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--encoder-mxq-path", "encoder.mxq"),
+        ("--decoder-mxq-path", "decoder.mxq"),
+        ("--encoder-onnx-path", "encoder.onnx"),
+        ("--decoder-onnx-path", "decoder.onnx"),
+        ("--prompt-weights-path", "weights.pt"),
+    ],
+)
+@pytest.mark.parametrize("command", ["predict", "val"])
+def test_mask_only_overrides_rejected_for_other_tasks(
+    synthetic_image_path: Path, command: str, flag: str, value: str
+) -> None:
+    """The generic engine never receives these paths.
+
+    Accepting them would silently download and run the default single artifact
+    instead of the explicitly requested local one.
+    """
+
+    from mblt_vision.cli._vision import reject_mask_generation_only_options
+
+    argv = ["predict", "--source", str(synthetic_image_path), "--model", "resnet50"]
+    if command == "val":
+        argv = ["val", "--model", "resnet50"]
+    args = build_parser().parse_args([*argv, flag, value])
+
+    with pytest.raises(SystemExit, match="only supported for mask generation"):
+        reject_mask_generation_only_options(args)
+
+
+def test_mask_only_override_guard_is_a_noop_without_those_options() -> None:
+    """The guard only fires on the mask-generation-only flags.
+
+    It is invoked solely from the non-mask branches, so mask generation keeps
+    accepting these overrides -- see the parsing tests below.
+    """
+
+    from mblt_vision.cli._vision import reject_mask_generation_only_options
+
+    for argv in (
+        ["val", "--model", "resnet50"],
+        ["val", "--model", "resnet50", "--mxq-path", "model.mxq"],
+    ):
+        assert (
+            reject_mask_generation_only_options(build_parser().parse_args(argv)) is None
+        )
+
+
 def test_val_parses_mask_generation_options() -> None:
     """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
 

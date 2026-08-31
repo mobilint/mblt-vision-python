@@ -196,6 +196,15 @@ class SAM2HieraLarge(MBLT_Engine):
             # error rather than as a network/cache failure from an artifact
             # fetch that would have been useless anyway.
             ort = _load_onnxruntime() if self.framework == "onnx" else None
+            # Same reasoning for the MXQ board: an unknown target must report as
+            # such rather than as a network/cache failure from a download that
+            # would have been useless. Still ignored for ONNX, which is
+            # board-agnostic.
+            resolved_target_device = (
+                normalize_target_device(target_device or "aries-rb")
+                if self.framework == "mxq"
+                else ""
+            )
 
             resolved_prompt_weights_path = prompt_weights_path or download_hub_artifact(
                 repo_id=_REPO_ID,
@@ -230,9 +239,6 @@ class SAM2HieraLarge(MBLT_Engine):
                     label="decoder",
                 )
             else:
-                resolved_target_device = normalize_target_device(
-                    target_device or "aries-rb"
-                )
                 resolved_encoder_path = encoder_mxq_path or download_hub_artifact(
                     repo_id=_REPO_ID,
                     filename=_ENCODER_FILENAME,
@@ -283,6 +289,15 @@ class SAM2HieraLarge(MBLT_Engine):
         and conflict loudly with an explicitly selected opposite framework.
         """
 
+        # Lowercased before validation and before the path-conflict checks
+        # below, matching `_model_paths.resolve_framework`, so `framework="ONNX"`
+        # behaves the same here as it does for every other model.
+        if framework is not None:
+            if not isinstance(framework, str):
+                raise ValueError(
+                    f"framework must be 'mxq' or 'onnx', got {framework!r}."
+                )
+            framework = framework.lower()
         if framework is not None and framework not in ("mxq", "onnx"):
             raise ValueError(f"framework must be 'mxq' or 'onnx', got {framework!r}.")
         if framework == "mxq" and onnx_path_passed:

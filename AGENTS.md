@@ -115,7 +115,13 @@ The current ownership boundary is deliberate:
   and in the constructor, which uses `_close(suppress_errors=True)` like the base engine) so a
   failing `dispose()` cannot replace the original construction error. Validate every explicitly
   supplied artifact path -- prompt weights included -- with a fail-fast `FileNotFoundError` after
-  the argument-coherence checks but before any download. ONNX graph validation treats `-1` as
+  the argument-coherence checks but before any download, and normalize the MXQ `target_device`
+  there too so an unknown board reports as such rather than as a Hub failure. Lowercase an
+  explicit `framework` before validating it, matching `_model_paths.resolve_framework`, so
+  `framework="ONNX"` behaves as it does for every other model. Mask-generation-only CLI overrides
+  (`--encoder-*-path`, `--decoder-*-path`, `--prompt-weights-path`) must be rejected by every
+  command that builds a non-mask engine, since the generic engine never receives them and would
+  silently run the downloaded default instead. ONNX graph validation treats `-1` as
   "this axis must be declared dynamic" (ONNX Runtime reports a dynamic axis as a `str`), not as a
   wildcard: a decoder frozen at one token count would otherwise pass construction and fail inside
   ONNX Runtime for two- and three-point prompts. Point prompts are validated as 1-3 points with finite

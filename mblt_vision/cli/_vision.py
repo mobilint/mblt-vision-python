@@ -329,6 +329,39 @@ def reject_single_artifact_paths(args: argparse.Namespace) -> None:
         )
 
 
+MASK_GENERATION_ONLY_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("encoder_mxq_path", "--encoder-mxq-path"),
+    ("decoder_mxq_path", "--decoder-mxq-path"),
+    ("encoder_onnx_path", "--encoder-onnx-path"),
+    ("decoder_onnx_path", "--decoder-onnx-path"),
+    ("prompt_weights_path", "--prompt-weights-path"),
+)
+
+
+def reject_mask_generation_only_options(args: argparse.Namespace) -> None:
+    """Rejects two-artifact overrides for models that do not accept them.
+
+    The generic engine never receives these paths, so accepting them silently
+    downloads and runs the default single artifact instead of the requested
+    local one.
+
+    Raises:
+        SystemExit: If any mask-generation-only artifact override is set.
+    """
+
+    supplied = [
+        flag
+        for attribute, flag in MASK_GENERATION_ONLY_OPTIONS
+        if getattr(args, attribute, "")
+    ]
+    if supplied:
+        raise SystemExit(
+            f"{', '.join(supplied)} is only supported for mask generation models "
+            "such as SAM2HieraLarge. Use `--model-path`, `--mxq-path`, or "
+            "`--onnx-path` for this model."
+        )
+
+
 def create_mask_generation_engine(args: argparse.Namespace) -> Any:
     """Creates a promptable mask generation engine from shared CLI model options.
 
@@ -426,6 +459,7 @@ def run_vision_inference(
             "`--point` is only supported for mask generation models such as "
             "SAM2HieraLarge."
         )
+    reject_mask_generation_only_options(args)
     model = create_vision_engine(args)
     try:
         actual_task = normalize_vision_task(model.post_cfg.get("task", ""))

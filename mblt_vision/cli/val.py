@@ -20,6 +20,7 @@ from ._vision import (
     create_vision_engine,
     parse_target_clusters,
     parse_target_cores,
+    reject_mask_generation_only_options,
     resolve_cli_task,
 )
 
@@ -406,6 +407,7 @@ def _run_validation(args: argparse.Namespace) -> float:
     if resolve_cli_task(args) == "mask_generation":
         model = create_mask_generation_engine(args)
     else:
+        reject_mask_generation_only_options(args)
         model = create_vision_engine(args)
     try:
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):

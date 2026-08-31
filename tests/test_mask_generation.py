@@ -715,6 +715,44 @@ def test_sam2_framework_and_path_conflicts_fail_fast(
         SAM2HieraLarge(**kwargs)
 
 
+@pytest.mark.parametrize("framework", ["ONNX", "Onnx", "MXQ", "Mxq"])
+def test_sam2_framework_name_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, framework: str
+) -> None:
+    """Match `_model_paths.resolve_framework`, which lowercases explicit names."""
+
+    assert (
+        SAM2HieraLarge._resolve_framework(
+            framework, mxq_path_passed=False, onnx_path_passed=False
+        )
+        == framework.lower()
+    )
+
+    # The conflict checks run on the normalized value too.
+    with pytest.raises(ValueError, match="conflicts with explicit"):
+        SAM2HieraLarge._resolve_framework(
+            "ONNX", mxq_path_passed=True, onnx_path_passed=False
+        )
+
+
+def test_sam2_invalid_target_device_reported_before_any_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An unknown board must not surface as a Hub/network failure."""
+
+    _make_engine(monkeypatch, tmp_path)
+    downloads: list[str] = []
+
+    def _record_download(**kwargs: Any) -> str:
+        downloads.append(str(kwargs.get("filename")))
+        raise AssertionError("no artifact may be downloaded before target validation")
+
+    monkeypatch.setattr(sam2_module, "download_hub_artifact", _record_download)
+    with pytest.raises(ValueError, match="target_device"):
+        SAM2HieraLarge(target_device="not-a-board")
+    assert downloads == []
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
