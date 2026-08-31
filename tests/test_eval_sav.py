@@ -52,6 +52,49 @@ def test_calculate_sav_sample_ious_rejects_shape_mismatch() -> None:
         calculate_sav_sample_ious(np.zeros((4, 4), bool), np.zeros((4, 4), bool))
 
 
+def test_calculate_sav_sample_ious_rejects_non_binary_candidates() -> None:
+    """Logits, probabilities, and NaN must be reported, not silently binarized.
+
+    `astype(bool)` treats every nonzero value as foreground, including negative
+    logits, which would yield a plausible but meaningless IoU.
+    """
+
+    gt = np.zeros((4, 4), dtype=bool)
+    gt[:2, :2] = True
+
+    logits = np.full((1, 4, 4), -3.5, dtype=np.float32)
+    logits[0, :2, :2] = 4.0
+    with pytest.raises(ValueError, match="single positive foreground value"):
+        calculate_sav_sample_ious(logits, gt)
+
+    probabilities = np.linspace(0.0, 1.0, 16, dtype=np.float32).reshape(1, 4, 4)
+    with pytest.raises(ValueError, match="single positive foreground value"):
+        calculate_sav_sample_ious(probabilities, gt)
+
+    non_finite = np.zeros((1, 4, 4), dtype=np.float32)
+    non_finite[0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="must be finite"):
+        calculate_sav_sample_ious(non_finite, gt)
+
+
+@pytest.mark.parametrize(
+    "encoding",
+    [
+        np.array([[[True, False], [False, False]]]),
+        np.array([[[1, 0], [0, 0]]], dtype=np.uint8),
+        np.array([[[255, 0], [0, 0]]], dtype=np.uint8),
+        np.array([[[1.0, 0.0], [0.0, 0.0]]], dtype=np.float32),
+    ],
+)
+def test_calculate_sav_sample_ious_accepts_conventional_binary_encodings(
+    encoding: np.ndarray,
+) -> None:
+    """bool, {0, 1}, {0, 255} and float 0/1 all denote the same binary mask."""
+
+    gt = np.array([[True, False], [False, False]])
+    assert calculate_sav_sample_ious(encoding, gt) == [pytest.approx(1.0)]
+
+
 @pytest.mark.parametrize(
     ("num_points", "expected_labels"),
     [(1, [1]), (2, [1, 0]), (3, [1, 1, 0])],

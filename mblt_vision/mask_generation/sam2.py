@@ -26,6 +26,7 @@ and ``_sam2_host.py``, numerically verified bit-for-bit against the real
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -167,6 +168,25 @@ class SAM2HieraLarge(MBLT_Engine):
             mxq_path_passed=bool(encoder_mxq_path or decoder_mxq_path),
             onnx_path_passed=bool(encoder_onnx_path or decoder_onnx_path),
         )
+        # Every explicitly supplied artifact -- the prompt-weights bundle
+        # included -- is checked after the argument-coherence checks above but
+        # before any download, so an invalid local path is reported as such
+        # rather than surfacing as a Hub/network failure offline, or costing a
+        # pointless download online. Mirrors MBLT_Engine's fail-fast
+        # FileNotFoundError for explicit paths.
+        for label, path in (
+            ("encoder_mxq_path", encoder_mxq_path),
+            ("decoder_mxq_path", decoder_mxq_path),
+            ("encoder_onnx_path", encoder_onnx_path),
+            ("decoder_onnx_path", decoder_onnx_path),
+            ("prompt_weights_path", prompt_weights_path),
+        ):
+            if path and not Path(path).is_file():
+                raise FileNotFoundError(
+                    f"Explicit {label} does not exist: {path}. Remove it to "
+                    "download the configured artifact."
+                )
+
         resolved_revision = revision or "main"
 
         try:
@@ -246,7 +266,10 @@ class SAM2HieraLarge(MBLT_Engine):
                 name: tensor.to(self.device) for name, tensor in weights.items()
             }
         except Exception:
-            self.close()
+            # Suppress disposal failures while unwinding, as MBLT_Engine does:
+            # a backend that also raises from dispose() would otherwise replace
+            # the actionable original construction error.
+            self._close(suppress_errors=True)
             raise
 
     @staticmethod
@@ -310,7 +333,10 @@ class SAM2HieraLarge(MBLT_Engine):
             backend.create()
             backend.launch()
         except Exception:
-            backend.dispose()
+            # Never let a dispose() failure replace the load/launch error that
+            # actually explains what went wrong.
+            with suppress(Exception):
+                backend.dispose()
             raise
         return backend
 
@@ -341,7 +367,10 @@ class SAM2HieraLarge(MBLT_Engine):
             backend.create()
             validate_onnx_session_inputs(backend.get_inputs(), expected_inputs, label)
         except Exception:
-            backend.dispose()
+            # Never let a dispose() failure replace the session/validation error
+            # that actually explains what went wrong.
+            with suppress(Exception):
+                backend.dispose()
             raise
         return backend
 

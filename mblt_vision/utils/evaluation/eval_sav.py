@@ -114,6 +114,25 @@ def calculate_sav_sample_ious(
             "Candidate masks and ground truth shapes must match: "
             f"candidates {candidates.shape[1:]}, ground truth {gt.shape}."
         )
+    # `astype(bool)` would treat mask logits, probabilities, and NaN as
+    # foreground and report a plausible but meaningless IoU. Require an
+    # already-binarized map, accepting the conventional encodings (bool,
+    # {0, 1}, {0, 255}) with the same "one non-zero value" rule the SA-V
+    # ground-truth masks use.
+    for index, candidate in enumerate(candidates):
+        if candidate.dtype == np.bool_:
+            continue
+        if not bool(np.isfinite(candidate).all()):
+            raise ValueError(
+                f"Candidate mask {index} must be finite; got NaN or infinity."
+            )
+        foreground = set(np.unique(candidate).tolist()) - {0}
+        if len(foreground) > 1 or any(value <= 0 for value in foreground):
+            raise ValueError(
+                f"Candidate mask {index} must be a binary map with a single "
+                f"positive foreground value, got values {sorted(foreground)[:5]}. "
+                "predict() must return binarized masks, not logits or probabilities."
+            )
     return [mask_iou(candidate.astype(bool), gt) for candidate in candidates]
 
 

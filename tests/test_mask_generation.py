@@ -594,6 +594,85 @@ def test_sam2_framework_and_path_conflicts_fail_fast(
         SAM2HieraLarge(**kwargs)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"encoder_mxq_path": "missing-encoder.mxq"},
+        {"decoder_onnx_path": "missing-decoder.onnx"},
+        {"prompt_weights_path": "missing-weights.pt"},
+    ],
+)
+def test_sam2_missing_explicit_artifact_fails_before_any_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kwargs: dict[str, Any]
+) -> None:
+    """An invalid local path must be reported as such, not as a Hub failure.
+
+    Offline this would otherwise surface as a network error; online it would
+    cost a download before failing later in backend creation.
+    """
+
+    _make_onnx_engine(monkeypatch, tmp_path)
+    downloads: list[str] = []
+
+    def _record_download(**download_kwargs: Any) -> str:
+        downloads.append(str(download_kwargs.get("filename")))
+        raise AssertionError("no artifact may be downloaded before path validation")
+
+    monkeypatch.setattr(sam2_module, "download_hub_artifact", _record_download)
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        SAM2HieraLarge(**kwargs)
+    assert downloads == []
+
+
+def test_sam2_construction_error_survives_a_failing_dispose(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A dispose() failure must not replace the original construction error."""
+
+    class _UndisposableDriftedBackend(_DriftedDecoderONNXBackend):
+        def dispose(self) -> None:
+            raise RuntimeError("dispose exploded")
+
+    encoder_path, decoder_path = _make_onnx_engine(
+        monkeypatch, tmp_path, _UndisposableDriftedBackend
+    )
+
+    # The graph-drift ValueError is what tells the caller what is wrong; the
+    # dispose RuntimeError must not surface in its place.
+    with pytest.raises(ValueError, match="decoder ONNX input names mismatch"):
+        SAM2HieraLarge(
+            encoder_onnx_path=str(encoder_path), decoder_onnx_path=str(decoder_path)
+        )
+
+
+def test_sam2_onnx_rejects_a_frozen_prompt_token_axis(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A decoder exported with a fixed token dimension must fail construction.
+
+    It would otherwise work for one-point prompts and fail inside ONNX Runtime
+    for the advertised two- and three-point prompts.
+    """
+
+    class _FrozenTokenAxisBackend(_FakeONNXBackend):
+        def get_inputs(self) -> list[_FakeOnnxInput]:
+            if self._is_encoder:
+                return _ENCODER_ONNX_INPUTS
+            return [
+                _FakeOnnxInput("tokens", [1, 8, 256]),  # frozen, not symbolic
+                *_DECODER_ONNX_INPUTS[1:],
+            ]
+
+    encoder_path, decoder_path = _make_onnx_engine(
+        monkeypatch, tmp_path, _FrozenTokenAxisBackend
+    )
+
+    with pytest.raises(ValueError, match="must be dynamic"):
+        SAM2HieraLarge(
+            encoder_onnx_path=str(encoder_path), decoder_onnx_path=str(decoder_path)
+        )
+
+
 def test_sam2_onnx_predict_preprocessed_uses_the_exported_graph_contract(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

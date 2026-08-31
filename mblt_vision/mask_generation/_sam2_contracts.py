@@ -109,27 +109,43 @@ def validate_onnx_session_inputs(
     """Fail loudly at construction time if a resolved ONNX artifact's graph drifts.
 
     ``session_inputs`` is ONNX Runtime input metadata (``session.get_inputs()``).
-    ``-1`` in ``expected`` marks the dynamic token axis; an expected static
-    dimension must be declared statically by the graph as well.
+    An expected static dimension must be declared statically by the graph, and
+    ``-1`` marks an axis the graph must declare *dynamic* -- not a wildcard that
+    accepts anything. ONNX Runtime reports a dynamic axis as its symbolic name
+    (a ``str``), so a decoder exported with a frozen token dimension such as
+    ``(1, 8, 256)`` is rejected here rather than working for one-point prompts
+    and failing inside ONNX Runtime for the advertised two- and three-point
+    prompts.
     """
 
-    actual = {item.name: normalize_onnx_dims(item.shape) for item in session_inputs}
-    if set(actual) != set(expected):
+    raw_shapes = {item.name: tuple(item.shape) for item in session_inputs}
+    if set(raw_shapes) != set(expected):
         raise ValueError(
-            f"{label} ONNX input names mismatch: graph={sorted(actual)}, "
+            f"{label} ONNX input names mismatch: graph={sorted(raw_shapes)}, "
             f"expected={sorted(expected)}."
         )
     for name, shape in expected.items():
         want = tuple(int(dim) for dim in shape)
-        got = actual[name]
-        if len(got) != len(want) or any(
-            expected_dim != -1 and actual_dim != expected_dim
-            for actual_dim, expected_dim in zip(got, want)
-        ):
+        raw = raw_shapes[name]
+        got = normalize_onnx_dims(raw)
+        if len(raw) != len(want):
             raise ValueError(
                 f"{label} ONNX input '{name}' shape mismatch: graph={got}, "
                 f"expected={want}."
             )
+        for axis, (raw_dim, want_dim) in enumerate(zip(raw, want)):
+            if want_dim == -1:
+                if not isinstance(raw_dim, str):
+                    raise ValueError(
+                        f"{label} ONNX input '{name}' axis {axis} must be dynamic "
+                        f"to accept a varying prompt-token count, but the graph "
+                        f"declares it as {raw_dim!r} (graph={got})."
+                    )
+            elif not isinstance(raw_dim, int) or raw_dim != want_dim:
+                raise ValueError(
+                    f"{label} ONNX input '{name}' shape mismatch: graph={got}, "
+                    f"expected={want}."
+                )
 
 
 def classify_decoder_outputs(outputs: Sequence[np.ndarray]) -> dict[str, np.ndarray]:

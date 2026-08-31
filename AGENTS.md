@@ -106,7 +106,14 @@ The current ownership boundary is deliberate:
   downloading any artifact, so a missing `onnxruntime` reports the package extra rather than a
   network failure. Build each backend so it disposes itself when `launch()`/graph validation
   fails after `create()`: the caller only assigns it on success, so the constructor's cleanup
-  cannot otherwise reach it. Point prompts are validated as 1-3 points with finite
+  cannot otherwise reach it. Suppress disposal failures while unwinding (both in those builders
+  and in the constructor, which uses `_close(suppress_errors=True)` like the base engine) so a
+  failing `dispose()` cannot replace the original construction error. Validate every explicitly
+  supplied artifact path -- prompt weights included -- with a fail-fast `FileNotFoundError` after
+  the argument-coherence checks but before any download. ONNX graph validation treats `-1` as
+  "this axis must be declared dynamic" (ONNX Runtime reports a dynamic axis as a `str`), not as a
+  wildcard: a decoder frozen at one token count would otherwise pass construction and fail inside
+  ONNX Runtime for two- and three-point prompts. Point prompts are validated as 1-3 points with finite
   coordinates and labels of exactly `1`/`0` (checked before the integer cast, which would
   otherwise truncate `0.5` into a valid label) before any backend call, and host prompt tensors
   are built on the weights' device so `device="cuda"` works. `classify_decoder_outputs` requires

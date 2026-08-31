@@ -42,8 +42,11 @@ description: >-
   and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
   framework-independent; only fpn_from_onnx/prepare_decoder_tensors_onnx vs
   fpn_from_runtime/prepare_decoder_tensors differ. eval_sav works unchanged for both.
-  Load the optional runtime before downloading artifacts; dispose a backend that fails after
-  create() inside its builder (the caller assigns it only on success); validate point labels as
+  Load the optional runtime before downloading artifacts; validate explicit artifact paths
+  (prompt weights included) with FileNotFoundError before any download; dispose a backend that
+  fails after create() inside its builder (the caller assigns it only on success) while
+  suppressing dispose failures so they cannot mask the original error; treat -1 in ONNX graph
+  validation as "must be dynamic", not a wildcard; validate point labels as
   exactly 1/0; build host prompt tensors on the weights' device so device="cuda" works; and
   reject single-artifact path options in every CLI command that builds the engine, not just
   predict.
