@@ -121,7 +121,12 @@ The current ownership boundary is deliberate:
   ONNX Runtime for two- and three-point prompts. Point prompts are validated as 1-3 points with finite
   coordinates and labels of exactly `1`/`0` (checked before the integer cast, which would
   otherwise truncate `0.5` into a valid label) before any backend call, and host prompt tensors
-  are built on the weights' device so `device="cuda"` works. `classify_decoder_outputs` requires
+  are built on the weights' device so `device="cuda"` works. `original_hw` is likewise validated
+  as exactly two positive whole numbers, and the source image as numeric and finite, before
+  either backend runs: interpolation preserves NaN, and a zero dimension yields infinite prompt
+  coordinates. Both FPN converters pin each level's complete `(C, H, W)` rather than only its
+  channel count, since `build_backbone_features` `view()`s them and a same-element-count geometry
+  would be silently rearranged into a corrupted FPN that still passes every downstream check. `classify_decoder_outputs` requires
   exactly three mask candidates and rejects non-finite decoder outputs, so a NaN cannot reach
   `argmax` over the IoU scores or the `> 0` mask threshold. Mask generation models reject `--model-path`/`--mxq-path`/`--onnx-path`
   in every CLI command that builds one, never only in `predict`.

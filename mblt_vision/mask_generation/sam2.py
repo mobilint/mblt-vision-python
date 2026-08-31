@@ -26,6 +26,7 @@ and ``_sam2_host.py``, numerically verified bit-for-bit against the real
 
 from __future__ import annotations
 
+import math
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Sequence
@@ -423,6 +424,24 @@ class SAM2HieraLarge(MBLT_Engine):
         """
 
         self._ensure_open()
+        # Checked before either backend runs: a zero dimension makes
+        # transform_points produce infinite coordinates, and a fractional or
+        # wrong-length size fails only in the final mask resize, after both
+        # backends have already executed, as an opaque runtime error.
+        original_hw_values = list(np.asarray(original_hw).reshape(-1))
+        if len(original_hw_values) != 2 or np.asarray(original_hw).ndim != 1:
+            raise ValueError(
+                f"Expected original_hw as (height, width), got {original_hw!r}."
+            )
+        for axis, value in zip(("height", "width"), original_hw_values):
+            number = float(value)
+            if not math.isfinite(number) or number != int(number) or number <= 0:
+                raise ValueError(
+                    f"original_hw {axis} must be a positive whole number, "
+                    f"got {value!r}."
+                )
+        original_hw = (int(original_hw_values[0]), int(original_hw_values[1]))
+
         points_array = np.asarray(points, dtype=np.float32)
         # Read labels without an integer cast first: casting to int64 truncates,
         # so 0.5/1.9/-0.1 would silently become valid 0/1 labels and pass the

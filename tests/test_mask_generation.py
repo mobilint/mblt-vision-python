@@ -396,6 +396,99 @@ def test_predict_preprocessed_rejects_unsupported_point_labels(
         engine.close()
 
 
+@pytest.mark.parametrize(
+    "bad_hw",
+    [(0, 640), (640, 0), (-1, 480), (640.5, 480), (640, 480, 3), (640,)],
+)
+def test_predict_preprocessed_rejects_malformed_original_hw(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bad_hw: tuple[int, ...]
+) -> None:
+    """Geometry is validated before either backend runs.
+
+    A zero dimension makes transform_points produce infinite coordinates, and a
+    fractional or wrong-length size otherwise fails only in the final mask
+    resize, after both backends have already executed.
+    """
+
+    encoder_path, decoder_path = _make_engine(monkeypatch, tmp_path)
+    engine = SAM2HieraLarge(
+        encoder_mxq_path=str(encoder_path), decoder_mxq_path=str(decoder_path)
+    )
+    try:
+        with pytest.raises(ValueError, match="original_hw"):
+            engine.predict_preprocessed(
+                np.zeros((1024, 1024, 3), dtype=np.float32),
+                bad_hw,
+                points=[[10.0, 10.0]],
+                labels=[1],
+            )
+    finally:
+        engine.close()
+
+
+def test_preprocess_rejects_non_finite_and_non_numeric_images() -> None:
+    """Interpolation and normalization preserve NaN, so catch it at the source.
+
+    Otherwise the backend fails in a runtime-specific way and the decoder-output
+    finiteness check fires too late to name the offending input.
+    """
+
+    from mblt_vision.mask_generation._sam2_host import preprocess_encoder_input
+
+    non_finite = np.zeros((32, 32, 3), dtype=np.float32)
+    non_finite[0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="must be finite"):
+        preprocess_encoder_input(non_finite)
+
+    infinite = np.zeros((32, 32, 3), dtype=np.float32)
+    infinite[1, 1, 1] = np.inf
+    with pytest.raises(ValueError, match="must be finite"):
+        preprocess_encoder_input(infinite)
+
+    with pytest.raises(ValueError, match="numeric RGB image"):
+        preprocess_encoder_input(np.full((4, 4, 3), "x"))
+
+    # uint8 and float sources both remain supported.
+    for supported in (
+        np.zeros((32, 32, 3), dtype=np.uint8),
+        np.zeros((32, 32, 3), dtype=np.float32),
+    ):
+        assert preprocess_encoder_input(supported).shape == (1, 1024, 1024, 3)
+
+
+@pytest.mark.parametrize("converter", ["runtime", "onnx"])
+def test_fpn_converters_pin_the_complete_level_shape(converter: str) -> None:
+    """A channel-correct level with wrong geometry must not be reshaped.
+
+    (1, 32, 128, 512) has the same element count as (1, 32, 256, 256), so
+    build_backbone_features would view it into a plausible but corrupted FPN
+    that then passes every downstream decoder-feed check.
+    """
+
+    from mblt_vision.mask_generation._sam2_host import fpn_from_onnx, fpn_from_runtime
+
+    if converter == "onnx":
+        convert = fpn_from_onnx
+        good = [
+            np.zeros((1, 32, 256, 256), dtype=np.float32),
+            np.zeros((1, 64, 128, 128), dtype=np.float32),
+            np.zeros((1, 256, 64, 64), dtype=np.float32),
+        ]
+        wrong_geometry = np.zeros((1, 32, 128, 512), dtype=np.float32)
+    else:
+        convert = fpn_from_runtime
+        good = [
+            np.zeros((256, 256, 32), dtype=np.float32),
+            np.zeros((128, 128, 64), dtype=np.float32),
+            np.zeros((64, 64, 256), dtype=np.float32),
+        ]
+        wrong_geometry = np.zeros((128, 512, 32), dtype=np.float32)
+
+    assert len(convert(good, torch.device("cpu"))) == 3
+    with pytest.raises(ValueError, match="spatially"):
+        convert([wrong_geometry, *good[1:]], torch.device("cpu"))
+
+
 def test_predict_preprocessed_rejects_non_finite_point_coordinates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

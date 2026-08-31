@@ -36,6 +36,15 @@ class BackboneFeatures(TypedDict):
 
 
 _FPN_CHANNELS = (32, 64, 256)
+# Each FPN level's full (channels, height, width). `build_backbone_features`
+# `view()`s these into `prompt.BB_FEAT_SIZES`, so a channel-correct level with
+# the wrong spatial geometry but the same element count -- (1, 32, 128, 512)
+# for (1, 32, 256, 256) -- would be silently rearranged into a plausible but
+# corrupted FPN, after which the decoder feed still has the expected shape and
+# passes its own validation. Pin the complete shape, not just the channel count.
+_FPN_LEVEL_SHAPES: dict[int, tuple[int, int]] = dict(
+    zip(_FPN_CHANNELS, prompt.BB_FEAT_SIZES)
+)
 
 _NORMALIZE_MEAN = torch.tensor(prompt.NORMALIZE_MEAN, dtype=torch.float32).view(
     -1, 1, 1
@@ -64,6 +73,18 @@ def preprocess_encoder_input(image: np.ndarray) -> np.ndarray:
     array = np.asarray(image)
     if array.ndim != 3 or array.shape[2] != 3:
         raise ValueError(f"Expected an HWC RGB image, got shape {array.shape}.")
+    # Interpolation and normalization preserve NaN/infinity, so a non-finite
+    # source image would reach the backend as an invalid encoder tensor and
+    # fail in a backend-specific way -- by the time the decoder-output
+    # finiteness check fires, the source is no longer identifiable.
+    if not (
+        np.issubdtype(array.dtype, np.floating)
+        or np.issubdtype(array.dtype, np.integer)
+        or array.dtype == np.bool_
+    ):
+        raise ValueError(f"Expected a numeric RGB image, got dtype {array.dtype}.")
+    if np.issubdtype(array.dtype, np.floating) and not bool(np.isfinite(array).all()):
+        raise ValueError("Source image must be finite; got NaN or infinity.")
     # HWC -> CHW as a fresh contiguous copy; PIL-backed arrays are read-only
     # and torch.from_numpy warns on non-writable memory.
     chw = np.ascontiguousarray(array.transpose(2, 0, 1))
@@ -117,6 +138,14 @@ def fpn_from_runtime(
             continue
         if channel in features:
             raise ValueError(f"Duplicate encoder output with {channel} channels.")
+        expected_spatial = _FPN_LEVEL_SHAPES[channel]
+        if tuple(tensor.shape[2:]) != expected_spatial:
+            raise ValueError(
+                f"Encoder output with {channel} channels must be "
+                f"{expected_spatial} spatially, got {tuple(tensor.shape[2:])}. "
+                "A same-element-count geometry would be silently rearranged into "
+                "a corrupted FPN."
+            )
         features[channel] = tensor.to(device)
 
     missing = [channel for channel in _FPN_CHANNELS if channel not in features]
@@ -153,6 +182,14 @@ def fpn_from_onnx(
                 f"(1, C, H, W) with C in {_FPN_CHANNELS}. Got shapes {shapes}."
             )
         channel = int(array.shape[1])
+        expected_spatial = _FPN_LEVEL_SHAPES[channel]
+        if tuple(array.shape[2:]) != expected_spatial:
+            raise ValueError(
+                f"Encoder ONNX output with {channel} channels must be "
+                f"{expected_spatial} spatially, got {tuple(array.shape[2:])}. "
+                "A same-element-count geometry would be silently rearranged into "
+                "a corrupted FPN."
+            )
         if channel in features:
             raise ValueError(f"Duplicate encoder output with {channel} channels.")
         features[channel] = torch.from_numpy(np.ascontiguousarray(array)).to(device)
