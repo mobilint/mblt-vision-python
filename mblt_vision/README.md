@@ -404,11 +404,16 @@ mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,
 mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1 --framework onnx
 ```
 
-Validate with the built-in SA-V evaluation (the dataset downloads and organizes
-automatically on the first run):
+Validate with the built-in SA-V evaluation. Unlike the auto-downloading datasets,
+SA-V must be obtained manually: Meta distributes it through a
+[gated download form](https://ai.meta.com/datasets/segment-anything-video-downloads/),
+and this package does not mirror it. Download `sav_val.tar`, then pass it (or its
+extracted `sav_val` directory) on the first run; it is organized into the dataset
+cache and reused afterwards. The official layout is documented in the
+[SAM 2 `sav_dataset` README](https://github.com/facebookresearch/sam2/blob/main/sav_dataset/README.md).
 
 ```bash
-mblt-vision val --model sam2-hiera-large
+mblt-vision val --model sam2-hiera-large --annotation-dir /path/to/sav_val.tar
 mblt-vision val --model sam2-hiera-large --framework onnx
 ```
 

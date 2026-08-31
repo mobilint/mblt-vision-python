@@ -62,7 +62,7 @@ DOTAV1_CLASS_TO_IDX = {
 COCO_DOWNLOAD_CONFIG = get_dataset_config("coco")["download"]
 ADE20K_DOWNLOAD_CONFIG = get_dataset_config("ade20k")["download"]
 SAV_DOWNLOAD_CONFIG = get_dataset_config("sa-v")["download"]
-SAV_URL = SAV_DOWNLOAD_CONFIG["url"]
+SAV_ARCHIVE = SAV_DOWNLOAD_CONFIG["archive"]
 NYU_DEPTH_URL = (
     "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 )
@@ -77,7 +77,10 @@ PINNED_ARCHIVE_SHA256 = {
     COCO_DOWNLOAD_CONFIG["images"]: COCO_DOWNLOAD_CONFIG["images_sha256"],
     COCO_DOWNLOAD_CONFIG["annotations"]: COCO_DOWNLOAD_CONFIG["annotations_sha256"],
     ADE20K_DOWNLOAD_CONFIG["url"]: ADE20K_DOWNLOAD_CONFIG["sha256"],
-    SAV_DOWNLOAD_CONFIG["url"]: SAV_DOWNLOAD_CONFIG["sha256"],
+    # SA-V is deliberately absent: it is user-supplied from Meta's gated
+    # portal rather than fetched from a URL this package controls, so there is
+    # no download to pin. Its identity is enforced on content by readiness
+    # (video/masklet/mask counts plus per-mask geometry and values).
 }
 
 
@@ -1550,14 +1553,20 @@ def _validate_staged_sav_masks(staged_root: Path) -> None:
 
 
 def organize_sav(
-    dataset_path: str = SAV_URL,
+    dataset_path: str,
     output_dir: str | None = None,
 ) -> None:
-    """Organizes SA-V validation, downloading and unpacking an archive when necessary.
+    """Organizes SA-V validation from a manually downloaded archive or directory.
+
+    ``dataset_path`` is required because SA-V is distributed through Meta's
+    form-gated portal and is not mirrored by this package, so there is no
+    default source to download (unlike the other organizers).
 
     Args:
-        dataset_path: Path or URL to the ``sav_val.tar`` archive or extracted
-            dataset directory.
+        dataset_path: Path to the manually downloaded ``sav_val.tar`` archive
+            or its extracted dataset directory. See
+            https://github.com/facebookresearch/sam2/blob/main/sav_dataset/README.md
+            for the official layout.
         output_dir: Directory to store the organized dataset. Defaults to the
             resolved Mobilint cache directory.
     """

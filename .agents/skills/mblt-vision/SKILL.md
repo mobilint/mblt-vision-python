@@ -37,9 +37,11 @@ description: >-
   facebookresearch/sam2 checkout. mask_generation's host-side prompt encoding is a from-scratch
   port verified bit-for-bit against the real predictor, backed by a small Hub-hosted weights
   bundle, not package data.
-- mask_generation validates on SA-V val via datasets/sa-v.yaml, auto-downloaded from the
-  Mobilint Hub mirror datasets/mobilint/sa-v (unmodified official sav_val.tar; CC BY 4.0 by
-  Meta AI -- keep the mirror attribution and the pinned sha256). Registering a new dataset
+- mask_generation validates on SA-V val via datasets/sa-v.yaml. SA-V is NOT auto-downloaded and
+  must never be mirrored on Mobilint infrastructure: Meta gates it behind a download form, so the
+  user supplies the official sav_val.tar (or its extracted directory) with
+  --annotation-dir/--image-dir, like Cityscapes. Not sha256-pinned (user-supplied, not fetched);
+  identity comes from the readiness inventory. CC BY 4.0 by Meta AI. Registering a new dataset
   requires readiness (`_*_ready` + `dataset_ready` map) before the organizer, since staged
   validation calls `dataset_ready`; also register the organizer in the
   test_dataset_organizer.py parametrize lists.

@@ -257,6 +257,33 @@ def test_find_existing_source_never_returns_the_organized_cache(
     assert _find_existing_source(str(data_path), candidates) == str(real_source)
 
 
+def test_val_requires_a_manually_downloaded_sav_archive(tmp_path: Path) -> None:
+    """SA-V is gated by Meta and not mirrored, so there is no default source.
+
+    The error must name the portal, the layout reference, and the flags that
+    accept the archive, rather than falling back to a URL.
+    """
+
+    from mblt_vision.cli.val import _resolve_sav_source
+
+    args = build_parser().parse_args(["val", "--model", "sam2-hiera-large"])
+    data_path = tmp_path / "datasets" / "sa-v"
+    data_path.mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as excinfo:
+        _resolve_sav_source(args, str(data_path))
+    message = str(excinfo.value)
+    assert "sav_val.tar" in message
+    assert "ai.meta.com" in message
+    assert "sav_dataset" in message
+    assert "--annotation-dir" in message
+
+    # A manually downloaded archive beside the dataset path is accepted.
+    archive = data_path.parent / "sav_val.tar"
+    archive.write_bytes(b"archive")
+    assert _resolve_sav_source(args, str(data_path)) == str(archive)
+
+
 def test_val_parses_mask_generation_options() -> None:
     """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
 

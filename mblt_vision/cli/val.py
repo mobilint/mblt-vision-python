@@ -34,7 +34,7 @@ DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
 DEFAULT_NYU_DEPTH_SOURCE = get_dataset_config("nyu-depth")["download"]["url"]
 DEFAULT_ADE20K_SOURCE = get_dataset_config("ade20k")["download"]["url"]
-DEFAULT_SAV_SOURCE = get_dataset_config("sa-v")["download"]["url"]
+SAV_DOWNLOAD_CONFIG = get_dataset_config("sa-v")["download"]
 CITYSCAPES_DOWNLOAD_CONFIG = get_dataset_config("cityscapes")["download"]
 CITYSCAPES_IMAGE_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["images_archive"]
 CITYSCAPES_ANNOTATION_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["annotations_archive"]
@@ -184,14 +184,39 @@ def _resolve_nyu_depth_source(args: argparse.Namespace, data_path: str) -> str:
 
 
 def _resolve_sav_source(args: argparse.Namespace, data_path: str) -> str:
-    """Resolve a local archive or URL for SA-V organization."""
+    """Resolve the manually downloaded SA-V validation archive or directory.
+
+    SA-V is distributed through Meta's form-gated portal and is not mirrored by
+    this package, so unlike the auto-downloading datasets there is no default
+    source to fall back to.
+
+    Args:
+        args: Parsed validation CLI arguments.
+        data_path: Organized SA-V output path used as a discovery anchor.
+
+    Returns:
+        Path to the ``sav_val.tar`` archive or its extracted directory.
+
+    Raises:
+        SystemExit: If the archive or extracted directory cannot be found.
+    """
 
     dataset_path = args.annotation_dir or args.image_dir
     if not args.force_organize:
         dataset_path = dataset_path or _find_existing_source(
-            data_path, ["sav_val.tar", "sa-v", "sav_val"]
+            data_path, [SAV_DOWNLOAD_CONFIG["archive"], "sav_val"]
         )
-    return dataset_path or DEFAULT_SAV_SOURCE
+    if not dataset_path:
+        raise SystemExit(
+            "SA-V organization requires the official validation archive, which Meta "
+            "distributes through a gated download form and this package does not mirror.\n"
+            f"  Download it at {SAV_DOWNLOAD_CONFIG['source']}\n"
+            f"  Layout reference: {SAV_DOWNLOAD_CONFIG['documentation']}\n"
+            f"Pass the resulting {SAV_DOWNLOAD_CONFIG['archive']} (or its extracted "
+            "`sav_val` directory) with --annotation-dir or --image-dir, or place it "
+            "near the dataset path."
+        )
+    return dataset_path
 
 
 def _resolve_ade20k_source(args: argparse.Namespace, data_path: str) -> str:

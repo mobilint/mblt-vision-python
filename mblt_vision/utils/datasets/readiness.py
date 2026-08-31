@@ -34,10 +34,12 @@ CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
 SAV_VALIDATION_VIDEO_COUNT = 155
 SAV_VALIDATION_MASKLET_COUNT = 293
 # Total per-object annotated masks across every masklet, measured from the
-# organized sha256-pinned official `sav_val.tar` (see `datasets/sa-v.yaml` and
-# `PINNED_ARCHIVE_SHA256`). Masklet and video counts alone accept a truncated
-# source that keeps every masklet but only a few of its annotated frames,
-# which would silently change the evaluation corpus; this pins the inventory.
+# organized official `sav_val.tar` (see `datasets/sa-v.yaml`). The archive is
+# user-supplied from Meta's gated portal rather than downloaded from a URL this
+# package controls, so these counts -- not an archive checksum -- are what
+# establish dataset identity. Masklet and video counts alone accept a truncated
+# source that keeps every masklet but only a few of its annotated frames, which
+# would silently change the evaluation corpus; this pins the inventory.
 SAV_VALIDATION_MASK_COUNT = 31967
 ADE20K_METADATA_FILES = ("objectInfo150.txt", "sceneCategories.txt")
 IMAGENET_CLASS_PATTERN = re.compile(r"n\d{8}")

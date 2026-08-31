@@ -3,16 +3,25 @@
 # distributed as extracted JPEG frames (24fps) and per-object binary PNG
 # masks (6fps). Organized paths are relative to `path`.
 #
-# The archive is the unmodified official `sav_val.tar`, mirrored with
-# attribution on the Mobilint Hugging Face organization because Meta's
-# download page is form-gated. SA-V is licensed CC BY 4.0 by Meta AI:
-# https://ai.meta.com/datasets/segment-anything-video/
+# SA-V is distributed by Meta behind a form-gated download portal and is not
+# mirrored on Mobilint infrastructure, so it cannot be fetched automatically:
+# download `sav_val.tar` yourself and pass it (or its extracted `sav_val/`
+# directory) to the organizer. The official layout this package expects is
+# documented in the SAM 2 repository, linked below. SA-V is licensed
+# CC BY 4.0 by Meta AI.
+#
+# The archive is not sha256-pinned because it is user-supplied rather than
+# fetched from a URL this package controls. Dataset identity is enforced on
+# content instead: readiness requires 155 videos, 293 masklets and 31967
+# annotated masks, and validates every mask's geometry and single-object
+# values.
 name: sa-v
 path: ~/.mblt_model_zoo/datasets/sa-v
 val: images
 tasks:
   - mask_generation
 download:
-  url: https://huggingface.co/datasets/mobilint/sa-v/resolve/main/sav_val.tar
-  sha256: 81b83d9a24aec921e39e532e933a86496d12c001ebb733591c9f29a3f205a83b
-  source: https://ai.meta.com/datasets/segment-anything-video/
+  type: manual
+  source: https://ai.meta.com/datasets/segment-anything-video-downloads/
+  documentation: https://github.com/facebookresearch/sam2/blob/main/sav_dataset/README.md
+  archive: sav_val.tar
