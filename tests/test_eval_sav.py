@@ -64,17 +64,31 @@ def test_calculate_sav_sample_ious_rejects_non_binary_candidates() -> None:
 
     logits = np.full((1, 4, 4), -3.5, dtype=np.float32)
     logits[0, :2, :2] = 4.0
-    with pytest.raises(ValueError, match="single positive foreground value"):
+    with pytest.raises(ValueError, match="must be a binary map"):
         calculate_sav_sample_ious(logits, gt)
 
     probabilities = np.linspace(0.0, 1.0, 16, dtype=np.float32).reshape(1, 4, 4)
-    with pytest.raises(ValueError, match="single positive foreground value"):
+    with pytest.raises(ValueError, match="must be a binary map"):
         calculate_sav_sample_ious(probabilities, gt)
 
     non_finite = np.zeros((1, 4, 4), dtype=np.float32)
     non_finite[0, 0, 0] = np.nan
     with pytest.raises(ValueError, match="must be finite"):
         calculate_sav_sample_ious(non_finite, gt)
+
+    # A single positive value is not sufficient: a thresholded probability map
+    # and a degenerate uniform one both have exactly one, and the latter would
+    # silently become an all-foreground mask.
+    thresholded = np.where(gt, 0.5, 0.0).astype(np.float32)[None]
+    with pytest.raises(ValueError, match="must be a binary map"):
+        calculate_sav_sample_ious(thresholded, gt)
+
+    uniform = np.full((1, 4, 4), 0.5, dtype=np.float32)
+    with pytest.raises(ValueError, match="must be a binary map"):
+        calculate_sav_sample_ious(uniform, gt)
+
+    with pytest.raises(ValueError, match="unsupported dtype"):
+        calculate_sav_sample_ious(np.array([[["a", "b"], ["c", "d"]]]), gt[:2, :2])
 
 
 @pytest.mark.parametrize(
@@ -93,6 +107,22 @@ def test_calculate_sav_sample_ious_accepts_conventional_binary_encodings(
 
     gt = np.array([[True, False], [False, False]])
     assert calculate_sav_sample_ious(encoding, gt) == [pytest.approx(1.0)]
+
+
+@pytest.mark.parametrize(
+    ("degenerate", "expected_iou"),
+    [
+        (np.zeros((1, 2, 2), dtype=np.uint8), 0.0),
+        (np.ones((1, 2, 2), dtype=np.uint8), 0.25),
+    ],
+)
+def test_calculate_sav_sample_ious_accepts_empty_and_full_masks(
+    degenerate: np.ndarray, expected_iou: float
+) -> None:
+    """An all-background or all-foreground prediction is valid, just wrong."""
+
+    gt = np.array([[True, False], [False, False]])
+    assert calculate_sav_sample_ious(degenerate, gt) == [pytest.approx(expected_iou)]
 
 
 @pytest.mark.parametrize(

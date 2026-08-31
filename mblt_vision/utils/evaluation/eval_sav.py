@@ -114,24 +114,37 @@ def calculate_sav_sample_ious(
             "Candidate masks and ground truth shapes must match: "
             f"candidates {candidates.shape[1:]}, ground truth {gt.shape}."
         )
-    # `astype(bool)` would treat mask logits, probabilities, and NaN as
-    # foreground and report a plausible but meaningless IoU. Require an
-    # already-binarized map, accepting the conventional encodings (bool,
-    # {0, 1}, {0, 255}) with the same "one non-zero value" rule the SA-V
-    # ground-truth masks use.
+    # `astype(bool)` would treat logits, probabilities, and NaN as foreground
+    # and report a plausible but meaningless IoU, so candidates must already be
+    # binarized in one of the documented encodings. The permitted values are
+    # enumerated per dtype rather than merely required to be "a single positive
+    # value": that weaker rule still admits a probability map such as
+    # {0.0, 0.5}, or a degenerate uniform 0.5 candidate that silently becomes
+    # all-foreground. This is deliberately stricter than the SA-V ground-truth
+    # mask check, where any single positive value is a legitimate object ID.
     for index, candidate in enumerate(candidates):
         if candidate.dtype == np.bool_:
             continue
-        if not bool(np.isfinite(candidate).all()):
+        if np.issubdtype(candidate.dtype, np.floating):
+            if not bool(np.isfinite(candidate).all()):
+                raise ValueError(
+                    f"Candidate mask {index} must be finite; got NaN or infinity."
+                )
+            permitted: tuple[set[float], ...] = ({0.0, 1.0},)
+        elif np.issubdtype(candidate.dtype, np.integer):
+            permitted = ({0.0, 1.0}, {0.0, 255.0})
+        else:
             raise ValueError(
-                f"Candidate mask {index} must be finite; got NaN or infinity."
+                f"Candidate mask {index} has unsupported dtype {candidate.dtype}; "
+                "predict() must return a boolean, integer, or floating binary map."
             )
-        foreground = set(np.unique(candidate).tolist()) - {0}
-        if len(foreground) > 1 or any(value <= 0 for value in foreground):
+        values = {float(value) for value in np.unique(candidate).tolist()}
+        if not any(values <= allowed for allowed in permitted):
             raise ValueError(
-                f"Candidate mask {index} must be a binary map with a single "
-                f"positive foreground value, got values {sorted(foreground)[:5]}. "
-                "predict() must return binarized masks, not logits or probabilities."
+                f"Candidate mask {index} must be a binary map encoded as bool, "
+                f"{{0, 1}}, or {{0, 255}} for integers, or {{0.0, 1.0}} for floats; "
+                f"got values {sorted(values)[:5]}. predict() must return binarized "
+                "masks, not logits or probabilities."
             )
     return [mask_iou(candidate.astype(bool), gt) for candidate in candidates]
 
