@@ -31,6 +31,16 @@ WIDERFACE_VALIDATION_SAMPLE_COUNT = 3226
 NYU_DEPTH_VALIDATION_SAMPLE_COUNT = 654
 ADE20K_VALIDATION_SAMPLE_COUNT = 2000
 CITYSCAPES_VALIDATION_SAMPLE_COUNT = 500
+SAV_VALIDATION_VIDEO_COUNT = 155
+SAV_VALIDATION_MASKLET_COUNT = 293
+# Total per-object annotated masks across every masklet, measured from the
+# organized official `sav_val.tar` (see `datasets/sa-v.yaml`). The archive is
+# user-supplied from Meta's gated portal rather than downloaded from a URL this
+# package controls, so these counts -- not an archive checksum -- are what
+# establish dataset identity. Masklet and video counts alone accept a truncated
+# source that keeps every masklet but only a few of its annotated frames, which
+# would silently change the evaluation corpus; this pins the inventory.
+SAV_VALIDATION_MASK_COUNT = 31967
 ADE20K_METADATA_FILES = ("objectInfo150.txt", "sceneCategories.txt")
 IMAGENET_CLASS_PATTERN = re.compile(r"n\d{8}")
 IMAGENET_IMAGE_PATTERN = re.compile(r"ILSVRC2012_val_\d{8}")
@@ -39,6 +49,9 @@ WIDERFACE_EVENT_PATTERN = re.compile(r"\d+--\S.*")
 CITYSCAPES_SAMPLE_ID_PATTERN = re.compile(
     r"^(?P<city>[A-Za-z][A-Za-z0-9-]*)_\d{6}_\d{6}$"
 )
+SAV_VIDEO_ID_PATTERN = re.compile(r"^sav_\d{6}$")
+SAV_OBJECT_ID_PATTERN = re.compile(r"^\d{3}$")
+SAV_FRAME_STEM_PATTERN = re.compile(r"^\d{5}$")
 CITYSCAPES_VALIDATION_CITY_COUNTS = {"frankfurt": 267, "lindau": 59, "munster": 174}
 IMAGENET_SYNSET_ORDER = tuple(
     files("mblt_vision.datasets")
@@ -1011,6 +1024,123 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     return False
 
 
+def _sav_mask_is_valid(mask_path: Path, frame_shape: tuple[int, int]) -> bool:
+    """Return whether one cached SA-V mask matches its frame and is single-object.
+
+    Both properties are checked for every mask. The value constraint is
+    discharged from the image mode when the file is bilevel: a 1-bit PNG can
+    only encode two values with zero as background, so it cannot hold the
+    ``{1, 2}`` case that ``CustomSAV``'s ``> 0`` binarization would turn
+    entirely into foreground. Any other mode is decoded and checked directly.
+    The official split is bilevel throughout, so this reads headers rather
+    than decoding ~32k full-resolution masks on every readiness call.
+    """
+
+    try:
+        with Image.open(mask_path) as mask_image:
+            if (mask_image.height, mask_image.width) != frame_shape:
+                return False
+            if mask_image.mode == "1":
+                return True
+            mask = np.asarray(mask_image)
+    except OSError:
+        return False
+    return mask.ndim == 2 and len(set(np.unique(mask).tolist()) - {0}) <= 1
+
+
+def _sav_ready(root: Path) -> bool:
+    """Return whether an organized SA-V validation split is complete.
+
+    Validates the id list, per-video image/annotation directory identity, the
+    total masklet count, and mask/frame stem consistency. Decodes one
+    frame/mask pair per video (155 decodes) rather than the full multi-
+    thousand-file corpus, which would make this readiness probe too slow for
+    its per-`val`-invocation call site; the organizer's staged payload
+    validation decodes every mask once at install time instead.
+    """
+
+    if _path_has_symlink_component(root) or not root.is_dir():
+        return False
+    video_ids_path = root / "video_ids.txt"
+    if video_ids_path.is_symlink() or not video_ids_path.is_file():
+        return False
+    try:
+        video_ids = [
+            line.strip()
+            for line in video_ids_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, UnicodeDecodeError):
+        return False
+    if len(video_ids) != SAV_VALIDATION_VIDEO_COUNT or len(set(video_ids)) != len(
+        video_ids
+    ):
+        return False
+    if any(SAV_VIDEO_ID_PATTERN.fullmatch(video_id) is None for video_id in video_ids):
+        return False
+
+    image_root = root / "images"
+    annotation_root = root / "annotations"
+    for directory in (image_root, annotation_root):
+        if directory.is_symlink() or not directory.is_dir():
+            return False
+        entries = list(directory.iterdir())
+        if any(entry.is_symlink() for entry in entries):
+            return False
+        if {entry.name for entry in entries if entry.is_dir()} != set(video_ids):
+            return False
+
+    total_masklets = 0
+    total_masks = 0
+    for video_id in video_ids:
+        images = _files_by_stem(image_root / video_id, {".jpg"}, reject_symlinks=True)
+        if not images:
+            return False
+        if any(SAV_FRAME_STEM_PATTERN.fullmatch(stem) is None for stem in images):
+            return False
+
+        annotation_dir = annotation_root / video_id
+        object_dirs = sorted(
+            entry for entry in annotation_dir.iterdir() if entry.is_dir()
+        )
+        if not object_dirs or any(entry.is_symlink() for entry in object_dirs):
+            return False
+        if any(
+            SAV_OBJECT_ID_PATTERN.fullmatch(entry.name) is None for entry in object_dirs
+        ):
+            return False
+        total_masklets += len(object_dirs)
+
+        # Frame geometry for every annotated stem, read from image headers so
+        # the per-mask comparison below covers the whole video rather than only
+        # its first mask.
+        try:
+            frame_shapes: dict[str, tuple[int, int]] = {}
+            for stem, image_path in images.items():
+                with Image.open(image_path) as image:
+                    frame_shapes[stem] = (image.height, image.width)
+            # One full decode per video still catches a truncated JPEG, which a
+            # header-only read cannot see.
+            with Image.open(images[sorted(images)[0]]) as image:
+                image.load()
+        except OSError:
+            return False
+
+        for object_dir in object_dirs:
+            masks = _files_by_stem(object_dir, {".png"}, reject_symlinks=True)
+            if not masks or not set(masks) <= set(images):
+                return False
+            total_masks += len(masks)
+            for stem, mask_path in masks.items():
+                if not _sav_mask_is_valid(mask_path, frame_shapes[stem]):
+                    return False
+
+    return (
+        total_masklets == SAV_VALIDATION_MASKLET_COUNT
+        and total_masks == SAV_VALIDATION_MASK_COUNT
+    )
+
+
 def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) -> bool:
     """Return whether an organized dataset matches its task, taxonomy, and full validation split.
 
@@ -1033,6 +1163,7 @@ def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) 
         "face_detection": "widerface",
         "obb": "dotav1",
         "depth_estimation": "nyu-depth",
+        "mask_generation": "sa-v",
     }.get(normalized_task)
     normalized_dataset = (dataset or expected_dataset or "").lower()
 
@@ -1054,4 +1185,6 @@ def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) 
         return _dotav1_ready(root)
     if normalized_task == "depth_estimation":
         return dense_dataset_ready(root, normalized_dataset)
+    if normalized_task == "mask_generation":
+        return _sav_ready(root)
     return False

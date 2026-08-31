@@ -28,6 +28,23 @@ description: >-
   Use file_cfg.filename for MXQ and derive the same-stem ONNX artifact unless
   onnx_filename is required.
 - Every post_cfg declares dataset; resolve output taxonomy from the dataset/task pair.
+- A promptable or multi-artifact model (see mask_generation/SAM2HieraLarge) bypasses
+  MBLT_Engine.__init__, build_preprocess/build_postprocess, and create_model_class entirely,
+  implementing its own preprocess/predict methods; it still subclasses MBLT_Engine only for
+  list_models() discovery. Reuse wrapper.download_hub_artifact for any additional Hub artifact
+  rather than duplicating Hub-resolution logic.
+- Never depend on the PyPI `sam2` package (unofficial third-party mirror) or a manually cloned
+  facebookresearch/sam2 checkout. mask_generation's host-side prompt encoding is a from-scratch
+  port verified bit-for-bit against the real predictor, backed by a small Hub-hosted weights
+  bundle, not package data.
+- mask_generation validates on SA-V val via datasets/sa-v.yaml. SA-V is NOT auto-downloaded and
+  must never be mirrored on Mobilint infrastructure: Meta gates it behind a download form, so the
+  user supplies the official sav_val.tar (or its extracted directory) with
+  --annotation-dir/--image-dir, like Cityscapes. Not sha256-pinned (user-supplied, not fetched);
+  identity comes from the readiness inventory. CC BY 4.0 by Meta AI. Registering a new dataset
+  requires readiness (`_*_ready` + `dataset_ready` map) before the organizer, since staged
+  validation calls `dataset_ready`; also register the organizer in the
+  test_dataset_organizer.py parametrize lists.
 
 ## Processing and Results
 

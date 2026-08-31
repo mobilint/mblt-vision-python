@@ -23,6 +23,12 @@ from .eval_nyu_depth import (
     calculate_nyu_depth_metrics,
     eval_nyu_depth,
 )
+from .eval_sav import (
+    SAVMetricAccumulator,
+    SAVResult,
+    calculate_sav_sample_ious,
+    eval_sav,
+)
 from .eval_widerface import WiderFaceResult, eval_widerface
 
 __all__: list[str] = [
@@ -46,6 +52,10 @@ __all__: list[str] = [
     "NYUDepthMetricAccumulator",
     "calculate_nyu_depth_metrics",
     "eval_nyu_depth",
+    "SAVResult",
+    "SAVMetricAccumulator",
+    "calculate_sav_sample_ious",
+    "eval_sav",
     "WiderFaceResult",
     "eval_widerface",
 ]

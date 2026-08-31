@@ -11,6 +11,7 @@ from . import depth_estimation as depth_estimation
 from . import face_detection as face_detection
 from . import image_classification as image_classification
 from . import instance_segmentation as instance_segmentation
+from . import mask_generation as mask_generation
 from . import obb as obb
 from . import object_detection as object_detection
 from . import pose_estimation as pose_estimation
@@ -19,13 +20,14 @@ from ._api import list_models as list_models
 from ._api import list_tasks as list_tasks
 from .wrapper import MBLT_Engine as MBLT_Engine
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 _TASK_MODULES = (
     face_detection,
     depth_estimation,
     image_classification,
     instance_segmentation,
+    mask_generation,
     object_detection,
     obb,
     pose_estimation,
@@ -49,6 +51,7 @@ _PUBLIC_EXPORTS = [
     "depth_estimation",
     "image_classification",
     "instance_segmentation",
+    "mask_generation",
     "object_detection",
     "obb",
     "pose_estimation",

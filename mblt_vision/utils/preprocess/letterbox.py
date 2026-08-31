@@ -37,6 +37,17 @@ def _apply_letterbox(
             image, (resized_width, resized_height), interpolation=interpolation
         )
     top, bottom, left, right = geometry.borders
+    # cv2's border value fills only the first channel and zeros the rest when
+    # given a bare scalar on a multi-channel image (cv::Scalar's single-value
+    # constructor), so broadcast a scalar to one value per channel rather than
+    # pass it through as-is -- a no-op for the already-per-channel tuple caller
+    # and for the single-channel semantic-mask caller.
+    channels = image.shape[2] if image.ndim == 3 else 1
+    border_value: cv2.typing.Scalar = (
+        (float(padding_value),) * channels
+        if isinstance(padding_value, int)
+        else tuple(float(component) for component in padding_value)
+    )
     image = cv2.copyMakeBorder(
         image,
         top,
@@ -44,7 +55,7 @@ def _apply_letterbox(
         left,
         right,
         cv2.BORDER_CONSTANT,
-        value=padding_value,
+        value=border_value,
     )
     return image, geometry.ratio_pad
 
