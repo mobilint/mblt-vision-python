@@ -36,10 +36,13 @@ description: >-
 - mask_generation supports framework="mxq" (default) and framework="onnx" with
   MBLT_Engine-style inference/conflict semantics (explicit encoder/decoder path suffixes infer
   the framework; NPU-only arguments are ignored for ONNX). The ONNX exports are same-stem
-  sam2_hiera_large_{encoder,decoder}.onnx at the Hub repo root (board-agnostic). Keep the two
-  graph contracts pinned in _sam2_contracts.py and validated at construction: MXQ takes six
-  flattened positional NHWC inputs; the ONNX graphs are NCHW with five named decoder inputs
-  and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
+  sam2_hiera_large_{encoder,decoder}.onnx at the Hub repo root (board-agnostic). Keep the
+  graph contracts pinned in _sam2_contracts.py and validated at construction: two MXQ decoder
+  generations exist, identified from the artifact's declared input shapes at engine
+  construction (detect_decoder_contract) -- assembled (six host-flattened inputs, four
+  outputs) and bridged (prompt-encoder raw inputs, two outputs; sam_tokens/object_score are
+  optional in classify_decoder_outputs); the ONNX graphs are NCHW with five named decoder
+  inputs and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
   framework-independent; only fpn_from_onnx/prepare_decoder_tensors_onnx vs
   fpn_from_runtime/prepare_decoder_tensors differ. eval_sav works unchanged for both.
   Load the optional runtime before downloading artifacts; validate explicit artifact paths

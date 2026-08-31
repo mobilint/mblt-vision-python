@@ -271,6 +271,13 @@ class SAM2HieraLarge(MBLT_Engine):
                     target_clusters=decoder_target_clusters,
                     target_device=resolved_target_device,
                 )
+                # Identify the decoder generation now, not on first decode: an
+                # artifact matching neither contract must fail while the engine
+                # is being built (the enclosing except disposes both backends),
+                # not after predict has already spent an encoder inference.
+                self._decoder_contract = detect_decoder_contract(
+                    self._backend_input_shapes(self._decoder_backend)
+                )
 
             weights = prompt.load_prompt_weights(resolved_prompt_weights_path)
             self.weights = {
@@ -606,16 +613,12 @@ class SAM2HieraLarge(MBLT_Engine):
 
         Two decoder generations exist (see ``_sam2_contracts``): the assembled
         contract takes host-flattened tensors, the bridged contract takes the
-        prompt encoder's raw outputs. Which one is loaded is read off the
-        artifact's declared shapes, so a mismatched feed is impossible rather
-        than merely checked.
+        prompt encoder's raw outputs. Which one is loaded was identified at
+        construction from the artifact's declared shapes, so a mismatched feed
+        is impossible rather than merely checked.
         """
 
         decoder_backend = self._require_decoder_backend()
-        if self._decoder_contract is None:
-            self._decoder_contract = detect_decoder_contract(
-                self._backend_input_shapes(decoder_backend)
-            )
         if self._decoder_contract == "bridged":
             decoder_tensors = prepare_decoder_tensors_bridged(
                 weights, features, points, labels, original_hw

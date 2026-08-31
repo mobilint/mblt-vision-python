@@ -404,6 +404,13 @@ mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,
 mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1 --framework onnx
 ```
 
+Local decoder artifacts (`--decoder-mxq-path` / `decoder_mxq_path`) may come from either
+compiled generation: the Hub-hosted decoder, whose host assembles the prompt tokens and
+emits four outputs, or an SDK-tutorial decoder, whose graph does that assembly itself and
+emits two (masks and IoU -- `object_score` is absent from its results). The engine detects
+which one is loaded from the artifact's declared input shapes at construction; an artifact
+matching neither fails there rather than producing wrong masks.
+
 Validate with the built-in SA-V evaluation. Unlike the auto-downloading datasets,
 SA-V must be obtained manually: Meta distributes it through a
 [gated download form](https://ai.meta.com/datasets/segment-anything-video-downloads/),

@@ -224,12 +224,19 @@ class _FakeBackend:
 
     instances: list["_FakeBackend"] = []
     input_shape: list[tuple[int, ...]] = [(1024, 1024, 3)]
+    # Construction now detects the decoder contract from declared shapes, so the
+    # decoder handle must present a valid signature even in wiring-only tests.
+    decoder_input_shape: ClassVar[list[tuple[int, ...]]] = list(
+        DECODER_MXQ_INPUT_SHAPES["assembled"]
+    )
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
         self.disposed = False
         self.launched = False
-        self.mxq_model = _FakeModelHandle(self.input_shape)
+        self.is_decoder = kwargs["mxq_path"].endswith("decoder.mxq")
+        shapes = self.decoder_input_shape if self.is_decoder else self.input_shape
+        self.mxq_model = _FakeModelHandle(list(shapes))
         _FakeBackend.instances.append(self)
 
     def create(self) -> None:
@@ -263,9 +270,6 @@ class _DualContractBackend(_FakeBackend):
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.is_decoder = kwargs["mxq_path"].endswith("decoder.mxq")
-        if self.is_decoder:
-            self.mxq_model = _FakeModelHandle(list(self.decoder_input_shape))
         self.received_feeds: list[list[np.ndarray]] = []
 
     def __call__(self, feed: list[np.ndarray]) -> list[np.ndarray]:
@@ -294,8 +298,10 @@ class _FailingDecoderBackend(_FakeBackend):
 
 
 class _WrongShapeBackend(_FakeBackend):
-    """Reports an input shape that does not match the fed tensor -- simulates a
-    resolved artifact compiled from a different signature than expected."""
+    """Reports an encoder input shape that does not match the fed tensor --
+    simulates a resolved artifact compiled from a different signature than
+    expected. The decoder keeps a valid signature so construction succeeds and
+    the drift is caught at the encoder feed."""
 
     input_shape = [(1, 2, 3)]
 
@@ -601,6 +607,33 @@ def test_predict_preprocessed_rejects_encoder_artifact_shape_drift(
             )
     finally:
         engine.close()
+
+
+class _UnknownDecoderContractBackend(_FakeBackend):
+    """Decoder declares shapes matching neither known contract."""
+
+    decoder_input_shape: ClassVar[list[tuple[int, ...]]] = [(64, 64, 256)] * 6
+
+
+def test_unknown_decoder_contract_fails_at_construction_and_disposes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A drifted decoder artifact must fail while the engine is being built.
+
+    Detection at first decode would let the engine construct successfully and
+    burn an NPU encoder inference before reporting the invalid signature.
+    """
+
+    encoder_path, decoder_path = _make_engine(
+        monkeypatch, tmp_path, _UnknownDecoderContractBackend
+    )
+    with pytest.raises(ValueError, match="neither known contract"):
+        SAM2HieraLarge(
+            encoder_mxq_path=str(encoder_path), decoder_mxq_path=str(decoder_path)
+        )
+    assert all(
+        instance.disposed for instance in _UnknownDecoderContractBackend.instances
+    )
 
 
 def test_predict_preprocessed_drives_the_bridged_decoder_contract(
