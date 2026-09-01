@@ -28,6 +28,50 @@ description: >-
   Use file_cfg.filename for MXQ and derive the same-stem ONNX artifact unless
   onnx_filename is required.
 - Every post_cfg declares dataset; resolve output taxonomy from the dataset/task pair.
+- A promptable or multi-artifact model (see mask_generation/SAM2HieraLarge) bypasses
+  MBLT_Engine.__init__, build_preprocess/build_postprocess, and create_model_class entirely,
+  implementing its own preprocess/predict methods; it still subclasses MBLT_Engine only for
+  list_models() discovery. Reuse wrapper.download_hub_artifact for any additional Hub artifact
+  rather than duplicating Hub-resolution logic.
+- mask_generation supports framework="mxq" (default) and framework="onnx" with
+  MBLT_Engine-style inference/conflict semantics (explicit encoder/decoder path suffixes infer
+  the framework; NPU-only arguments are ignored for ONNX). The ONNX exports are same-stem
+  sam2_hiera_large_{encoder,decoder}.onnx at the Hub repo root (board-agnostic). Keep the
+  graph contracts pinned in _sam2_contracts.py and validated at construction: two MXQ decoder
+  generations exist, identified from the artifact's declared input shapes at engine
+  construction (detect_decoder_contract) -- assembled (six host-flattened inputs, four
+  outputs) and bridged (prompt-encoder raw inputs, two outputs; sam_tokens/object_score are
+  optional in classify_decoder_outputs); the ONNX graphs are NCHW with five named decoder
+  inputs and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
+  framework-independent; only the feed builders differ
+  (fpn_from_onnx/prepare_decoder_tensors_onnx vs
+  fpn_from_runtime/prepare_decoder_tensors/prepare_decoder_tensors_bridged).
+  eval_sav works unchanged for both.
+  Load the optional runtime before downloading artifacts; validate explicit artifact paths
+  (prompt weights included) with FileNotFoundError before any download; dispose a backend that
+  fails after create() inside its builder (the caller assigns it only on success) while
+  suppressing dispose failures so they cannot mask the original error; treat -1 in ONNX graph
+  validation as "must be dynamic", not a wildcard; validate point labels as
+  exactly 1/0; build host prompt tensors on the weights' device so device="cuda" works; and
+  reject single-artifact path options in every CLI command that builds the engine, not just
+  predict.
+- Never depend on the PyPI `sam2` package (unofficial third-party mirror) or a manually cloned
+  facebookresearch/sam2 checkout. mask_generation's host-side prompt encoding is a from-scratch
+  port verified bit-for-bit against the real predictor, backed by a small Hub-hosted weights
+  bundle, not package data.
+- mask_generation validates on SA-V val via datasets/sa-v.yaml. SA-V is NOT auto-downloaded and
+  must never be mirrored on Mobilint infrastructure: Meta gates it behind a download form, so the
+  user supplies the official sav_val.tar (or its extracted directory) with
+  --annotation-dir/--image-dir, like Cityscapes. Not sha256-pinned (user-supplied, not fetched);
+  identity comes from the readiness inventory. CC BY 4.0 by Meta AI. Readiness pins all three
+  inventory counts (155 videos / 293 masklets / 31967 masks); video and masklet totals alone
+  accept a truncated source. Both the organizer and readiness require every non-zero mask value
+  to be one object ID, since `{1, 2}` survives a unique-value count but `> 0` binarization makes
+  it all foreground. Readiness validates every mask (not just the first per video); bilevel masks
+  are validated from the header, since a 1-bit PNG cannot hold a non-zero background. Reject
+  `sav_val.txt` ids that fail SAV_VIDEO_ID_PATTERN or escape staging, before any write. Registering a new dataset requires readiness (`_*_ready` + `dataset_ready`
+  map) before the organizer, since staged validation calls `dataset_ready`; also register the
+  organizer in the test_dataset_organizer.py parametrize lists.
 
 ## Processing and Results
 
@@ -55,7 +99,8 @@ description: >-
   compilation metadata must resolve only from the selected board folder, never a core-mode path or
   a fallback board folder.
 - Include model and dataset YAML files as package data. Build a wheel and inspect it after
-  changing metadata or assets.
+  changing metadata or assets. `assets/` holds development-only sample images: tracked in git by
+  deliberate exception, pruned from distribution via MANIFEST.in, never grown for one-off inputs.
 - Do not require native bindings, GStreamer, hardware, downloaded models, or caches for normal
   imports and unit tests.
 

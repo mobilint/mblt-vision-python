@@ -274,6 +274,93 @@ class CustomNYUDepth(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str]
         return len(self.samples)
 
 
+class CustomSAV(torch.utils.data.Dataset[tuple[np.ndarray, np.ndarray, str, str, str]]):
+    """SA-V validation dataset of per-object annotated frames.
+
+    One sample is one ``(video_id, object_id, frame_stem)`` triple: an RGB
+    frame plus that object's boolean ground-truth mask. There is deliberately
+    no batched loader/collate companion: mask-generation evaluation is
+    prompt-conditioned and sample-at-a-time with globally area-balanced
+    sampling, so a DataLoader batch dimension buys nothing.
+    """
+
+    def __init__(self, root: str) -> None:
+        """Validate the organizer's ``images/``/``annotations/`` layout."""
+
+        self.root = root
+        image_root = os.path.join(root, "images")
+        annotation_root = os.path.join(root, "annotations")
+        if not os.path.isdir(image_root) or not os.path.isdir(annotation_root):
+            raise FileNotFoundError(
+                f"SA-V requires images/ and annotations/ directories under: {root}"
+            )
+        samples: list[tuple[str, str, str, str, str]] = []
+        for video_id in sorted(os.listdir(annotation_root)):
+            video_annotation_dir = os.path.join(annotation_root, video_id)
+            video_image_dir = os.path.join(image_root, video_id)
+            if not os.path.isdir(video_annotation_dir):
+                continue
+            if not os.path.isdir(video_image_dir):
+                raise ValueError(
+                    f"SA-V video '{video_id}' has annotations but no frames: {root}"
+                )
+            for object_id in sorted(os.listdir(video_annotation_dir)):
+                object_dir = os.path.join(video_annotation_dir, object_id)
+                if not os.path.isdir(object_dir):
+                    continue
+                for mask_name in sorted(os.listdir(object_dir)):
+                    if not mask_name.endswith(".png"):
+                        continue
+                    stem = mask_name[: -len(".png")]
+                    frame_path = os.path.join(video_image_dir, f"{stem}.jpg")
+                    if not os.path.isfile(frame_path):
+                        raise ValueError(
+                            f"SA-V mask {video_id}/{object_id}/{mask_name} has no "
+                            f"matching frame: {frame_path}"
+                        )
+                    samples.append(
+                        (
+                            frame_path,
+                            os.path.join(object_dir, mask_name),
+                            video_id,
+                            object_id,
+                            stem,
+                        )
+                    )
+        if not samples:
+            raise ValueError(f"SA-V contains no annotated samples: {root}")
+        self.samples = samples
+
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, str, str, str]:
+        """Load an RGB frame and the boolean mask for one annotated object."""
+
+        frame_path, mask_path, video_id, object_id, stem = self.samples[index]
+        frame = cv2.imread(frame_path)
+        if frame is None:
+            raise FileNotFoundError(f"SA-V frame not found: {frame_path}")
+        mask_image = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if mask_image is None:
+            raise FileNotFoundError(f"SA-V mask not found: {mask_path}")
+        if mask_image.shape != frame.shape[:2]:
+            raise ValueError(
+                "SA-V frame and mask shapes must match for "
+                f"{video_id}/{object_id}/{stem}: frame {frame.shape[:2]}, "
+                f"mask {mask_image.shape}."
+            )
+        return (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+            mask_image > 0,
+            video_id,
+            object_id,
+            stem,
+        )
+
+    def __len__(self) -> int:
+        """Return the number of annotated (video, object, frame) samples."""
+
+        return len(self.samples)
+
+
 def get_nyu_depth_loader(
     dataset: CustomNYUDepth,
     batch_size: int,

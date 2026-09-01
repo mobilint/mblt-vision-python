@@ -560,7 +560,13 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
     def extract_final_outputs(
         self, x: TensorLike | ListTensorLike
     ) -> tuple[list[torch.Tensor] | torch.Tensor | None, torch.Tensor | None]:
-        """Accept YOLO26's decode-enabled score, xyxy, and keypoint outputs."""
+        """Accept YOLO26's decode-enabled score, xyxy, and keypoint outputs.
+
+        When this input shape doesn't match, falls through to the base class,
+        whose own already-decoded-detections path can return a bare tensor
+        instead of a per-image list -- hence the wider return type than this
+        override's own ``list[torch.Tensor] | None`` branch above.
+        """
         if self.e2e and isinstance(x, (list, tuple)) and len(x) == 4:
             tensors = [
                 value if isinstance(value, torch.Tensor) else torch.as_tensor(value)

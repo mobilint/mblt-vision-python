@@ -16,9 +16,12 @@ from mblt_vision.wrapper import get_mobilint_cache_dir
 from ._vision import (
     add_e2e_arg,
     add_threshold_args,
+    create_mask_generation_engine,
     create_vision_engine,
     parse_target_clusters,
     parse_target_cores,
+    reject_mask_generation_only_options,
+    resolve_cli_task,
 )
 
 DEFAULT_IMAGENET_IMAGE_SOURCE = get_dataset_config("imagenet")["download"]["images"]
@@ -32,6 +35,7 @@ DEFAULT_WIDERFACE_ANNOTATION_SOURCE = get_dataset_config("widerface")["download"
 DEFAULT_DOTAV1_SOURCE = get_dataset_config("dotav1")["download"]["url"]
 DEFAULT_NYU_DEPTH_SOURCE = get_dataset_config("nyu-depth")["download"]["url"]
 DEFAULT_ADE20K_SOURCE = get_dataset_config("ade20k")["download"]["url"]
+SAV_DOWNLOAD_CONFIG = get_dataset_config("sa-v")["download"]
 CITYSCAPES_DOWNLOAD_CONFIG = get_dataset_config("cityscapes")["download"]
 CITYSCAPES_IMAGE_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["images_archive"]
 CITYSCAPES_ANNOTATION_ARCHIVE = CITYSCAPES_DOWNLOAD_CONFIG["annotations_archive"]
@@ -54,12 +58,21 @@ def _candidate_search_roots(data_path: str) -> list[Path]:
 
 
 def _find_existing_source(data_path: str, candidate_names: list[str]) -> str | None:
-    """Finds a nearby raw archive or extracted dataset directory."""
+    """Finds a nearby raw archive or extracted dataset directory.
 
+    Never returns the organized output directory itself. Several datasets use a
+    cache directory whose name also appears in their source-candidate list (for
+    example `sa-v` and `nyu-depth`), so `data_path.parent / name` can resolve
+    back to `data_path`. Handing that to an organizer as a raw source makes
+    source resolution fail on the incomplete cache instead of downloading the
+    default archive and repairing it.
+    """
+
+    organized_root = Path(data_path).expanduser().resolve()
     for root in _candidate_search_roots(data_path):
         for name in candidate_names:
             candidate = root / name
-            if candidate.exists():
+            if candidate.exists() and candidate.resolve() != organized_root:
                 return str(candidate)
     return None
 
@@ -171,6 +184,49 @@ def _resolve_nyu_depth_source(args: argparse.Namespace, data_path: str) -> str:
     return dataset_path or DEFAULT_NYU_DEPTH_SOURCE
 
 
+def _resolve_sav_source(args: argparse.Namespace, data_path: str) -> str:
+    """Resolve the manually downloaded SA-V validation archive or directory.
+
+    SA-V is distributed through Meta's form-gated portal and is not mirrored by
+    this package, so unlike the auto-downloading datasets there is no default
+    source to fall back to.
+
+    Args:
+        args: Parsed validation CLI arguments.
+        data_path: Organized SA-V output path used as a discovery anchor.
+
+    Returns:
+        Path to the ``sav_val.tar`` archive or its extracted directory.
+
+    Raises:
+        SystemExit: If the archive or extracted directory cannot be found.
+    """
+
+    # Discovery runs even under --force-organize, unlike the auto-downloading
+    # datasets. There the flag skips discovery so a rebuild re-fetches from the
+    # canonical URL; SA-V has no such fallback, so skipping it would fail on a
+    # manual archive sitting in the documented discovery location -- the very
+    # place the error below tells the user to put it. `_find_existing_source`
+    # already refuses to return the organized output, so this cannot resolve to
+    # the stale cache that --force-organize exists to rebuild.
+    dataset_path = (
+        args.annotation_dir
+        or args.image_dir
+        or _find_existing_source(data_path, [SAV_DOWNLOAD_CONFIG["archive"], "sav_val"])
+    )
+    if not dataset_path:
+        raise SystemExit(
+            "SA-V organization requires the official validation archive, which Meta "
+            "distributes through a gated download form and this package does not mirror.\n"
+            f"  Download it at {SAV_DOWNLOAD_CONFIG['source']}\n"
+            f"  Layout reference: {SAV_DOWNLOAD_CONFIG['documentation']}\n"
+            f"Pass the resulting {SAV_DOWNLOAD_CONFIG['archive']} (or its extracted "
+            "`sav_val` directory) with --annotation-dir or --image-dir, or place it "
+            "near the dataset path."
+        )
+    return dataset_path
+
+
 def _resolve_ade20k_source(args: argparse.Namespace, data_path: str) -> str:
     """Resolve a local archive, extracted directory, or URL for ADE20K organization."""
 
@@ -259,6 +315,7 @@ def _ensure_dataset(
             organize_dotav1,
             organize_imagenet,
             organize_nyu_depth,
+            organize_sav,
             organize_widerface,
         )
     except ImportError as exc:
@@ -300,6 +357,11 @@ def _ensure_dataset(
             dataset_path=_resolve_nyu_depth_source(args, data_path),
             output_dir=data_path,
         )
+    elif task == "mask_generation":
+        organize_sav(
+            dataset_path=_resolve_sav_source(args, data_path),
+            output_dir=data_path,
+        )
     elif task == "semantic_segmentation":
         if dataset == "cityscapes":
             image_dir, annotation_dir = _resolve_cityscapes_sources(args, data_path)
@@ -335,13 +397,18 @@ def _run_validation(args: argparse.Namespace) -> float:
             eval_dota,
             eval_imagenet_metrics,
             eval_nyu_depth,
+            eval_sav,
             eval_widerface,
         )
     except ImportError as exc:
         print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
-    model = create_vision_engine(args)
+    if resolve_cli_task(args) == "mask_generation":
+        model = create_mask_generation_engine(args)
+    else:
+        reject_mask_generation_only_options(args)
+        model = create_vision_engine(args)
     try:
         if not getattr(getattr(model, "postprocessor", None), "e2e", True):
             raise SystemExit(
@@ -380,6 +447,24 @@ def _run_validation(args: argparse.Namespace) -> float:
                 f"(rmse): {depth_result.rmse:.5f}"
             )
             return depth_result.primary_score
+
+        if task == "mask_generation":
+            sav_result = eval_sav(
+                model=model,
+                data_path=data_path,
+                num_samples=args.num_samples,
+                num_points=args.num_points,
+                seed=args.seed,
+            )
+            print(
+                "Validation score "
+                f"(mIoU): {sav_result.miou:.5f} "
+                f"(+-95%CI {sav_result.miou_ci95:.5f}), "
+                f"(mIoU best-of-3): {sav_result.miou_best_of_3:.5f}, "
+                f"samples: {sav_result.num_samples}, "
+                f"videos: {sav_result.distinct_videos}"
+            )
+            return sav_result.primary_score
 
         if task == "semantic_segmentation":
             if taxonomy == "cityscapes":
@@ -556,6 +641,55 @@ def add_val_parser(
         help=(
             "Local archive path or download URL for dataset annotations. Cityscapes requires gtFine_trainvaltest.zip."
         ),
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=parse_positive_int,
+        default=200,
+        help="Mask generation only: number of prompted SA-V samples to evaluate.",
+    )
+    parser.add_argument(
+        "--num-points",
+        type=int,
+        default=1,
+        choices=[1, 2, 3],
+        help="Mask generation only: points per synthetic prompt.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Mask generation only: sampling and prompt-synthesis seed.",
+    )
+    parser.add_argument(
+        "--encoder-mxq-path",
+        dest="encoder_mxq_path",
+        default="",
+        help="Optional local encoder MXQ path for mask generation models.",
+    )
+    parser.add_argument(
+        "--decoder-mxq-path",
+        dest="decoder_mxq_path",
+        default="",
+        help="Optional local decoder MXQ path for mask generation models.",
+    )
+    parser.add_argument(
+        "--encoder-onnx-path",
+        dest="encoder_onnx_path",
+        default="",
+        help="Optional local encoder ONNX path for mask generation models.",
+    )
+    parser.add_argument(
+        "--decoder-onnx-path",
+        dest="decoder_onnx_path",
+        default="",
+        help="Optional local decoder ONNX path for mask generation models.",
+    )
+    parser.add_argument(
+        "--prompt-weights-path",
+        dest="prompt_weights_path",
+        default="",
+        help="Optional local prompt-encoder weights path for mask generation models.",
     )
     add_threshold_args(parser, conf_default=None, iou_default=None)
     add_e2e_arg(parser)

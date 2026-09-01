@@ -575,6 +575,11 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
         single-class label column and convert the boxes once. QBCompiler leaves
         visibility as near-zero logits in this layout, so normalize them as the
         split-head pose decoder does.
+
+        When this input shape doesn't match, falls through to the base class,
+        whose own already-decoded-detections path can return a bare tensor
+        instead of a per-image list -- hence the wider return type than this
+        override's own ``list[torch.Tensor] | None`` branch above.
         """
         if self.e2e and isinstance(x, (list, tuple)) and len(x) == 1:
             value = x[0]

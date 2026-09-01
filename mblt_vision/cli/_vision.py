@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
@@ -51,6 +52,39 @@ def parse_target_clusters(value: str | None) -> list[int] | None:
             "target clusters must be semicolon-separated integers"
         ) from exc
     return clusters or None
+
+
+def parse_point(value: str) -> tuple[float, float, int]:
+    """Parses an `X,Y,LABEL` point prompt for mask generation models."""
+
+    parts = value.split(",")
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError("expected a point as X,Y,LABEL")
+    try:
+        x, y = float(parts[0]), float(parts[1])
+        label = int(parts[2])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "expected numeric X,Y coordinates and an integer LABEL"
+        ) from exc
+    # `float()` accepts "nan"/"inf", which would otherwise reach Fourier prompt
+    # encoding and contaminate the resulting tokens, masks, and IoU scores.
+    if not (math.isfinite(x) and math.isfinite(y)):
+        raise argparse.ArgumentTypeError("expected finite X,Y coordinates")
+    if label not in (0, 1):
+        raise argparse.ArgumentTypeError(
+            "point LABEL must be 1 (positive) or 0 (negative)"
+        )
+    return (x, y, label)
+
+
+def resolve_cli_task(args: argparse.Namespace) -> str:
+    """Resolves the selected model's task without constructing a runtime."""
+
+    from mblt_vision.wrapper import resolve_model_config
+
+    config = resolve_model_config(args.model, args.model_type)
+    return normalize_vision_task(config["post_cfg"]["task"])
 
 
 def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
@@ -275,6 +309,141 @@ def create_vision_engine(args: argparse.Namespace) -> Any:
     )
 
 
+def reject_single_artifact_paths(args: argparse.Namespace) -> None:
+    """Rejects single-artifact model paths for two-artifact mask generation models.
+
+    Raises:
+        SystemExit: If `--model-path`, `--mxq-path`, or `--onnx-path` is set.
+    """
+
+    if (
+        getattr(args, "model_path", "")
+        or getattr(args, "mxq_path", "")
+        or getattr(args, "onnx_path", "")
+    ):
+        raise SystemExit(
+            "Mask generation models load two artifacts; use "
+            "`--encoder-mxq-path`/`--decoder-mxq-path` (or "
+            "`--encoder-onnx-path`/`--decoder-onnx-path` with `--framework onnx`) "
+            "instead of `--model-path`/`--mxq-path`/`--onnx-path`."
+        )
+
+
+MASK_GENERATION_ONLY_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("encoder_mxq_path", "--encoder-mxq-path"),
+    ("decoder_mxq_path", "--decoder-mxq-path"),
+    ("encoder_onnx_path", "--encoder-onnx-path"),
+    ("decoder_onnx_path", "--decoder-onnx-path"),
+    ("prompt_weights_path", "--prompt-weights-path"),
+)
+
+
+def reject_mask_generation_only_options(args: argparse.Namespace) -> None:
+    """Rejects two-artifact overrides for models that do not accept them.
+
+    The generic engine never receives these paths, so accepting them silently
+    downloads and runs the default single artifact instead of the requested
+    local one.
+
+    Raises:
+        SystemExit: If any mask-generation-only artifact override is set.
+    """
+
+    supplied = [
+        flag
+        for attribute, flag in MASK_GENERATION_ONLY_OPTIONS
+        if getattr(args, attribute, "")
+    ]
+    if supplied:
+        raise SystemExit(
+            f"{', '.join(supplied)} is only supported for mask generation models "
+            "such as SAM2HieraLarge. Use `--model-path`, `--mxq-path`, or "
+            "`--onnx-path` for this model."
+        )
+
+
+def create_mask_generation_engine(args: argparse.Namespace) -> Any:
+    """Creates a promptable mask generation engine from shared CLI model options.
+
+    Mask generation models load two artifacts (encoder + decoder): MXQ by
+    default, or ONNX with `--framework onnx`. The shared NPU options
+    (`--dev-no`, `--core-mode`, `--target-cores`, `--target-clusters`) apply
+    to both MXQ backends and are ignored for ONNX inference.
+
+    The single-artifact path options are rejected here rather than in one
+    command's handler, so every command that builds a mask generation engine
+    fails loudly instead of silently evaluating the downloaded default in
+    place of an explicitly requested local artifact.
+    """
+
+    reject_single_artifact_paths(args)
+
+    try:
+        import mblt_vision.mask_generation as mask_generation_module
+        from mblt_vision.wrapper import _model_name_aliasing
+    except ImportError as exc:
+        print(f"Missing dependencies for vision CLI: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    class_name = Path(_model_name_aliasing(args.model)).stem
+    model_class = getattr(mask_generation_module, class_name, None)
+    if model_class is None:
+        raise SystemExit(
+            f"Mask generation model class '{class_name}' is not exported by "
+            "mblt_vision.mask_generation."
+        )
+    return model_class(
+        encoder_mxq_path=getattr(args, "encoder_mxq_path", None) or None,
+        decoder_mxq_path=getattr(args, "decoder_mxq_path", None) or None,
+        prompt_weights_path=getattr(args, "prompt_weights_path", None) or None,
+        encoder_dev_no=args.dev_no,
+        decoder_dev_no=args.dev_no,
+        encoder_core_mode=args.core_mode,
+        decoder_core_mode=args.core_mode,
+        encoder_target_cores=args.target_cores,
+        decoder_target_cores=args.target_cores,
+        encoder_target_clusters=args.target_clusters,
+        decoder_target_clusters=args.target_clusters,
+        target_device=args.target_device,
+        framework=args.framework,
+        encoder_onnx_path=getattr(args, "encoder_onnx_path", None) or None,
+        decoder_onnx_path=getattr(args, "decoder_onnx_path", None) or None,
+    )
+
+
+def run_mask_generation_inference(
+    args: argparse.Namespace,
+    *,
+    command: str,
+) -> Any:
+    """Runs point-prompted mask generation for a CLI command."""
+
+    point_prompts = getattr(args, "points", None) or []
+    if not 1 <= len(point_prompts) <= 3:
+        raise SystemExit(
+            "Mask generation requires 1 to 3 point prompts; pass `--point X,Y,LABEL` "
+            "(LABEL 1 positive, 0 negative) up to three times."
+        )
+    reject_single_artifact_paths(args)
+
+    points = [[x, y] for x, y, _ in point_prompts]
+    labels = [label for _, _, label in point_prompts]
+    model = create_mask_generation_engine(args)
+    try:
+        result = model.predict(args.source, points, labels)
+        save_path = resolve_output_path(args.output, command, args.source, args.model)
+        result.plot(source_path=args.source, save_path=save_path)
+        iou_text = ", ".join(f"{float(value):.4f}" for value in result.iou_predictions)
+        print(
+            f"Predicted IoU per mask candidate: [{iou_text}]; "
+            f"selected mask index: {result.selected}"
+        )
+        print(f"Saved result to {os.path.relpath(save_path)}")
+        return result
+    finally:
+        model.dispose()
+
+
 def run_vision_inference(
     args: argparse.Namespace,
     *,
@@ -283,6 +452,14 @@ def run_vision_inference(
     """Runs a complete vision inference pipeline for a CLI command."""
 
     require_source_file(args.source)
+    if resolve_cli_task(args) == "mask_generation":
+        return run_mask_generation_inference(args, command=command)
+    if getattr(args, "points", None):
+        raise SystemExit(
+            "`--point` is only supported for mask generation models such as "
+            "SAM2HieraLarge."
+        )
+    reject_mask_generation_only_options(args)
     model = create_vision_engine(args)
     try:
         actual_task = normalize_vision_task(model.post_cfg.get("task", ""))

@@ -86,6 +86,338 @@ def test_predict_help_explains_supported_workflows(
     assert "--target-device regulus-ra" in help_text
 
 
+def test_predict_parses_point_prompts_for_mask_generation() -> None:
+    """Accept repeated `--point X,Y,LABEL` prompts and mask-generation path overrides."""
+
+    args = build_parser().parse_args(
+        [
+            "predict",
+            "--source",
+            "image.jpg",
+            "--model",
+            "sam2-hiera-large",
+            "--point",
+            "320,240,1",
+            "--point",
+            "10.5,20.5,0",
+            "--encoder-mxq-path",
+            "encoder.mxq",
+            "--decoder-mxq-path",
+            "decoder.mxq",
+            "--encoder-onnx-path",
+            "encoder.onnx",
+            "--decoder-onnx-path",
+            "decoder.onnx",
+        ]
+    )
+    assert args.points == [(320.0, 240.0, 1), (10.5, 20.5, 0)]
+    assert args.encoder_mxq_path == "encoder.mxq"
+    assert args.decoder_mxq_path == "decoder.mxq"
+    assert args.encoder_onnx_path == "encoder.onnx"
+    assert args.decoder_onnx_path == "decoder.onnx"
+
+
+@pytest.mark.parametrize(
+    "bad_point",
+    # nan/inf parse fine as floats, so they must be rejected explicitly:
+    # they would otherwise contaminate Fourier prompt encoding downstream.
+    ["320,240", "320,240,2", "x,240,1", "nan,240,1", "320,inf,1", "-inf,240,0"],
+)
+def test_predict_rejects_malformed_point_prompts(bad_point: str) -> None:
+    """Fail argument parsing on malformed or out-of-range point prompts."""
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [
+                "predict",
+                "--source",
+                "image.jpg",
+                "--model",
+                "sam2-hiera-large",
+                "--point",
+                bad_point,
+            ]
+        )
+
+
+def test_predict_rejects_points_for_non_mask_generation_models(
+    synthetic_image_path: Path,
+) -> None:
+    """Reject `--point` before constructing an engine for a non-promptable model."""
+
+    from mblt_vision.cli._vision import run_vision_inference
+
+    args = build_parser().parse_args(
+        [
+            "predict",
+            "--source",
+            str(synthetic_image_path),
+            "--model",
+            "resnet50",
+            "--point",
+            "320,240,1",
+        ]
+    )
+    with pytest.raises(SystemExit, match="only supported for mask generation"):
+        run_vision_inference(args, command="predict")
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "match"),
+    [
+        ([], "1 to 3 point prompts"),
+        (
+            [
+                "--point",
+                "1,1,1",
+                "--point",
+                "2,2,1",
+                "--point",
+                "3,3,1",
+                "--point",
+                "4,4,0",
+            ],
+            "1 to 3 point prompts",
+        ),
+        (["--point", "1,1,1", "--mxq-path", "model.mxq"], "encoder-mxq-path"),
+        (["--point", "1,1,1", "--onnx-path", "model.onnx"], "encoder-onnx-path"),
+    ],
+)
+def test_mask_generation_prompt_validation_fails_before_engine_construction(
+    synthetic_image_path: Path, extra_args: list[str], match: str
+) -> None:
+    """Reject invalid mask-generation invocations without loading any backend."""
+
+    from mblt_vision.cli._vision import run_vision_inference
+
+    args = build_parser().parse_args(
+        [
+            "predict",
+            "--source",
+            str(synthetic_image_path),
+            "--model",
+            "sam2-hiera-large",
+            *extra_args,
+        ]
+    )
+    with pytest.raises(SystemExit, match=match):
+        run_vision_inference(args, command="predict")
+
+
+@pytest.mark.parametrize(
+    ("path_arg", "match"),
+    [
+        (["--model-path", "model.mxq"], "encoder-mxq-path"),
+        (["--mxq-path", "model.mxq"], "encoder-mxq-path"),
+        (["--onnx-path", "model.onnx"], "encoder-onnx-path"),
+    ],
+)
+def test_val_rejects_single_artifact_paths_for_mask_generation(
+    path_arg: list[str], match: str
+) -> None:
+    """Refuse to silently evaluate the downloaded default instead of the request.
+
+    Validation accepting and ignoring a single-artifact path would invalidate
+    experiment results, so it must fail the same way prediction does.
+    """
+
+    from mblt_vision.cli._vision import create_mask_generation_engine
+
+    args = build_parser().parse_args(["val", "--model", "sam2-hiera-large", *path_arg])
+    with pytest.raises(SystemExit, match=match):
+        create_mask_generation_engine(args)
+
+
+@pytest.mark.parametrize(
+    ("cache_name", "candidates"),
+    [
+        ("sa-v", ["sav_val.tar", "sa-v", "sav_val"]),
+        ("nyu-depth", ["nyu-depth.zip", "nyu-depth"]),
+    ],
+)
+def test_find_existing_source_never_returns_the_organized_cache(
+    tmp_path: Path, cache_name: str, candidates: list[str]
+) -> None:
+    """An incomplete cache must not be handed back as its own raw source.
+
+    Several datasets use a cache directory whose name is also a source
+    candidate, so `data_path.parent / name` resolves back to `data_path`;
+    organizing from it fails instead of downloading the default archive.
+    """
+
+    from mblt_vision.cli.val import _find_existing_source
+
+    data_path = tmp_path / "datasets" / cache_name
+    data_path.mkdir(parents=True)
+    assert _find_existing_source(str(data_path), candidates) is None
+
+    # A genuine sibling source is still discovered.
+    real_source = data_path.parent / candidates[0]
+    real_source.write_bytes(b"archive")
+    assert _find_existing_source(str(data_path), candidates) == str(real_source)
+
+
+def test_val_requires_a_manually_downloaded_sav_archive(tmp_path: Path) -> None:
+    """SA-V is gated by Meta and not mirrored, so there is no default source.
+
+    The error must name the portal, the layout reference, and the flags that
+    accept the archive, rather than falling back to a URL.
+    """
+
+    from mblt_vision.cli.val import _resolve_sav_source
+
+    args = build_parser().parse_args(["val", "--model", "sam2-hiera-large"])
+    data_path = tmp_path / "datasets" / "sa-v"
+    data_path.mkdir(parents=True)
+
+    with pytest.raises(SystemExit) as excinfo:
+        _resolve_sav_source(args, str(data_path))
+    message = str(excinfo.value)
+    assert "sav_val.tar" in message
+    assert "ai.meta.com" in message
+    assert "sav_dataset" in message
+    assert "--annotation-dir" in message
+
+    # A manually downloaded archive beside the dataset path is accepted.
+    archive = data_path.parent / "sav_val.tar"
+    archive.write_bytes(b"archive")
+    assert _resolve_sav_source(args, str(data_path)) == str(archive)
+
+
+def test_val_finds_the_sav_archive_even_under_force_organize(tmp_path: Path) -> None:
+    """--force-organize rebuilds the dataset, it does not ignore the source.
+
+    SA-V has no fallback download URL, so skipping discovery would fail on a
+    manual archive sitting in the very location the error message recommends.
+    """
+
+    from mblt_vision.cli.val import _resolve_sav_source
+
+    data_path = tmp_path / "datasets" / "sa-v"
+    data_path.mkdir(parents=True)
+    archive = data_path.parent / "sav_val.tar"
+    archive.write_bytes(b"archive")
+
+    args = build_parser().parse_args(
+        ["val", "--model", "sam2-hiera-large", "--force-organize"]
+    )
+    assert args.force_organize is True
+    assert _resolve_sav_source(args, str(data_path)) == str(archive)
+
+
+def test_benchmark_runner_excludes_unsupported_mask_generation() -> None:
+    """The unified runner cannot build SAM2's engine or dispatch eval_sav.
+
+    Offering the task would accept `--task mask_generation` and then produce an
+    error row for every model.
+    """
+
+    from benchmark import benchmark_vision_models
+    from mblt_vision._tasks import VISION_TASKS
+
+    assert "mask_generation" in VISION_TASKS  # still a canonical Vision task
+    assert "mask_generation" not in benchmark_vision_models.TASK_CHOICES
+    assert set(benchmark_vision_models.TASK_CHOICES) == set(VISION_TASKS) - {
+        "mask_generation"
+    }
+
+    with pytest.raises(SystemExit):
+        benchmark_vision_models._parse_args(
+            ["--models", "ResNet50", "--task", "mask_generation"]
+        )
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--encoder-mxq-path", "encoder.mxq"),
+        ("--decoder-mxq-path", "decoder.mxq"),
+        ("--encoder-onnx-path", "encoder.onnx"),
+        ("--decoder-onnx-path", "decoder.onnx"),
+        ("--prompt-weights-path", "weights.pt"),
+    ],
+)
+@pytest.mark.parametrize("command", ["predict", "val"])
+def test_mask_only_overrides_rejected_for_other_tasks(
+    synthetic_image_path: Path, command: str, flag: str, value: str
+) -> None:
+    """The generic engine never receives these paths.
+
+    Accepting them would silently download and run the default single artifact
+    instead of the explicitly requested local one.
+    """
+
+    from mblt_vision.cli._vision import reject_mask_generation_only_options
+
+    argv = ["predict", "--source", str(synthetic_image_path), "--model", "resnet50"]
+    if command == "val":
+        argv = ["val", "--model", "resnet50"]
+    args = build_parser().parse_args([*argv, flag, value])
+
+    with pytest.raises(SystemExit, match="only supported for mask generation"):
+        reject_mask_generation_only_options(args)
+
+
+def test_mask_only_override_guard_is_a_noop_without_those_options() -> None:
+    """The guard only fires on the mask-generation-only flags.
+
+    It is invoked solely from the non-mask branches, so mask generation keeps
+    accepting these overrides -- see the parsing tests below.
+    """
+
+    from mblt_vision.cli._vision import reject_mask_generation_only_options
+
+    for argv in (
+        ["val", "--model", "resnet50"],
+        ["val", "--model", "resnet50", "--mxq-path", "model.mxq"],
+    ):
+        assert (
+            reject_mask_generation_only_options(build_parser().parse_args(argv)) is None
+        )
+
+
+def test_val_parses_mask_generation_options() -> None:
+    """Expose SA-V evaluation protocol knobs and artifact-path overrides on val."""
+
+    args = build_parser().parse_args(
+        [
+            "val",
+            "--model",
+            "sam2-hiera-large",
+            "--num-samples",
+            "20",
+            "--num-points",
+            "2",
+            "--seed",
+            "7",
+            "--encoder-mxq-path",
+            "encoder.mxq",
+            "--decoder-mxq-path",
+            "decoder.mxq",
+            "--encoder-onnx-path",
+            "encoder.onnx",
+            "--decoder-onnx-path",
+            "decoder.onnx",
+        ]
+    )
+    assert args.num_samples == 20
+    assert args.num_points == 2
+    assert args.seed == 7
+    assert args.encoder_mxq_path == "encoder.mxq"
+    assert args.decoder_mxq_path == "decoder.mxq"
+    assert args.encoder_onnx_path == "encoder.onnx"
+    assert args.decoder_onnx_path == "decoder.onnx"
+
+
+def test_val_defaults_match_the_reference_protocol() -> None:
+    """Default to the reference-validated 200-sample single-point protocol."""
+
+    args = build_parser().parse_args(["val", "--model", "sam2-hiera-large"])
+    assert args.num_samples == 200
+    assert args.num_points == 1
+    assert args.seed == 0
+
+
 def test_validation_default_dataset_path_uses_resolved_cache_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

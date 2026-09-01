@@ -43,5 +43,9 @@ compile_commands.json
 Thumbs.db
 
 *.zip
+*.tar
 *.tar.gz
+*.tgz
 *.egg
+
+runs/

@@ -35,7 +35,16 @@ CoreMode = Literal["single", "multi", "global4", "global8"]
 CORE_MODES: tuple[CoreMode, ...] = cast(
     tuple[CoreMode, ...], core_modes_for_target_device("aries-rb")
 )
-TASK_CHOICES = VISION_TASKS
+# `mask_generation` is a canonical Vision task but the unified runner cannot
+# execute it: it needs SAM2HieraLarge's two-artifact engine and point prompts
+# rather than the generic MBLT_Engine `_run_target` builds, and `eval_sav`
+# rather than the generic evaluators `_evaluate` dispatches. Offering it as a
+# choice would only produce an error row for every model. Benchmark it with
+# `mblt-vision val --model sam2-hiera-large` until the runner grows that path.
+UNSUPPORTED_BENCHMARK_TASKS: tuple[str, ...] = ("mask_generation",)
+TASK_CHOICES = tuple(
+    task for task in VISION_TASKS if task not in UNSUPPORTED_BENCHMARK_TASKS
+)
 SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 
 
@@ -69,7 +78,9 @@ def _parse_task(value: str) -> str:
     """Normalize a benchmark task for argparse."""
 
     try:
-        return normalize_vision_task(value)
+        # Validated against the runner's supported tasks, not every canonical
+        # Vision task, so an unsupported one reports what can actually be run.
+        return normalize_vision_task(value, supported=TASK_CHOICES)
     except (TypeError, ValueError) as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 

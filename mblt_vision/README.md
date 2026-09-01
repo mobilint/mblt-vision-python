@@ -2,9 +2,12 @@
 
 `mblt-vision-python` provides Python access to pre-trained Mobilint Vision models:
 image classification, depth estimation, face and object detection, oriented bounding
-boxes (OBB), instance and semantic segmentation, and pose estimation. Each model
-configuration includes the artifact, preprocessing, output taxonomy, and
-postprocessing contract needed to produce task-specific results.
+boxes (OBB), instance and semantic segmentation, pose estimation, and promptable mask
+generation (SAM2). Each model configuration includes the artifact, preprocessing, output
+taxonomy, and postprocessing contract needed to produce task-specific results. Mask
+generation is the one exception: `SAM2HieraLarge` loads two NPU artifacts and takes point
+prompts rather than an image alone, so it has its own constructor -- see
+[Mask Generation](#mask-generation).
 
 ## Loading models
 
@@ -371,5 +374,73 @@ validation split, following Ultralytics' depth-validation convention.
   for single-model single-scale validation on the
   [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset. Validation also reports
   rotated mAP50 as the secondary metric.
+
+</details>
+
+### Mask Generation
+
+Promptable segmentation: given an image and 1-3 point prompts (positive/negative), returns 3
+candidate masks with IoU scores. Point prompts only for now -- no box prompts and no automatic
+"segment everything" mode. Unlike every other model here, `SAM2HieraLarge` downloads three
+artifacts from the Hub instead of one: an image encoder, a prompt-conditioned mask decoder
+(MXQ by default, or the ONNX exports with `framework="onnx"`), and a small (~16KB) bundle of
+host-side prompt-encoder weights. Host-side prompt encoding
+is a from-scratch, dependency-free port of the official
+[`facebookresearch/sam2`](https://github.com/facebookresearch/sam2) prompt encoder and mask-decoder
+token setup (numerically verified bit-for-bit against the real implementation) -- no `sam2`
+package, no `torchvision`, no manually cloned repository, and no extra to install: everything
+runs on the package's existing `torch` dependency. See `mblt_vision/mask_generation/`.
+
+```python
+from mblt_vision.mask_generation import SAM2HieraLarge
+
+model = SAM2HieraLarge()  # framework="onnx" for ONNX Runtime inference
+result = model.predict("image.jpg", points=[[320, 240]], labels=[1])
+result.plot("image.jpg", save_path="result.jpg")
+```
+
+```bash
+mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1
+mblt-vision predict --source image.jpg --model sam2-hiera-large --point 320,240,1 --framework onnx
+```
+
+Local decoder artifacts (`--decoder-mxq-path` / `decoder_mxq_path`) may come from either
+compiled generation: the Hub-hosted decoder, whose host assembles the prompt tokens and
+emits four outputs, or an SDK-tutorial decoder, whose graph does that assembly itself and
+emits two (masks and IoU -- `object_score` is absent from its results). The engine detects
+which one is loaded from the artifact's declared input shapes at construction; an artifact
+matching neither fails there rather than producing wrong masks.
+
+Validate with the built-in SA-V evaluation. Unlike the auto-downloading datasets,
+SA-V must be obtained manually: Meta distributes it through a
+[gated download form](https://ai.meta.com/datasets/segment-anything-video-downloads/),
+and this package does not mirror it. Download `sav_val.tar`, then pass it (or its
+extracted `sav_val` directory) on the first run; it is organized into the dataset
+cache and reused afterwards. The official layout is documented in the
+[SAM 2 `sav_dataset` README](https://github.com/facebookresearch/sam2/blob/main/sav_dataset/README.md).
+
+```bash
+mblt-vision val --model sam2-hiera-large --annotation-dir /path/to/sav_val.tar
+mblt-vision val --model sam2-hiera-large --framework onnx
+```
+
+Local artifact overrides follow the framework: `--encoder-mxq-path`/`--decoder-mxq-path` for
+MXQ and `--encoder-onnx-path`/`--decoder-onnx-path` for ONNX. The shared NPU options apply to
+both MXQ backends and are ignored for ONNX inference, as everywhere else in the CLI.
+
+| Model | Input Size<br>(H,W,C) | Source | Note |
+| --- | --- | --- | --- |
+| SAM2HieraLarge | (1024,1024,3) | [Link](https://ai.meta.com/sam2) | Point prompts only |
+
+<details>
+<summary>Mask Generation (SA-V val)</summary>
+
+- Validation reports the own-selection mean IoU (`argmax` of the 3 predicted IoU scores) of the
+  predicted mask against ground truth as the primary metric, with the best-of-3 oracle IoU as
+  the secondary metric: 200 deterministic single-point-prompt samples by default (seed 0,
+  area-balanced) from the official
+  [SA-V](https://ai.meta.com/datasets/segment-anything-video) validation split
+  (155 videos, 293 masklets). Prompts are synthesized from the ground-truth mask
+  (distance-transform peak; `--num-points 2/3` adds negative and second positive points).
 
 </details>
