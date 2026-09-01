@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
 
 import cv2
 import numpy as np
 import pytest
 import torch
+import yaml
 
+import mblt_vision
 from mblt_vision import YOLO11m_face, list_models
 from mblt_vision.face_detection import YOLO11m_face as FaceDetectionYOLO11mFace
 from mblt_vision.utils.postprocess import build_postprocess
@@ -34,6 +37,8 @@ from mblt_vision.utils.postprocess.yolo_nmsfree_post import (
     YOLONMSFreeFaceDetectionPost,
 )
 from mblt_vision.utils.results import Results
+
+MODEL_CONFIG_DIR = Path(mblt_vision.__file__).parent / "models"
 
 
 def _pre_cfg() -> dict[str, Any]:
@@ -181,3 +186,45 @@ def test_nmsout2eval_face_rejects_nonzero_class_ids() -> None:
 
     with pytest.raises(ValueError, match="must all be 0"):
         nmsout2eval_face(detections, (100, 100), (100, 100))
+
+
+ANCHOR_FACE_MODELS = (
+    "YOLOv5n-face",
+    "YOLOv5n-0.5-face",
+    "YOLOv5s-face",
+    "YOLOv5m-face",
+    "YOLOv7-face",
+    "YOLOv7s-face",
+    "YOLOv7-tiny-face",
+    "YOLOv7-lite-s-face",
+    "YOLOv7-lite-t-face",
+)
+
+
+@pytest.mark.parametrize("model_name", ANCHOR_FACE_MODELS)
+def test_anchor_face_yaml_builds_anchor_face_postprocessor(model_name: str) -> None:
+    """Route every shipped anchor-based face YAML to the anchor face postprocessor.
+
+    The ``YOLOv5*-face`` and ``YOLOv7*-face`` families are the only shipped face
+    models that carry an ``anchors`` list, so they are what makes
+    ``YOLOAnchorFaceDetectionPost`` reachable from the registry rather than from
+    a synthetic ``post_cfg``.
+    """
+
+    config = yaml.safe_load(
+        (MODEL_CONFIG_DIR / f"{model_name}.yaml").read_text(encoding="utf-8")
+    )["DEFAULT"]
+    post_cfg = config["post_cfg"]
+
+    postprocessor = build_postprocess(config["pre_cfg"], post_cfg)
+
+    assert type(postprocessor) is YOLOAnchorFaceDetectionPost
+    assert config["pre_cfg"]["LetterBox"]["img_size"] == [640, 640]
+    assert post_cfg["dataset"] == "widerface"
+    assert post_cfg["iou_thres"] == 0.5
+    assert len(post_cfg["anchors"]) == 3
+    assert all(len(level) == 6 for level in post_cfg["anchors"])
+    detection_post = cast(YOLODetectionPostBase, postprocessor)
+    assert detection_post.nc == 1
+    assert detection_post.na == 3
+    assert detection_post.nl == 3

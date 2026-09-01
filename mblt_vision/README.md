@@ -246,11 +246,27 @@ COCO category mapping is applied.
 | YOLOv10s-face | (640,640,3) | [Link](https://github.com/akanametov/yolo-face) | |
 | YOLOv10m-face | (640,640,3) | [Link](https://github.com/akanametov/yolo-face) | |
 | YOLOv10l-face | (640,640,3) | [Link](https://github.com/akanametov/yolo-face) | |
+| YOLOv5n-face | (640,640,3) | [Link](https://github.com/deepcam-cn/yolov5-face) | Anchor-based. |
+| YOLOv5n-0.5-face | (640,640,3) | [Link](https://github.com/deepcam-cn/yolov5-face) | Anchor-based. |
+| YOLOv5s-face | (640,640,3) | [Link](https://github.com/deepcam-cn/yolov5-face) | Anchor-based. |
+| YOLOv5m-face | (640,640,3) | [Link](https://github.com/deepcam-cn/yolov5-face) | Anchor-based. |
+| YOLOv7-lite-t-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
+| YOLOv7-lite-s-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
+| YOLOv7-tiny-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
+| YOLOv7s-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
+| YOLOv7-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
 
 Input geometry follows each checkpoint's own training resolution. Every face
 model is trained and served at 640x640 except `YOLOv8m-face` and `YOLOv8l-face`,
 whose released weights record `imgsz: 960` in their embedded `train_args`; those
 two use 960x960 and must not be normalized down to 640.
+
+The `YOLOv5*-face` and `YOLOv7*-face` families are anchor-based and carry an
+`anchors` list in `post_cfg` with `iou_thres: 0.5`; every other face model is
+anchorless or NMS-free with `iou_thres: 0.7`. Their published ONNX exports emit
+three raw detection heads of shape `(batch, 3, H, W, 6)` — the five landmark
+pairs of the original repositories are stripped at export — so they decode
+through the shared anchor detection path with `nc = 1`.
 
 WiderFace accuracy columns are omitted until the full validation split has been
 measured for each artifact.

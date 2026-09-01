@@ -1,0 +1,44 @@
+DEFAULT:
+  file_cfg:
+    repo_id: mobilint/YOLOv7s-face
+    filename: yolov7s-face.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: cv
+  post_cfg:
+    task: face_detection
+    dataset: widerface
+    anchors:
+    - - 4
+      - 5
+      - 6
+      - 8
+      - 10
+      - 12
+    - - 15
+      - 19
+      - 23
+      - 30
+      - 39
+      - 52
+    - - 72
+      - 97
+      - 123
+      - 164
+      - 209
+      - 297
+    conf_thres: 0.001
+    iou_thres: 0.5
+TURBO:
+  update: DEFAULT
+  file_cfg:
+    revision: TURBO

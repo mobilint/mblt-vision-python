@@ -83,14 +83,16 @@ The current ownership boundary is deliberate:
   `nmsout2eval_face` labels every row `"face"` and rejects any class index other than `0`
   instead of routing indices through the COCO category-id table. `build_postprocess` therefore
   dispatches `face_detection` on its own branch, ahead of `object_detection`, using the same
-  `anchors` / `dflfree` / `nmsfree` `post_cfg` keys. The anchor-based branch is groundwork for
-  the YOLOv5-face and YOLOv7-face families and is exercised by unit tests, not yet by a shipped
-  model YAML.
+  `anchors` / `dflfree` / `nmsfree` `post_cfg` keys. The anchor-based branch serves the
+  `YOLOv5*-face` (deepcam-cn) and `YOLOv7*-face` (derronqi) families, whose published ONNX
+  exports emit three raw `(batch, 3, H, W, 6)` heads with the original repositories' five
+  landmark pairs stripped, so they decode through the shared anchor path with `nc = 1`.
 - Take face-detection `pre_cfg`/`post_cfg` defaults from
   `../mblt-model-ops/models/<Model>/pipeline.yaml`, which is the source of truth for the
   compiled artifacts. Face-detection input geometry is `640x640` for every shipped model except
   `YOLOv8m-face` and `YOLOv8l-face`, which are `960x960` because those checkpoints' own embedded
-  `train_args` record `imgsz: 960`. Do not normalize the exception away; a size change here is a
+  `train_args` record `imgsz: 960`. The anchor-based families additionally use `iou_thres: 0.5`
+  where every other face model uses `0.7`. Do not normalize the exception away; a size change here is a
   durable model-behavior change requiring the guide, both skill copies, and
   `mblt_vision/README.md` to be updated in the same commit.
 - `eval_sav` requires already-binarized candidate masks, enumerated per dtype (bool, integer

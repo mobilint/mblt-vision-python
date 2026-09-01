@@ -92,7 +92,8 @@ description: >-
   evaluation-format conversion differs: nmsout2eval_face labels every row "face" and rejects a
   class index other than 0 rather than using the COCO category-id table. build_postprocess
   dispatches face_detection before object_detection on the same anchors/dflfree/nmsfree keys.
-  The anchor branch is groundwork for YOLOv5-face and YOLOv7-face, covered by unit tests only.
+  The anchor branch serves the YOLOv5*-face and YOLOv7*-face families, whose ONNX exports emit
+  three raw (batch, 3, H, W, 6) heads with landmarks stripped and use iou_thres: 0.5.
 - Source face-detection pre_cfg/post_cfg from ../mblt-model-ops/models/<Model>/pipeline.yaml.
   Every shipped face model is 640x640 except YOLOv8m-face and YOLOv8l-face at 960x960, whose
   checkpoints record imgsz: 960 in their own train_args. Changing an input size is a durable
