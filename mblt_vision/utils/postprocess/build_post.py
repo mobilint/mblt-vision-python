@@ -9,20 +9,26 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .depth_post import DepthPost
 from .semantic_seg_post import SemanticSegPost
-from .yolo_anchor_post import YOLOAnchorDetectionPost, YOLOAnchorSegPost
+from .yolo_anchor_post import (
+    YOLOAnchorDetectionPost,
+    YOLOAnchorFaceDetectionPost,
+    YOLOAnchorSegPost,
+)
 from .yolo_anchorless_post import (
     YOLOAnchorlessDetectionPost,
+    YOLOAnchorlessFaceDetectionPost,
     YOLOAnchorlessOBBPost,
     YOLOAnchorlessPosePost,
     YOLOAnchorlessSegPost,
 )
 from .yolo_dflfree_post import (
     YOLODFLFreeDetectionPost,
+    YOLODFLFreeFaceDetectionPost,
     YOLODFLFreeOBBPost,
     YOLODFLFreePosePost,
     YOLODFLFreeSegPost,
 )
-from .yolo_nmsfree_post import YOLONMSFreeDetectionPost
+from .yolo_nmsfree_post import YOLONMSFreeDetectionPost, YOLONMSFreeFaceDetectionPost
 
 
 def build_postprocess(
@@ -51,7 +57,31 @@ def build_postprocess(
         return DepthPost(pre_cfg, post_cfg)
     if task == "semantic_segmentation":
         return SemanticSegPost(pre_cfg, post_cfg)
-    if task in {"object_detection", "face_detection"}:
+    if task == "face_detection":
+        if post_cfg.get("anchors", False):
+            return YOLOAnchorFaceDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        if post_cfg.get("dflfree", False):  # nms free is only available for detection
+            return YOLODFLFreeFaceDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        if post_cfg.get("nmsfree", False):
+            return YOLONMSFreeFaceDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        return YOLOAnchorlessFaceDetectionPost(
+            pre_cfg,
+            post_cfg,
+            **kwargs,
+        )
+    if task == "object_detection":
         if post_cfg.get("anchors", False):
             return YOLOAnchorDetectionPost(
                 pre_cfg,

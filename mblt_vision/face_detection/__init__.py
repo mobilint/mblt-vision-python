@@ -17,8 +17,15 @@ __all__: list[str] = [
     "YOLOv10m_face",
     "YOLOv10n_face",
     "YOLOv10s_face",
-    "YOLOv6m_face",
-    "YOLOv6n_face",
+    "YOLOv5m_face",
+    "YOLOv5n_0_5_face",
+    "YOLOv5n_face",
+    "YOLOv5s_face",
+    "YOLOv7_face",
+    "YOLOv7_lite_s_face",
+    "YOLOv7_lite_t_face",
+    "YOLOv7_tiny_face",
+    "YOLOv7s_face",
     "YOLOv8l_face",
     "YOLOv8m_face",
     "YOLOv8n_face",
@@ -36,8 +43,15 @@ YOLOv10l_face = create_model_class("YOLOv10l_face", __name__)
 YOLOv10m_face = create_model_class("YOLOv10m_face", __name__)
 YOLOv10n_face = create_model_class("YOLOv10n_face", __name__)
 YOLOv10s_face = create_model_class("YOLOv10s_face", __name__)
-YOLOv6m_face = create_model_class("YOLOv6m_face", __name__)
-YOLOv6n_face = create_model_class("YOLOv6n_face", __name__)
+YOLOv5m_face = create_model_class("YOLOv5m_face", __name__)
+YOLOv5n_0_5_face = create_model_class("YOLOv5n_0_5_face", __name__)
+YOLOv5n_face = create_model_class("YOLOv5n_face", __name__)
+YOLOv5s_face = create_model_class("YOLOv5s_face", __name__)
+YOLOv7_face = create_model_class("YOLOv7_face", __name__)
+YOLOv7_lite_s_face = create_model_class("YOLOv7_lite_s_face", __name__)
+YOLOv7_lite_t_face = create_model_class("YOLOv7_lite_t_face", __name__)
+YOLOv7_tiny_face = create_model_class("YOLOv7_tiny_face", __name__)
+YOLOv7s_face = create_model_class("YOLOv7s_face", __name__)
 YOLOv8l_face = create_model_class("YOLOv8l_face", __name__)
 YOLOv8m_face = create_model_class("YOLOv8m_face", __name__)
 YOLOv8n_face = create_model_class("YOLOv8n_face", __name__)

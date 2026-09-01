@@ -49,3 +49,7 @@ Thumbs.db
 *.egg
 
 runs/
+
+*.mxq
+*.mblt
+*.onnx

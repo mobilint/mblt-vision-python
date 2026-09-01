@@ -1309,6 +1309,69 @@ def nmsout2eval(
     return labels_list, boxes_list, scores_list
 
 
+def nmsout2eval_face(
+    nms_outs: list[torch.Tensor] | torch.Tensor,
+    img1_shape: tuple[int, int],
+    img0_shapes: tuple[int, int] | Sequence[tuple[int, int]],
+    ratio_pads: RatioPad | Sequence[RatioPad | None] | None = None,
+) -> tuple[list[list[str]], list[list[list[float]]], list[list[float]]]:
+    """Converts single-class face-detection NMS output to evaluation format.
+
+    WiderFace has exactly one class, so this mirrors :func:`nmsout2eval` without
+    routing label indices through COCO's 80-class category-id table: every row
+    is labeled ``"face"`` and its class index must be ``0``.
+
+    Args:
+        nms_outs: NMS output of shape ``(n, 6)`` per image, where ``n`` is the
+            number of detected faces.
+        img1_shape: Processed image shape ``(H, W)``.
+        img0_shapes: Original image shape or shapes.
+        ratio_pads: Optional letterbox metadata.
+
+    Returns:
+        tuple: A tuple containing:
+            - labels (list[list[str]]): ``"face"`` for every detection.
+            - boxes (list[list]): The bounding boxes (xywh) for each image.
+            - scores (list[list]): The confidence scores for each image.
+    """
+    if not isinstance(nms_outs, list):
+        nms_outs = [nms_outs]
+    actual_img0_shapes = normalize_image_shapes(img0_shapes, len(nms_outs))
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(nms_outs))
+    labels_list: list[list[str]] = []
+    boxes_list: list[list[list[float]]] = []
+    scores_list: list[list[float]] = []
+    for nms_out, img0_shape, ratio_pad in zip(
+        nms_outs, actual_img0_shapes, actual_ratio_pads
+    ):
+        boxes = nms_out[:, :4].clone()
+        scores = nms_out[:, 4]
+        labels = nms_out[:, 5]
+        valid_labels = (
+            torch.isfinite(labels) & (labels == labels.round()) & (labels == 0)
+        )
+        if not bool(valid_labels.all()):
+            invalid_labels = labels[~valid_labels].detach().cpu().tolist()
+            raise ValueError(
+                f"Face-detection class IDs must all be 0; got {invalid_labels}."
+            )
+        boxes = scale_boxes(
+            img1_shape, boxes, img0_shape, ratio_pad=ratio_pad
+        )  # scale boxes to original image size
+        boxes[:, 2:] = boxes[:, 2:] - boxes[:, :2]  # xyxy to xywh with corner xy
+
+        boxes_tolist = [
+            [round(float(value), 3) for value in box] for box in boxes.tolist()
+        ]
+        scores_tolist = [round(float(score), 5) for score in scores.tolist()]
+
+        labels_list.append(["face"] * len(boxes_tolist))
+        boxes_list.append(boxes_tolist)
+        scores_list.append(scores_tolist)
+
+    return labels_list, boxes_list, scores_list
+
+
 def nmsout2eval_seg(
     nms_outs: Any,
     img1_shape: tuple[int, int],
@@ -1491,6 +1554,41 @@ def nmsout2eval_obb(
     if include_xywhr:
         return labels_list, polygons_list, scores_list, xywhr_list
     return labels_list, polygons_list, scores_list
+
+
+class YOLOFaceDetectionMixin:
+    """Mixin class for single-class WiderFace face-detection postprocessing.
+
+    Face detection reuses the object-detection decode/NMS pipeline of whatever
+    head family a model belongs to (anchor, anchorless, DFL-free, or NMS-free);
+    the only thing that differs is evaluation-format label conversion, since
+    WiderFace has one class and no COCO category-id mapping applies. Mix this
+    in over the matching detection postprocessor, for example::
+
+        class YOLOAnchorlessFaceDetectionPost(
+            YOLOFaceDetectionMixin, YOLOAnchorlessDetectionPost
+        ):
+            pass
+    """
+
+    def nmsout2eval(
+        self,
+        nms_out: Any,
+        img1_shape: tuple[int, int],
+        img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None = None,
+    ) -> tuple[Any, ...]:
+        """Converts NMS output to evaluation format for face detection.
+
+        Args:
+            nms_out: NMS output (single-class face detections).
+            img1_shape: Resized image shape.
+            img0_shape: List of original image shapes.
+
+        Returns:
+            Tuple: (labels_list, boxes_list, scores_list).
+        """
+        return nmsout2eval_face(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
 
 
 class YOLOSegPostMixin:

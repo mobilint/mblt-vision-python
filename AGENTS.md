@@ -75,6 +75,26 @@ The current ownership boundary is deliberate:
   must remain lazy and report the appropriate package extra when unavailable.
 - For WiderFace evaluation, rank results by Hard-set AP and retain Medium-set
   then Easy-set AP as secondary metrics. Do not compute a mean across splits.
+- `face_detection` is a single-class WiderFace task, not an 80-class COCO one. Each YOLO head
+  family reuses its own object-detection decode and NMS through a thin
+  `YOLOFaceDetectionMixin` subclass (`YOLOAnchorFaceDetectionPost`,
+  `YOLOAnchorlessFaceDetectionPost`, `YOLODFLFreeFaceDetectionPost`,
+  `YOLONMSFreeFaceDetectionPost`); only evaluation-format conversion differs, because
+  `nmsout2eval_face` labels every row `"face"` and rejects any class index other than `0`
+  instead of routing indices through the COCO category-id table. `build_postprocess` therefore
+  dispatches `face_detection` on its own branch, ahead of `object_detection`, using the same
+  `anchors` / `dflfree` / `nmsfree` `post_cfg` keys. The anchor-based branch serves the
+  `YOLOv5*-face` (deepcam-cn) and `YOLOv7*-face` (derronqi) families, whose published ONNX
+  exports emit three raw `(batch, 3, H, W, 6)` heads with the original repositories' five
+  landmark pairs stripped, so they decode through the shared anchor path with `nc = 1`.
+- Take face-detection `pre_cfg`/`post_cfg` defaults from
+  `../mblt-model-ops/models/<Model>/pipeline.yaml`, which is the source of truth for the
+  compiled artifacts. Face-detection input geometry is `640x640` for every shipped model except
+  `YOLOv8m-face` and `YOLOv8l-face`, which are `960x960` because those checkpoints' own embedded
+  `train_args` record `imgsz: 960`. The anchor-based families additionally use `iou_thres: 0.5`
+  where every other face model uses `0.7`. Do not normalize the exception away; a size change here is a
+  durable model-behavior change requiring the guide, both skill copies, and
+  `mblt_vision/README.md` to be updated in the same commit.
 - `eval_sav` requires already-binarized candidate masks, enumerated per dtype (bool, integer
   `{0, 1}`/`{0, 255}`, float `{0.0, 1.0}`). A weaker "single positive value" rule still admits a
   probability map such as `{0.0, 0.5}`, or a uniform `0.5` candidate that `astype(bool)` turns

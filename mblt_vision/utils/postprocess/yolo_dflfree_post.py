@@ -7,6 +7,7 @@ import torch
 from ..types import ListTensorLike, TensorLike
 from .base import YOLODetectionPostBase
 from .common import (
+    YOLOFaceDetectionMixin,
     YOLOOBBPostMixin,
     YOLOPosePostMixin,
     YOLOSegPostMixin,
@@ -1021,6 +1022,10 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
             keep = rotated_nms(boxes, xi[:, 4], self.iou_thres)[:max_det]
             output.append(xi[keep])
         return output
+
+
+class YOLODFLFreeFaceDetectionPost(YOLOFaceDetectionMixin, YOLODFLFreeDetectionPost):
+    """Postprocessing for DFL-free WiderFace face-detection models."""
 
 
 YOLODFLFreePost = YOLODFLFreeDetectionPost
