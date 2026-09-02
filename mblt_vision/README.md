@@ -434,7 +434,8 @@ is a from-scratch, dependency-free port of the official
 [`facebookresearch/sam2`](https://github.com/facebookresearch/sam2) prompt encoder and mask-decoder
 token setup (numerically verified bit-for-bit against the real implementation) -- no `sam2`
 package, no `torchvision`, no manually cloned repository, and no extra to install: everything
-runs on the package's existing `torch` dependency. See `mblt_vision/mask_generation/`.
+runs on the package's existing `torch` dependency. The uploaded ONNX pair uses the same direct-MBLT boundary as the SDK MXQs: batched NHWC `input_image_0`, NHWC FPN outputs, and six raw prompt-decoder inputs (`image_embeddings`, `dense_prompt_embeddings`, `image_pe`, `sparse_prompt_embeddings_0`, `high_res_features0_0`, `high_res_features1_0`). See `mblt_vision/mask_generation/`.
+The ONNX artifacts share the SDK direct-MBLT interface: batched NHWC `input_image_0`, NHWC FPN outputs, and six raw prompt-decoder inputs.
 
 ```python
 from mblt_vision.mask_generation import SAM2HieraLarge
