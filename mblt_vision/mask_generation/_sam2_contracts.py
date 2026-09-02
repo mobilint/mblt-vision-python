@@ -20,12 +20,7 @@ Compile and calibration are out of scope for this phase, so each contract is
 a fixed validated signature rather than a configurable MBLT-input-name
 binding map.
 
-ONNX side: the graph interface written by the SDK tutorial's
-``sam2_export_onnx.py`` (``Sam2ImageEncoderWrapper``/``Sam2MaskDecoderWrapper``
-traces, verified numerically against the official ``facebookresearch/sam2``
-predictor). Unlike the compiled MXQ artifacts, the ONNX graphs are NCHW, keep
-the pre-flattening decoder tensor shapes, and take five named decoder inputs --
-``src_plus_pos_src`` stays inside the graph instead of being a sixth input.
+ONNX side: the Hub exports use the same direct-MBLT interface as the SDK MXQs: a batched NHWC `input_image_0`, three NHWC FPN outputs, and six raw prompt-decoder inputs. ONNX Runtime receives those tensors by their graph names; MXQ receives the same semantic tensors positionally.
 """
 
 from __future__ import annotations

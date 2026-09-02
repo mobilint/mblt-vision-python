@@ -126,7 +126,10 @@ The current ownership boundary is deliberate:
   *bridged* contract -- the SDK tutorial's legacy-parser decoder, whose MBLT carries that
   assembly as an in-graph host-bridge subgraph -- takes the prompt encoder's raw outputs
   (two outputs: `classify_decoder_outputs` keeps `masks`/`iou` required and treats
-  `sam_tokens`/`object_score` as optional). The uploaded ONNX graphs use the same direct-MBLT boundary as the SDK MXQs: batched NHWC encoder input `input_image_0`, NHWC FPN outputs, and six named decoder inputs (`image_embeddings`, `dense_prompt_embeddings`, `image_pe`, `sparse_prompt_embeddings_0`, `high_res_features0_0`, `high_res_features1_0`) with a dynamic prompt axis. Both frameworks use the raw prompt-encoder feed; ONNX supplies it by name and MXQ supplies it positionally. The ONNX
+  `sam_tokens`/`object_score` as optional). The uploaded ONNX graphs use the direct-MBLT
+  boundary: batched NHWC encoder input `input_image_0`, NHWC FPN outputs, and six named
+  decoder inputs with a dynamic prompt axis. ONNX supplies the raw prompt tensors by name;
+  MXQ supplies the same semantic tensors positionally. The ONNX
   pipeline is numerically verified against the official `facebookresearch/sam2` fp32 predictor
   (identical binary masks; opt-in `tests/test_mask_generation_onnx.py` covers it end-to-end
   without NPU hardware); the bridged MXQ contract is numerically verified on real hardware by

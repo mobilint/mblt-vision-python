@@ -402,9 +402,7 @@ class SAM2HieraLarge(MBLT_Engine):
     def preprocess(self, x: Any, **kwargs: Any) -> np.ndarray:
         """Resize/pad/normalize an image into the canonical NHWC encoder input.
 
-        The returned layout matches the encoder MXQ's runtime input and is
-        framework-independent: the ONNX path transposes to the exported
-        graph's NCHW layout internally.
+        The returned NHWC layout is the shared direct-MBLT encoder input for both frameworks.
         """
 
         if kwargs:
@@ -584,10 +582,7 @@ class SAM2HieraLarge(MBLT_Engine):
     def _encode_image_onnx(self, encoder_input: np.ndarray) -> list[torch.Tensor]:
         """Run the encoder ONNX graph and return ordered FPN levels.
 
-        ``encoder_input`` is the canonical NHWC array :meth:`preprocess`
-        returns; the exported graph was traced NCHW, so the transpose happens
-        here rather than changing the framework-independent preprocess
-        contract.
+        ``encoder_input`` is the shared direct-MBLT NHWC tensor returned by :meth:`preprocess`.
         """
 
         encoder_backend = self._require_encoder_backend()
@@ -639,7 +634,7 @@ class SAM2HieraLarge(MBLT_Engine):
         labels: np.ndarray,
         original_hw: Sequence[int],
     ) -> list[np.ndarray]:
-        """Run the decoder ONNX graph on its five named pre-flattening inputs."""
+        """Run the decoder ONNX graph on the six named direct-MBLT inputs."""
 
         decoder_tensors = prepare_decoder_tensors_bridged(
             weights, features, points, labels, original_hw
