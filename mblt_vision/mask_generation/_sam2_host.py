@@ -315,9 +315,9 @@ def prepare_decoder_tensors_bridged(
         "dense_prompt_embeddings": dense.float(),
         "image_pe": prompt.get_dense_pe(weights).float(),
         # (1, N+1, 256) -> (1, 1, N+1, 256); axis 2 is the dynamic prompt axis.
-        "sparse_prompt_embeddings": sparse.float().unsqueeze(1).contiguous(),
-        "hrf0_nhwc": high_res[0].permute(0, 2, 3, 1).contiguous(),
-        "hrf1_nhwc": high_res[1].permute(0, 2, 3, 1).contiguous(),
+        "sparse_prompt_embeddings_0": sparse.float().unsqueeze(1).contiguous(),
+        "high_res_features0_0": high_res[0].permute(0, 2, 3, 1).contiguous(),
+        "high_res_features1_0": high_res[1].permute(0, 2, 3, 1).contiguous(),
     }
     return _as_float32_arrays(tensors)
 
