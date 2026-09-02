@@ -53,3 +53,5 @@ runs/
 *.mxq
 *.mblt
 *.onnx
+
+.gjc/*
