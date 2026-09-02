@@ -20,7 +20,10 @@ Compile and calibration are out of scope for this phase, so each contract is
 a fixed validated signature rather than a configurable MBLT-input-name
 binding map.
 
-ONNX side: the Hub exports use the same direct-MBLT interface as the SDK MXQs: a batched NHWC `input_image_0`, three NHWC FPN outputs, and six raw prompt-decoder inputs. ONNX Runtime receives those tensors by their graph names; MXQ receives the same semantic tensors positionally.
+ONNX side: the Hub exports use the same direct-MBLT interface as the SDK MXQs:
+batched NHWC `input_image_0`, three NHWC FPN outputs, and six raw prompt-decoder
+inputs. ONNX Runtime receives tensors by graph name; MXQ receives the same semantic
+tensors positionally.
 """
 
 from __future__ import annotations

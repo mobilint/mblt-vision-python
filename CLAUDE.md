@@ -12,6 +12,3 @@ secondary metrics.
 
 For focused model, preprocessing, postprocessing, and model-registry work, also read
 .claude/skills/mblt-vision/SKILL.md.
-SAM2 ONNX artifacts use the direct-MBLT NHWC encoder and six-input prompt-decoder contract; see `AGENTS.md`.
-
-SAM2 ONNX artifacts share the direct-MBLT NHWC and six-input decoder contract documented in `AGENTS.md`.

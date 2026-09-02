@@ -41,11 +41,14 @@ description: >-
   generations exist, identified from the artifact's declared input shapes at engine
   construction (detect_decoder_contract) -- assembled (six host-flattened inputs, four
   outputs) and bridged (prompt-encoder raw inputs, two outputs; sam_tokens/object_score are
-  optional in classify_decoder_outputs); the ONNX graphs use the direct-MBLT NHWC encoder and six named decoder
-  inputs and a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
-  framework-independent; only the feed builders differ
-  (fpn_from_onnx/prepare_decoder_tensors_onnx vs
-  fpn_from_runtime/prepare_decoder_tensors/prepare_decoder_tensors_bridged).
+  optional in classify_decoder_outputs); the ONNX graphs use the direct-MBLT NHWC encoder
+  and six named decoder inputs with a dynamic token axis. Keep the prompt-encoding host path and
+  classify_decoder_outputs framework-independent. ONNX uses fpn_from_runtime and
+  prepare_decoder_tensors_bridged; MXQ uses fpn_from_runtime plus the detected decoder builder.
+  inputs with a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
+  framework-independent. ONNX uses fpn_from_runtime and prepare_decoder_tensors_bridged;
+  MXQ uses fpn_from_runtime plus prepare_decoder_tensors or prepare_decoder_tensors_bridged,
+  according to its detected decoder contract.
   eval_sav works unchanged for both.
   Load the optional runtime before downloading artifacts; validate explicit artifact paths
   (prompt weights included) with FileNotFoundError before any download; dispose a backend that
