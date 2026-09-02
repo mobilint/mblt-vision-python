@@ -62,14 +62,12 @@ from ._sam2_contracts import (
 from ._sam2_host import (
     BackboneFeatures,
     build_backbone_features,
-    fpn_from_onnx,
     fpn_from_runtime,
     load_rgb,
     postprocess_masks,
     preprocess_encoder_input,
     prepare_decoder_tensors,
     prepare_decoder_tensors_bridged,
-    prepare_decoder_tensors_onnx,
 )
 
 _REPO_ID = "mobilint/sam2-hiera-large"
@@ -593,16 +591,11 @@ class SAM2HieraLarge(MBLT_Engine):
         """
 
         encoder_backend = self._require_encoder_backend()
-        nhwc = strip_runtime_batch(encoder_input)
-        if nhwc.ndim != 3:
-            raise ValueError(
-                f"Expected an NHWC encoder input with a batch of one, got shape "
-                f"{np.asarray(encoder_input).shape}."
-            )
-        nchw = np.ascontiguousarray(nhwc.transpose(2, 0, 1))[None]
-        validate_runtime_shapes([nchw], [ENCODER_ONNX_INPUT_SHAPE], "encoder")
-        outputs = encoder_backend({ENCODER_ONNX_INPUT_NAME: nchw})
-        return fpn_from_onnx(outputs, self.device)
+        feed = np.asarray(encoder_input, dtype=np.float32)
+        validate_runtime_shapes([feed], [ENCODER_ONNX_INPUT_SHAPE], "encoder")
+        return fpn_from_runtime(
+            encoder_backend({ENCODER_ONNX_INPUT_NAME: feed}), self.device
+        )
 
     def _decode_prompts_mxq(
         self,
@@ -648,7 +641,7 @@ class SAM2HieraLarge(MBLT_Engine):
     ) -> list[np.ndarray]:
         """Run the decoder ONNX graph on its five named pre-flattening inputs."""
 
-        decoder_tensors = prepare_decoder_tensors_onnx(
+        decoder_tensors = prepare_decoder_tensors_bridged(
             weights, features, points, labels, original_hw
         )
         validate_runtime_shapes(

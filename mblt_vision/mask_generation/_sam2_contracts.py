@@ -53,9 +53,9 @@ DECODER_RUNTIME_ORDER_BRIDGED: tuple[str, ...] = (
     "image_embeddings",
     "dense_prompt_embeddings",
     "image_pe",
-    "sparse_prompt_embeddings",
-    "hrf0_nhwc",
-    "hrf1_nhwc",
+    "sparse_prompt_embeddings_0",
+    "high_res_features0_0",
+    "high_res_features1_0",
 )
 
 # Declared input signatures (batch stripped, as qbruntime reports them).
@@ -111,14 +111,15 @@ def detect_decoder_contract(shapes: Sequence[Sequence[int]]) -> str:
 
 # Exported ONNX graph interface. ``-1`` marks the prompt-count-dependent
 # dynamic token axis (``6 output tokens + N points + 1 pad``).
-ENCODER_ONNX_INPUT_NAME = "input_image"
-ENCODER_ONNX_INPUT_SHAPE: tuple[int, ...] = (1, 3, 1024, 1024)
+ENCODER_ONNX_INPUT_NAME = "input_image_0"
+ENCODER_ONNX_INPUT_SHAPE: tuple[int, ...] = (1, 1024, 1024, 3)
 DECODER_ONNX_INPUT_SHAPES: dict[str, tuple[int, ...]] = {
-    "tokens": (1, -1, 256),
-    "src": (1, 256, 64, 64),
-    "pos_src": (1, 256, 64, 64),
-    "high_res_features_0": (1, 32, 256, 256),
-    "high_res_features_1": (1, 64, 128, 128),
+    "image_embeddings": (1, 256, 64, 64),
+    "dense_prompt_embeddings": (1, 256, 64, 64),
+    "image_pe": (1, 256, 64, 64),
+    "sparse_prompt_embeddings_0": (1, 1, -1, 256),
+    "high_res_features0_0": (1, 256, 256, 32),
+    "high_res_features1_0": (1, 128, 128, 64),
 }
 DECODER_ONNX_INPUT_NAMES: tuple[str, ...] = tuple(DECODER_ONNX_INPUT_SHAPES)
 
