@@ -86,6 +86,13 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         ``(B, N, 5)`` instead. Restore the implicit column so the tensor takes
         the same already-decoded path as the six-column exports rather than
         falling through to raw split-head decoding, which cannot consume it.
+
+        At ``nc == 1`` five columns are also the width of a *converted* xywh
+        candidate tensor (``4 + nc``), which is a different thing entirely and
+        belongs to :meth:`non_e2e`. The two are separated by row count: an
+        end2end export is top-k selected and so never exceeds ``max_det`` rows,
+        while a converted tensor carries one row per anchor (8400 at 640x640).
+        Only the bounded form is treated as decoded detections.
         """
         if self.nc != 1:
             return None
@@ -104,6 +111,8 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         while tensor.ndim == 4 and tensor.shape[0] == 1:
             tensor = tensor[0]
         if tensor.ndim != 3 or tensor.shape[-1] != 5 + self.n_extra:
+            return None
+        if tensor.shape[1] > self.max_det:
             return None
         labels = torch.zeros_like(tensor[..., :1])
         return torch.cat((tensor[..., :5], labels, tensor[..., 5:]), dim=-1)
