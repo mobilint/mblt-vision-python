@@ -45,10 +45,6 @@ description: >-
   and six named decoder inputs with a dynamic token axis. Keep the prompt-encoding host path and
   classify_decoder_outputs framework-independent. ONNX uses fpn_from_runtime and
   prepare_decoder_tensors_bridged; MXQ uses fpn_from_runtime plus the detected decoder builder.
-  inputs with a dynamic token axis. Keep the prompt-encoding host path and classify_decoder_outputs
-  framework-independent. ONNX uses fpn_from_runtime and prepare_decoder_tensors_bridged;
-  MXQ uses fpn_from_runtime plus prepare_decoder_tensors or prepare_decoder_tensors_bridged,
-  according to its detected decoder contract.
   eval_sav works unchanged for both.
   Load the optional runtime before downloading artifacts; validate explicit artifact paths
   (prompt weights included) with FileNotFoundError before any download; dispose a backend that
