@@ -71,7 +71,42 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             if not self.e2e:
                 return self._stack_topk_outputs(batches), None
             return batches, None
+        restored = self._restored_single_class_end2end(x)
+        if restored is not None:
+            return super().extract_final_outputs(restored)
         return super().extract_final_outputs(x)
+
+    def _restored_single_class_end2end(self, x: Any) -> torch.Tensor | None:
+        """Reinstate the class column an end2end single-class export omits.
+
+        Ultralytics end2end YOLOv10 exports emit one decoded
+        ``(B, N, 6)`` tensor of ``xyxy``, confidence, and class id. A model
+        with ``nc == 1`` carries a class column that is constant ``0``, and
+        mblt-model-ops strips it, so the shipped ``*-face`` ONNX artifacts emit
+        ``(B, N, 5)`` instead. Restore the implicit column so the tensor takes
+        the same already-decoded path as the six-column exports rather than
+        falling through to raw split-head decoding, which cannot consume it.
+        """
+        if self.nc != 1:
+            return None
+        candidate = x
+        if isinstance(candidate, Sequence) and not isinstance(candidate, (str, bytes)):
+            if len(candidate) != 1:
+                return None
+            candidate = candidate[0]
+        if not isinstance(candidate, (np.ndarray, torch.Tensor)):
+            return None
+        tensor = (
+            candidate
+            if isinstance(candidate, torch.Tensor)
+            else torch.as_tensor(candidate)
+        )
+        while tensor.ndim == 4 and tensor.shape[0] == 1:
+            tensor = tensor[0]
+        if tensor.ndim != 3 or tensor.shape[-1] != 5 + self.n_extra:
+            return None
+        labels = torch.zeros_like(tensor[..., :1])
+        return torch.cat((tensor[..., :5], labels, tensor[..., 5:]), dim=-1)
 
     def _decoded_output_batches(
         self,
