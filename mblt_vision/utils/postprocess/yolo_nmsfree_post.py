@@ -73,8 +73,22 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             return batches, None
         restored = self._restored_single_class_end2end(x)
         if restored is not None:
-            return super().extract_final_outputs(restored)
+            detections, proto_outs = super().extract_final_outputs(restored)
+            if detections is not None:
+                # Match the decoded-triplet branch above: with e2e disabled the
+                # caller is promised export-style tensors, not a per-image list.
+                if not self.e2e and isinstance(detections, list):
+                    return self._stack_topk_outputs(detections), proto_outs
+                return detections, proto_outs
         return super().extract_final_outputs(x)
+
+    def _anchor_grid_size(self) -> int | None:
+        """Total anchor count for this configuration, when it is resolvable."""
+        try:
+            anchors = self.anchors_as_tensor()
+        except (AttributeError, TypeError):
+            return None
+        return int(anchors.shape[-1])
 
     def _restored_single_class_end2end(self, x: Any) -> torch.Tensor | None:
         """Reinstate the class column an end2end single-class export omits.
@@ -89,10 +103,18 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
 
         At ``nc == 1`` five columns are also the width of a *converted* xywh
         candidate tensor (``4 + nc``), which is a different thing entirely and
-        belongs to :meth:`non_e2e`. The two are separated by row count: an
-        end2end export is top-k selected and so never exceeds ``max_det`` rows,
-        while a converted tensor carries one row per anchor (8400 at 640x640).
-        Only the bounded form is treated as decoded detections.
+        belongs to :meth:`non_e2e`. Row count is not provenance -- a small
+        configuration can produce fewer candidates than ``max_det`` -- so the
+        two are separated by the one exact property available: a converted
+        tensor carries precisely one row per anchor, and this configuration
+        knows its own anchor count. A tensor of that height is left to the
+        conversion path.
+
+        When a configuration's anchor count coincides with the export's row
+        count the tensor is treated as converted, the conservative reading:
+        the full decode path runs, and a genuine export of that shape fails
+        loudly on raw-head decoding rather than silently skipping
+        candidate selection.
         """
         if self.nc != 1:
             return None
@@ -108,11 +130,15 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             if isinstance(candidate, torch.Tensor)
             else torch.as_tensor(candidate)
         )
-        while tensor.ndim == 4 and tensor.shape[0] == 1:
-            tensor = tensor[0]
+        # QBCompiler wraps the export in a singleton axis 1, giving
+        # (B, 1, N, 5). Squeeze that axis specifically so a batch larger than
+        # one survives; squeezing whichever axis happens to be 1 would drop the
+        # batch instead and reject every batched output.
+        if tensor.ndim == 4 and tensor.shape[1] == 1:
+            tensor = tensor[:, 0]
         if tensor.ndim != 3 or tensor.shape[-1] != 5 + self.n_extra:
             return None
-        if tensor.shape[1] > self.max_det:
+        if tensor.shape[1] == self._anchor_grid_size():
             return None
         labels = torch.zeros_like(tensor[..., :1])
         return torch.cat((tensor[..., :5], labels, tensor[..., 5:]), dim=-1)
