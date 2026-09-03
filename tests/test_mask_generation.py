@@ -758,13 +758,14 @@ class _FakeOnnxInput:
         self.shape = shape
 
 
-_ENCODER_ONNX_INPUTS = [_FakeOnnxInput("input_image", [1, 3, 1024, 1024])]
+_ENCODER_ONNX_INPUTS = [_FakeOnnxInput("input_image_0", [1, 1024, 1024, 3])]
 _DECODER_ONNX_INPUTS = [
-    _FakeOnnxInput("tokens", [1, "num_tokens", 256]),
-    _FakeOnnxInput("src", [1, 256, 64, 64]),
-    _FakeOnnxInput("pos_src", [1, 256, 64, 64]),
-    _FakeOnnxInput("high_res_features_0", [1, 32, 256, 256]),
-    _FakeOnnxInput("high_res_features_1", [1, 64, 128, 128]),
+    _FakeOnnxInput("image_embeddings", [1, 256, 64, 64]),
+    _FakeOnnxInput("dense_prompt_embeddings", [1, 256, 64, 64]),
+    _FakeOnnxInput("image_pe", [1, 256, 64, 64]),
+    _FakeOnnxInput("sparse_prompt_embeddings_0", [1, 1, "num_points", 256]),
+    _FakeOnnxInput("high_res_features0_0", [1, 256, 256, 32]),
+    _FakeOnnxInput("high_res_features1_0", [1, 128, 128, 64]),
 ]
 
 
@@ -799,15 +800,13 @@ class _FakeONNXBackend:
         if self._is_encoder:
             # Batched NCHW FPN levels, exactly as the exported graph declares.
             return [
-                np.zeros((1, 32, 256, 256), dtype=np.float32),
-                np.zeros((1, 64, 128, 128), dtype=np.float32),
-                np.zeros((1, 256, 64, 64), dtype=np.float32),
+                np.zeros((1, 256, 256, 32), dtype=np.float32),
+                np.zeros((1, 128, 128, 64), dtype=np.float32),
+                np.zeros((1, 64, 64, 256), dtype=np.float32),
             ]
         return [
-            np.zeros((1, 3, 256, 256), dtype=np.float32),
-            np.arange(3, dtype=np.float32).reshape(1, 3),
-            np.ones((1, 3, 256), dtype=np.float32),
-            np.array([[0.5]], dtype=np.float32),
+            np.arange(3, dtype=np.float32).reshape(1, 1, 3),
+            np.zeros((1, 3, 256 * 256), dtype=np.float32),
         ]
 
     def dispose(self) -> None:
@@ -1008,8 +1007,9 @@ def test_sam2_onnx_rejects_a_frozen_prompt_token_axis(
             if self._is_encoder:
                 return _ENCODER_ONNX_INPUTS
             return [
-                _FakeOnnxInput("tokens", [1, 8, 256]),  # frozen, not symbolic
-                *_DECODER_ONNX_INPUTS[1:],
+                *_DECODER_ONNX_INPUTS[:3],
+                _FakeOnnxInput("sparse_prompt_embeddings_0", [1, 1, 2, 256]),
+                *_DECODER_ONNX_INPUTS[4:],
             ]
 
     encoder_path, decoder_path = _make_onnx_engine(
@@ -1039,14 +1039,15 @@ def test_sam2_onnx_predict_preprocessed_uses_the_exported_graph_contract(
             labels=[1],
         )
         encoder_backend, decoder_backend = _FakeONNXBackend.instances
-        assert encoder_backend.calls == [{"input_image": (1, 3, 1024, 1024)}]
+        assert encoder_backend.calls == [{"input_image_0": (1, 1024, 1024, 3)}]
         (decoder_call,) = decoder_backend.calls
         assert decoder_call == {
-            "tokens": (1, 8, 256),  # 6 output tokens + 1 point + 1 pad
-            "src": (1, 256, 64, 64),
-            "pos_src": (1, 256, 64, 64),
-            "high_res_features_0": (1, 32, 256, 256),
-            "high_res_features_1": (1, 64, 128, 128),
+            "image_embeddings": (1, 256, 64, 64),
+            "dense_prompt_embeddings": (1, 256, 64, 64),
+            "image_pe": (1, 256, 64, 64),
+            "sparse_prompt_embeddings_0": (1, 1, 2, 256),
+            "high_res_features0_0": (1, 256, 256, 32),
+            "high_res_features1_0": (1, 128, 128, 64),
         }
         assert result.task == "mask_generation"
         assert result.masks is not None
@@ -1134,7 +1135,7 @@ def test_fpn_from_onnx_orders_levels_by_channel_and_rejects_other_layouts() -> N
 
 
 @pytest.mark.parametrize(("num_points", "num_tokens"), [(1, 8), (2, 9), (3, 10)])
-def test_prepare_decoder_tensors_onnx_builds_the_five_named_inputs(
+def test_prepare_decoder_tensors_onnx_builds_the_six_direct_inputs(
     num_points: int, num_tokens: int
 ) -> None:
     """The ONNX decoder feed keeps the traced pre-flattening shapes."""
@@ -1142,7 +1143,7 @@ def test_prepare_decoder_tensors_onnx_builds_the_five_named_inputs(
     from mblt_vision.mask_generation._sam2_contracts import DECODER_ONNX_INPUT_NAMES
     from mblt_vision.mask_generation._sam2_host import (
         build_backbone_features,
-        prepare_decoder_tensors_onnx,
+        prepare_decoder_tensors_bridged,
     )
 
     weights = _fake_prompt_weights()
@@ -1156,14 +1157,15 @@ def test_prepare_decoder_tensors_onnx_builds_the_five_named_inputs(
     )
     points = np.arange(num_points * 2, dtype=np.float32).reshape(num_points, 2)
     labels = np.ones(num_points, dtype=np.int64)
-    tensors = prepare_decoder_tensors_onnx(
+    tensors = prepare_decoder_tensors_bridged(
         weights, features, points, labels, (480, 640)
     )
 
     assert tuple(tensors) == DECODER_ONNX_INPUT_NAMES
-    assert tensors["tokens"].shape == (1, num_tokens, 256)
-    assert tensors["src"].shape == (1, 256, 64, 64)
-    assert tensors["pos_src"].shape == (1, 256, 64, 64)
-    assert tensors["high_res_features_0"].shape == (1, 32, 256, 256)
-    assert tensors["high_res_features_1"].shape == (1, 64, 128, 128)
+    assert tensors["image_embeddings"].shape == (1, 256, 64, 64)
+    assert tensors["dense_prompt_embeddings"].shape == (1, 256, 64, 64)
+    assert tensors["image_pe"].shape == (1, 256, 64, 64)
+    assert tensors["sparse_prompt_embeddings_0"].shape == (1, 1, num_points + 1, 256)
+    assert tensors["high_res_features0_0"].shape == (1, 256, 256, 32)
+    assert tensors["high_res_features1_0"].shape == (1, 128, 128, 64)
     assert all(array.dtype == np.float32 for array in tensors.values())
