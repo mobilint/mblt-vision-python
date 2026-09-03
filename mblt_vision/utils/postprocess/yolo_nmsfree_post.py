@@ -115,6 +115,12 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
         the full decode path runs, and a genuine export of that shape fails
         loudly on raw-head decoding rather than silently skipping
         candidate selection.
+
+        A configuration whose anchors cannot be resolved at all is treated the
+        same way. Without an anchor count there is nothing to separate the two
+        layouts, so restoration is skipped rather than applied unguarded: an
+        unrecognized tensor then fails loudly on raw-head decoding instead of
+        silently bypassing conversion and candidate selection.
         """
         if self.nc != 1:
             return None
@@ -138,7 +144,8 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             tensor = tensor[:, 0]
         if tensor.ndim != 3 or tensor.shape[-1] != 5 + self.n_extra:
             return None
-        if tensor.shape[1] == self._anchor_grid_size():
+        anchor_count = self._anchor_grid_size()
+        if anchor_count is None or tensor.shape[1] == anchor_count:
             return None
         labels = torch.zeros_like(tensor[..., :1])
         return torch.cat((tensor[..., :5], labels, tensor[..., 5:]), dim=-1)
