@@ -71,7 +71,84 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             if not self.e2e:
                 return self._stack_topk_outputs(batches), None
             return batches, None
+        restored = self._restored_single_class_end2end(x)
+        if restored is not None:
+            detections, proto_outs = super().extract_final_outputs(restored)
+            if detections is not None:
+                # Match the decoded-triplet branch above: with e2e disabled the
+                # caller is promised export-style tensors, not a per-image list.
+                if not self.e2e and isinstance(detections, list):
+                    return self._stack_topk_outputs(detections), proto_outs
+                return detections, proto_outs
         return super().extract_final_outputs(x)
+
+    def _anchor_grid_size(self) -> int | None:
+        """Total anchor count for this configuration, when it is resolvable."""
+        try:
+            anchors = self.anchors_as_tensor()
+        except (AttributeError, TypeError):
+            return None
+        return int(anchors.shape[-1])
+
+    def _restored_single_class_end2end(self, x: Any) -> torch.Tensor | None:
+        """Reinstate the class column an end2end single-class export omits.
+
+        Ultralytics end2end YOLOv10 exports emit one decoded
+        ``(B, N, 6)`` tensor of ``xyxy``, confidence, and class id. A model
+        with ``nc == 1`` carries a class column that is constant ``0``, and
+        mblt-model-ops strips it, so the shipped ``*-face`` ONNX artifacts emit
+        ``(B, N, 5)`` instead. Restore the implicit column so the tensor takes
+        the same already-decoded path as the six-column exports rather than
+        falling through to raw split-head decoding, which cannot consume it.
+
+        At ``nc == 1`` five columns are also the width of a *converted* xywh
+        candidate tensor (``4 + nc``), which is a different thing entirely and
+        belongs to :meth:`non_e2e`. Row count is not provenance -- a small
+        configuration can produce fewer candidates than ``max_det`` -- so the
+        two are separated by the one exact property available: a converted
+        tensor carries precisely one row per anchor, and this configuration
+        knows its own anchor count. A tensor of that height is left to the
+        conversion path.
+
+        When a configuration's anchor count coincides with the export's row
+        count the tensor is treated as converted, the conservative reading:
+        the full decode path runs, and a genuine export of that shape fails
+        loudly on raw-head decoding rather than silently skipping
+        candidate selection.
+
+        A configuration whose anchors cannot be resolved at all is treated the
+        same way. Without an anchor count there is nothing to separate the two
+        layouts, so restoration is skipped rather than applied unguarded: an
+        unrecognized tensor then fails loudly on raw-head decoding instead of
+        silently bypassing conversion and candidate selection.
+        """
+        if self.nc != 1:
+            return None
+        candidate = x
+        if isinstance(candidate, Sequence) and not isinstance(candidate, (str, bytes)):
+            if len(candidate) != 1:
+                return None
+            candidate = candidate[0]
+        if not isinstance(candidate, (np.ndarray, torch.Tensor)):
+            return None
+        tensor = (
+            candidate
+            if isinstance(candidate, torch.Tensor)
+            else torch.as_tensor(candidate)
+        )
+        # QBCompiler wraps the export in a singleton axis 1, giving
+        # (B, 1, N, 5). Squeeze that axis specifically so a batch larger than
+        # one survives; squeezing whichever axis happens to be 1 would drop the
+        # batch instead and reject every batched output.
+        if tensor.ndim == 4 and tensor.shape[1] == 1:
+            tensor = tensor[:, 0]
+        if tensor.ndim != 3 or tensor.shape[-1] != 5 + self.n_extra:
+            return None
+        anchor_count = self._anchor_grid_size()
+        if anchor_count is None or tensor.shape[1] == anchor_count:
+            return None
+        labels = torch.zeros_like(tensor[..., :1])
+        return torch.cat((tensor[..., :5], labels, tensor[..., 5:]), dim=-1)
 
     def _decoded_output_batches(
         self,
