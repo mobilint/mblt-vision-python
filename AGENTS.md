@@ -88,6 +88,14 @@ The current ownership boundary is deliberate:
 - `Reader` takes a `color_mode`. Everything shipped before YOLOX wants RGB and that stays the
   default; YOLOX is trained on cv2's native BGR and loses accuracy without it. The flag
   describes the array the reader emits, so an array handed in is taken as RGB and converted.
+- `YuNet` decodes through `post_cfg.yunet`, dispatched ahead of the other face flags. Its
+  export is twelve tensors — `cls_*`, `obj_*`, `bbox_*`, `kps_*` at strides 8/16/32, class
+  score and objectness already sigmoid — and the four heads are read *positionally*, because
+  class score and objectness are both one channel wide and nothing else tells them apart. A
+  candidate's score is class times objectness (a product, not OpenCV's square root), its box
+  is `xy * stride + prior` and `exp(wh) * stride` against a prior grid with no half-cell
+  offset, and the landmarks are dropped to keep the box-and-score face contract. Its geometry
+  is BGR, aspect-preserving, zero-padded top-left.
 - `YOLOX-*` and `DAMO-YOLO-*` decode through their own postprocessors
   (`post_cfg.yolox` / `post_cfg.damoyolo`, dispatched ahead of the `anchors` / `dflfree` /
   `nmsfree` flags), because neither head is an Ultralytics one: YOLOX emits a single

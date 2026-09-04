@@ -85,6 +85,9 @@ description: >-
 - A pipeline may declare no Normalize step. Normalize always divides by 255, and YOLOX and
   DAMO-YOLO take unscaled 0-255 input; the ONNX path casts the byte tensor to the dtype the
   graph declares. Reader.color_mode picks the channel order (RGB default, BGR for YOLOX).
+- YuNet decodes through `post_cfg.yunet` (face branch): twelve heads, read positionally because
+  class score and objectness are both one channel wide, score = class x objectness, prior grid
+  with no half-cell offset, landmarks dropped. Geometry is BGR, zero-padded top-left.
 - YOLOX and DAMO-YOLO decode through `post_cfg.yolox` / `post_cfg.damoyolo`, dispatched ahead of
   anchors/dflfree/nmsfree. Both drop the Ultralytics half-cell anchor offset; DAMO-YOLO's
   `reg_max` counts the largest distance, so 16 means 17 distribution bins. Only the conversion

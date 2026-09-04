@@ -31,6 +31,7 @@ from .yolo_dflfree_post import (
 from .damoyolo_post import DAMOYOLODetectionPost, DAMOYOLOFaceDetectionPost
 from .yolo_nmsfree_post import YOLONMSFreeDetectionPost, YOLONMSFreeFaceDetectionPost
 from .yolox_post import YOLOXDetectionPost, YOLOXFaceDetectionPost
+from .yunet_post import YuNetFaceDetectionPost
 
 
 def build_postprocess(
@@ -60,6 +61,12 @@ def build_postprocess(
     if task == "semantic_segmentation":
         return SemanticSegPost(pre_cfg, post_cfg)
     if task == "face_detection":
+        if post_cfg.get("yunet", False):
+            return YuNetFaceDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
         if post_cfg.get("yolox", False):
             return YOLOXFaceDetectionPost(
                 pre_cfg,

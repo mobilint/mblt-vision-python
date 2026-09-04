@@ -29,6 +29,7 @@ __all__: list[str] = [
     "YOLOv8l_face",
     "YOLOv8m_face",
     "YOLOv8n_face",
+    "YuNet",
 ]
 
 YOLO11l_face = create_model_class("YOLO11l_face", __name__)
@@ -55,3 +56,4 @@ YOLOv7s_face = create_model_class("YOLOv7s_face", __name__)
 YOLOv8l_face = create_model_class("YOLOv8l_face", __name__)
 YOLOv8m_face = create_model_class("YOLOv8m_face", __name__)
 YOLOv8n_face = create_model_class("YOLOv8n_face", __name__)
+YuNet = create_model_class("YuNet", __name__)

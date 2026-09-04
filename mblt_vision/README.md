@@ -255,6 +255,7 @@ COCO category mapping is applied.
 | YOLOv7-tiny-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
 | YOLOv7s-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
 | YOLOv7-face | (640,640,3) | [Link](https://github.com/derronqi/yolov7-face) | Anchor-based. |
+| YuNet | (640,640,3) | [Link](https://github.com/ShiqiYu/libfacedetection.train) | ONNX only; BGR input, zero-padded top-left |
 
 Input geometry follows each checkpoint's own training resolution. Every face
 model is trained and served at 640x640 except `YOLOv8m-face` and `YOLOv8l-face`,
