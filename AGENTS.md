@@ -68,6 +68,39 @@ The current ownership boundary is deliberate:
 - Use the shared letterbox helpers for forward geometry and inverse output restoration. Detection
   postprocessors require pre_cfg.LetterBox; metadata-aware semantic preprocessing returns the
   original image shape and ratio_pad so logits can be restored before argmax.
+- `LetterBox` describes several published conventions, not one, through `center`,
+  `keep_ratio` and `padding_value`: Ultralytics centres an aspect-preserving resize and pads
+  it with 114 (the default, unchanged), YOLOX anchors the same resize at the **top-left**
+  with 114 (`center: false`), and DAMO-YOLO anchors it top-left with **zeros**
+  (`padding_value: 0`) — while `keep_ratio: false` describes the stretch that upstream's
+  current config specifies for checkpoints nobody can download any more. Match the geometry
+  to the weights' era, not to upstream HEAD: DAMO-YOLO-T scores 39.72 mAP through the
+  stretch and 41.79 through the era-correct letterbox, against a published 41.8.
+  A stretch scales the axes differently, so `LetterBoxGeometry` reports `ratio_xy` and
+  `scale_boxes` divides x and y by their own gain; deriving the inverse from image shapes
+  alone would silently reinstate the centred assumption, so both the plot path and
+  `nmsout2eval` build it from the model's own `pre_cfg.LetterBox` flags.
+- A pipeline may legitimately declare **no `Normalize` step**: `Normalize` always divides by
+  255, and YOLOX and DAMO-YOLO are both trained on unscaled 0-255 input (measured, not
+  assumed — 0-1 input yields no DAMO-YOLO detection above 0.4 confidence). The preprocessor
+  then hands over the bytes it read, which is what the NPU takes; the ONNX path casts to the
+  dtype the graph declares rather than rejecting a byte tensor.
+- `Reader` takes a `color_mode`. Everything shipped before YOLOX wants RGB and that stays the
+  default; YOLOX is trained on cv2's native BGR and loses accuracy without it. The flag
+  describes the array the reader emits, so an array handed in is taken as RGB and converted.
+- `YOLOX-*` and `DAMO-YOLO-*` decode through their own postprocessors
+  (`post_cfg.yolox` / `post_cfg.damoyolo`, dispatched ahead of the `anchors` / `dflfree` /
+  `nmsfree` flags), because neither head is an Ultralytics one: YOLOX emits a single
+  `(batch, anchors, 5 + classes)` tensor whose box is `(raw + grid) * stride` and
+  `exp(raw) * stride` with a score of objectness times class, and DAMO-YOLO emits six
+  per-level tensors — three sigmoid class maps and three distribution maps — whose `reg_max`
+  counts the largest distance rather than the bins, so 16 means 17 bins. Both grids drop the
+  Ultralytics half-cell offset, so both call `make_anchors(offset=0.0)`. Only the conversion
+  to candidates is new; filtering, `xywh2xyxy`, NMS and the inverse letterbox are inherited.
+- Take `YOLOX-*` and `DAMO-YOLO-*` `pre_cfg`/`post_cfg` from
+  `../mblt-model-ops/models/<Model>/pipeline.yaml`, the same source of truth the
+  face-detection models use. Their `file_cfg` names the Hub artifact each Model will ship as;
+  a local ONNX run overrides it with `model_path=<file>.onnx`.
 - Normalize dense outputs before inverse letterboxing: upsample quarter-resolution depth maps by
   four, preserve baked-resize depth maps, convert Cityscapes NHWC logits to NCHW, and reject
   non-finite, fractional, or out-of-range baked semantic IDs before casting.

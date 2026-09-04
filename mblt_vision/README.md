@@ -340,11 +340,34 @@ validation split, following Ultralytics' depth-validation convention.
 | YOLO12m | (640,640,3) | 51.899 | 52.297 | 77.22 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 | YOLO12l | (640,640,3) | 53.200 | 53.508 | 105.07 | 26.40 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 | YOLO12x | (640,640,3) | 54.758 | 55.061 | 223.27 | 59.14 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
+| YOLOX-Nano | (416,416,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| YOLOX-Tiny | (416,416,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| YOLOX-s | (640,640,3) | - | 40.685 | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| YOLOX-m | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| YOLOX-l | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| YOLOX-x | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| YOLOX-Darknet53 | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | ONNX only; not compiled yet |
+| DAMO-YOLO-T | (640,640,3) | - | 41.789 | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | ONNX only; Dec 2022 checkpoint |
+| DAMO-YOLO-T-distill | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | ONNX only; Dec 2022 checkpoint |
+| DAMO-YOLO-S | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | ONNX only; Dec 2022 checkpoint |
+| DAMO-YOLO-S-distill | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | ONNX only; Dec 2022 checkpoint |
+| DAMO-YOLO-M | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | ONNX only; Dec 2022 checkpoint |
+| DAMO-YOLO-M-distill | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | ONNX only; Dec 2022 checkpoint |
 
 <details>
 <summary>Object Detection (COCO)</summary>
 
 - $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$ values are for single-model single-scale on the [COCO val2017](https://cocodataset.org/) dataset.
+- `YOLOX-*` and `DAMO-YOLO-*` are ONNX-only so far: no MXQ has been compiled, so their NPU
+  column is empty, and a GPU figure appears only where the ONNX artifact has actually been
+  evaluated on the full COCO val2017 split (YOLOX-s 40.685 against upstream's 40.5;
+  DAMO-YOLO-T 41.789 against upstream's 41.8).
+- Neither family preprocesses like the Ultralytics models. YOLOX takes a **BGR** image
+  letterboxed at the **top-left** with 114, and DAMO-YOLO an **RGB** image letterboxed at the
+  top-left with **zeros**; neither scales its input, so both pipelines declare no `Normalize`
+  step. The DAMO-YOLO geometry follows the December 2022 checkpoints -- the only ones still
+  downloadable -- rather than upstream HEAD, which describes the stretch used by weights that
+  are no longer published; the difference is two points of mAP.
 
 </details>
 

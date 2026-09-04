@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..._tasks import normalize_vision_task
-from ..letterbox import RatioPad
+from ..letterbox import LetterBoxGeometry, RatioPad
 from ..preprocess._validation import normalize_image_size
 from ..types import ListTensorLike, TensorLike
 from .common import nmsout2eval, process_mask_upsample
@@ -160,6 +160,10 @@ class YOLODetectionPostBase(PostBase):
                 )
             self.nl = len(self.anchors)
             self.na = len(self.anchors[0]) // 2
+        # How this model's letterbox was built, so an inverse derived here matches the
+        # forward op rather than assuming the centered, aspect-preserving default.
+        self.letterbox_center = bool(letterbox_cfg.get("center", True))
+        self.letterbox_keep_ratio = bool(letterbox_cfg.get("keep_ratio", True))
         self.n_extra: int = post_cfg.get("n_extra", 0)
         self.conf_thres = float(post_cfg.get("conf_thres", 0.25))
         self.iou_thres = float(post_cfg.get("iou_thres", 0.7))
@@ -290,6 +294,27 @@ class YOLODetectionPostBase(PostBase):
                 - Segmentation/Pose: (labels_list, boxes_list, scores_list, extra_list)
         """
 
+        if ratio_pad is None and not (
+            self.letterbox_center and self.letterbox_keep_ratio
+        ):
+            # Without recorded metadata the shared helper re-derives a centered,
+            # aspect-preserving letterbox. That is the wrong inverse for YOLOX (padded
+            # at the top-left) and for DAMO-YOLO (stretched, no padding), so derive it
+            # here from the geometry this model actually used.
+            shapes = (
+                img0_shape
+                if isinstance(img0_shape, list)
+                else [img0_shape] * len(nms_out)
+            )
+            ratio_pad = [
+                LetterBoxGeometry.from_shapes(
+                    img1_shape,
+                    shape,
+                    center=self.letterbox_center,
+                    keep_ratio=self.letterbox_keep_ratio,
+                ).ratio_pad
+                for shape in shapes
+            ]
         return nmsout2eval(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
 
     def extract_final_outputs(

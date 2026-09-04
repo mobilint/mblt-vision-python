@@ -75,6 +75,20 @@ description: >-
 ## Processing and Results
 
 - Reuse the shared letterbox geometry for both preprocessing and inverse coordinate restoration.
+- LetterBox covers several conventions through `center`, `keep_ratio` and `padding_value`:
+  Ultralytics centres and pads with 114 (default), YOLOX pads with 114 at the top-left
+  (`center: false`), DAMO-YOLO pads with 0 at the top-left, and `keep_ratio: false` stretches
+  with no padding (scaling the axes differently, so the geometry reports `ratio_xy`). Match a
+  model's geometry to its checkpoint's era, not to upstream HEAD — for DAMO-YOLO that is worth
+  two points of mAP. Derive an inverse from the model's own pre_cfg flags, never from image
+  shapes alone.
+- A pipeline may declare no Normalize step. Normalize always divides by 255, and YOLOX and
+  DAMO-YOLO take unscaled 0-255 input; the ONNX path casts the byte tensor to the dtype the
+  graph declares. Reader.color_mode picks the channel order (RGB default, BGR for YOLOX).
+- YOLOX and DAMO-YOLO decode through `post_cfg.yolox` / `post_cfg.damoyolo`, dispatched ahead of
+  anchors/dflfree/nmsfree. Both drop the Ultralytics half-cell anchor offset; DAMO-YOLO's
+  `reg_max` counts the largest distance, so 16 means 17 distribution bins. Only the conversion
+  to candidates is theirs — filtering, xywh2xyxy, NMS and the inverse letterbox are inherited.
 - Detection requires pre_cfg.LetterBox. Keep semantic metadata (img0_shape and
   ratio_pad) through postprocessing so logits restore to the original geometry before
   argmax.

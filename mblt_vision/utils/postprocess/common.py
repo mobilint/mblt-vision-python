@@ -736,17 +736,18 @@ def scale_boxes(
         np.ndarray | torch.Tensor: The scaled bounding boxes, in the format of (x1, y1, x2, y2)
     """
     ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
-    gain = ratio[0]
-    if isinstance(boxes, np.ndarray):
-        if padding:
-            boxes[..., [0, 2]] -= pad[0]  # x padding
-            boxes[..., [1, 3]] -= pad[1]  # y padding
-        boxes[..., :4] /= gain
-        return clip_boxes(boxes, img0_shape)
+    # Per axis, not one gain: an aspect-preserving letterbox reports the same number
+    # twice, but a stretching resize (DAMO-YOLO's `keep_ratio: False`) reports two
+    # different ones, and dividing both axes by the x scale would skew every box.
+    gain_x, gain_y = float(ratio[0]), float(ratio[1])
+    # NumPy and Torch both support this indexed in-place operation, but their
+    # type stubs expose incompatible ``__setitem__`` value types.
+    mutable_boxes: Any = boxes
     if padding:
-        boxes[..., [0, 2]] -= pad[0]  # x padding
-        boxes[..., [1, 3]] -= pad[1]  # y padding
-    boxes[..., :4] /= gain
+        mutable_boxes[..., [0, 2]] -= pad[0]  # x padding
+        mutable_boxes[..., [1, 3]] -= pad[1]  # y padding
+    mutable_boxes[..., [0, 2]] /= gain_x
+    mutable_boxes[..., [1, 3]] /= gain_y
     return clip_boxes(boxes, img0_shape)
 
 

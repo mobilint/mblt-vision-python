@@ -549,10 +549,19 @@ class Results:
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         self.labels = box_cls[:, 5].to(torch.int64)
         self.scores = box_cls[:, 4]
+        letterbox_cfg = self.pre_cfg.get("LetterBox", {})
         self.boxes = scale_boxes(
             img1_shape,
             box_cls[:, :4].clone(),
             img0_shape,
+            # Derived from this model's own letterbox, not from the centered
+            # aspect-preserving default, which YOLOX and DAMO-YOLO do not use.
+            ratio_pad=LetterBoxGeometry.from_shapes(
+                (int(img1_shape[0]), int(img1_shape[1])),
+                img0_shape,
+                center=bool(letterbox_cfg.get("center", True)),
+                keep_ratio=bool(letterbox_cfg.get("keep_ratio", True)),
+            ).ratio_pad,
         )
         boxes = self.boxes
         scores = self.scores

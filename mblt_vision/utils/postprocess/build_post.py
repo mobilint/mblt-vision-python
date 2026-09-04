@@ -28,7 +28,9 @@ from .yolo_dflfree_post import (
     YOLODFLFreePosePost,
     YOLODFLFreeSegPost,
 )
+from .damoyolo_post import DAMOYOLODetectionPost, DAMOYOLOFaceDetectionPost
 from .yolo_nmsfree_post import YOLONMSFreeDetectionPost, YOLONMSFreeFaceDetectionPost
+from .yolox_post import YOLOXDetectionPost, YOLOXFaceDetectionPost
 
 
 def build_postprocess(
@@ -58,6 +60,18 @@ def build_postprocess(
     if task == "semantic_segmentation":
         return SemanticSegPost(pre_cfg, post_cfg)
     if task == "face_detection":
+        if post_cfg.get("yolox", False):
+            return YOLOXFaceDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        if post_cfg.get("damoyolo", False):
+            return DAMOYOLOFaceDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
         if post_cfg.get("anchors", False):
             return YOLOAnchorFaceDetectionPost(
                 pre_cfg,
@@ -82,6 +96,18 @@ def build_postprocess(
             **kwargs,
         )
     if task == "object_detection":
+        if post_cfg.get("yolox", False):
+            return YOLOXDetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
+        if post_cfg.get("damoyolo", False):
+            return DAMOYOLODetectionPost(
+                pre_cfg,
+                post_cfg,
+                **kwargs,
+            )
         if post_cfg.get("anchors", False):
             return YOLOAnchorDetectionPost(
                 pre_cfg,

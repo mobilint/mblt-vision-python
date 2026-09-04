@@ -800,6 +800,13 @@ class MBLT_Engine:
 
         if x_np.dtype == np.float64:
             x_np = x_np.astype(np.float32)
+        # A pipeline with no Normalize step hands over the bytes it read, which is what
+        # the NPU takes and what YOLOX and DAMO-YOLO are trained on -- neither scales its
+        # input. An ONNX graph still declares a float input, so honour the declaration
+        # rather than reject the byte tensor: the values are unchanged by the cast.
+        declared_type = self._require_onnx_session().get_inputs()[0].type
+        if declared_type == "tensor(float)" and x_np.dtype != np.float32:
+            x_np = x_np.astype(np.float32)
 
         expected_shape = self._require_onnx_session().get_inputs()[0].shape
         if len(expected_shape) == 4:

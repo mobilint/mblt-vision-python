@@ -1,0 +1,27 @@
+DEFAULT:
+  # The Hub artifact this Model will ship as; a local run overrides it with
+  # `model_path=<file>.onnx`. pre_cfg and post_cfg mirror
+  # ../mblt-model-ops/models/YOLOX-l/pipeline.yaml, which is the source of truth.
+  file_cfg:
+    repo_id: mobilint/YOLOX-l
+    filename: yolox_l.mxq
+    revision: main
+  pre_cfg:
+    Reader:
+      style: numpy
+      color_mode: BGR
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+      center: false
+      padding_value: 114
+    SetOrder:
+      shape: HWC
+  post_cfg:
+    task: object_detection
+    dataset: coco
+    yolox: true
+    nl: 3
+    conf_thres: 0.001
+    iou_thres: 0.65

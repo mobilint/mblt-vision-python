@@ -15,6 +15,9 @@ def _apply_letterbox(
     img_size: list[int],
     interpolation: int,
     padding_value: int | tuple[int, int, int],
+    *,
+    center: bool = True,
+    keep_ratio: bool = True,
 ) -> tuple[np.ndarray, RatioPad]:
     """Resize and pad an array while preserving its aspect ratio.
 
@@ -30,7 +33,9 @@ def _apply_letterbox(
 
     input_shape = (int(img_size[0]), int(img_size[1]))
     original_shape = (int(image.shape[0]), int(image.shape[1]))
-    geometry = LetterBoxGeometry.from_shapes(input_shape, original_shape)
+    geometry = LetterBoxGeometry.from_shapes(
+        input_shape, original_shape, center=center, keep_ratio=keep_ratio
+    )
     resized_height, resized_width = geometry.resized_shape
     if image.shape[:2] != geometry.resized_shape:
         image = cv2.resize(
@@ -97,14 +102,47 @@ class LetterBox(PreOps):
     Ref: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
     """
 
-    def __init__(self, img_size: list[int]) -> None:
+    def __init__(
+        self,
+        img_size: list[int],
+        center: bool = True,
+        keep_ratio: bool = True,
+        padding_value: int = 114,
+    ) -> None:
         """Initializes LetterBox with target image size.
 
         Args:
             img_size (list[int]): Target image size [h, w].
+            center (bool): Center the resized image in the canvas, as Ultralytics does.
+                ``False`` anchors it top-left, which is YOLOX's `preproc()` convention.
+            keep_ratio (bool): Preserve aspect ratio and pad the remainder. ``False``
+                stretches onto the canvas with no padding, which is DAMO-YOLO's
+                test-time `Resize(keep_ratio=False)`.
+            padding_value (int): Constant fill for the padded border. Unused when
+                ``keep_ratio`` is ``False``, because nothing is padded.
+
+        Raises:
+            TypeError: If a flag is not a boolean.
+            ValueError: If the padding value is outside the byte range.
         """
         super().__init__()
         self.img_size = normalize_image_size(img_size, name="img_size")
+        for name, flag in (("center", center), ("keep_ratio", keep_ratio)):
+            if not isinstance(flag, bool):
+                raise TypeError(
+                    f"LetterBox {name} must be a bool, got {type(flag).__name__}."
+                )
+        if isinstance(padding_value, bool) or not isinstance(padding_value, int):
+            raise TypeError(
+                f"LetterBox padding_value must be an int, got {type(padding_value).__name__}."
+            )
+        if not 0 <= padding_value <= 255:
+            raise ValueError(
+                f"LetterBox padding_value must be in [0, 255], got {padding_value}."
+            )
+        self.center = center
+        self.keep_ratio = keep_ratio
+        self.padding_value = padding_value
         self.ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None
 
     def __call__(self, x: TensorLike) -> torch.Tensor:
@@ -125,10 +163,13 @@ class LetterBox(PreOps):
         if x.ndim != 3:
             raise ValueError(f"LetterBox expects an HWC image, got shape {x.shape}.")
         x = normalize_uint8_rgb_array(x, operation="LetterBox")
+        padding_value = (self.padding_value, self.padding_value, self.padding_value)
         img, self.ratio_pad = _apply_letterbox(
             x,
             self.img_size,
             cv2.INTER_LINEAR,
-            (114, 114, 114),
+            padding_value,
+            center=self.center,
+            keep_ratio=self.keep_ratio,
         )
         return torch.from_numpy(img).to(self.device).byte()

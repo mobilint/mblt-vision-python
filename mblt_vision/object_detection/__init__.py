@@ -77,6 +77,19 @@ __all__: list[str] = [
     "YOLOv10n",
     "YOLOv10s",
     "YOLOv10x",
+    "DAMO_YOLO_T",
+    "DAMO_YOLO_TDistill",
+    "DAMO_YOLO_S",
+    "DAMO_YOLO_SDistill",
+    "DAMO_YOLO_M",
+    "DAMO_YOLO_MDistill",
+    "YOLOX_Nano",
+    "YOLOX_Tiny",
+    "YOLOX_s",
+    "YOLOX_m",
+    "YOLOX_l",
+    "YOLOX_x",
+    "YOLOX_Darknet53",
 ]
 
 YOLO11l = create_model_class("YOLO11l", __name__)
@@ -151,3 +164,16 @@ YOLOv10m = create_model_class("YOLOv10m", __name__)
 YOLOv10n = create_model_class("YOLOv10n", __name__)
 YOLOv10s = create_model_class("YOLOv10s", __name__)
 YOLOv10x = create_model_class("YOLOv10x", __name__)
+DAMO_YOLO_T = create_model_class("DAMO_YOLO_T", __name__)
+DAMO_YOLO_TDistill = create_model_class("DAMO_YOLO_TDistill", __name__)
+DAMO_YOLO_S = create_model_class("DAMO_YOLO_S", __name__)
+DAMO_YOLO_SDistill = create_model_class("DAMO_YOLO_SDistill", __name__)
+DAMO_YOLO_M = create_model_class("DAMO_YOLO_M", __name__)
+DAMO_YOLO_MDistill = create_model_class("DAMO_YOLO_MDistill", __name__)
+YOLOX_Nano = create_model_class("YOLOX_Nano", __name__)
+YOLOX_Tiny = create_model_class("YOLOX_Tiny", __name__)
+YOLOX_s = create_model_class("YOLOX_s", __name__)
+YOLOX_m = create_model_class("YOLOX_m", __name__)
+YOLOX_l = create_model_class("YOLOX_l", __name__)
+YOLOX_x = create_model_class("YOLOX_x", __name__)
+YOLOX_Darknet53 = create_model_class("YOLOX_Darknet53", __name__)
