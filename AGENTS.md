@@ -59,6 +59,12 @@ The current ownership boundary is deliberate:
 - Keep each model YAML's file_cfg, pre_cfg, and post_cfg shape stable.
   file_cfg.filename is the canonical MXQ Hub artifact; derive the same-stem ONNX filename
   unless the Hub artifact requires an explicit onnx_filename.
+- Keep a timm classifier's pre_cfg identical to the same model's pipeline.yaml in
+  mblt-model-ops, which derives it from the timm id's default pretrained configuration.
+  Resize.size there is floor(input_size / crop_pct) — timm's own transforms_factory
+  floors, and rounding differs by a pixel at 224/0.9 and 224/0.95. Several names
+  (ConvNext_Base) resolve in timm yet carry torchvision's transform here, so read the
+  expected value from that model's source.yaml provenance rather than from the name.
 - Require post_cfg.dataset in every model YAML and resolve output class counts using the
   dataset/task pair. Do not assume one output taxonomy for every model in a task.
 - Preserve automatic .mxq/.onnx framework detection and the fail-fast error when a local
@@ -287,6 +293,33 @@ The current ownership boundary is deliberate:
 - Use a deterministic default seed of 0 for any public API that samples or otherwise uses
   randomness.
 
+## Postprocess and Scoring Performance
+
+- Postprocessing and metric scoring are a real share of an evaluation run, and several
+  hot paths here are shaped for cost rather than only for clarity. Keep those shapes:
+  `rotated_nms` tiles pairwise probIoU in `ROTATED_NMS_BLOCK`-wide blocks and drops a
+  column as soon as any higher-scored candidate suppresses it, which preserves the
+  Fast-NMS verdict while bounding every intermediate at `ROTATED_NMS_BLOCK ** 2` — the
+  single-matrix form needs tens of gigabytes at the candidate caps a dense OBB head
+  reaches. `to_string` encodes all RLE counts in lockstep instead of one Python loop per
+  count, which is 5x on a 300-mask image. `_match_predictions` sorts and filters once and
+  compares the matched IoU against the threshold vector, because the candidate set at a
+  higher threshold is a prefix of the sorted set at the lowest one. `eval_widerface`
+  scores Easy, Medium and Hard from one pass, because the IoU matrix does not depend on
+  which faces a setting ignores.
+- A speed change to any of these must be shown to keep the metric, not argued to: run the
+  old and the new implementation on the same randomized inputs, degenerate cases included
+  (no predictions, no annotated targets, tied scores, unsorted scores, empty count lists),
+  and require identical output. Then measure. Not every port lands: compacting the
+  candidate tensors inside `non_max_suppression` is 1.8x in numpy and measured ~2x
+  *slower* here, because six boolean index operations per iteration cost more in torch
+  than one gather through a shrinking index; that measurement is recorded in the function.
+- `mblt-model-ops`'s `datasets/*/evaluator.py` are the counterparts of
+  `mblt_vision/utils/evaluation/eval_*.py`, and nothing compares them automatically. A
+  scoring change on one side is owed to the other, verified separately on each, since the
+  two do not share conventions everywhere. When a release carries such work, bump
+  `mblt_vision.__version__` so the other repository's parity pin can move to it.
+
 ## Code Quality and Documentation
 
 - Use four-space indentation, PEP 484 type annotations, clear docstrings for public APIs, and
@@ -300,7 +333,10 @@ The current ownership boundary is deliberate:
   language-tagged code fences, and concise paragraphs. Keep examples executable against the
   public mblt_vision namespace and do not document Model Zoo CLI commands as standalone features.
 - When a durable public fact changes, update this guide, the matching agent skill, CLAUDE.md, and
-  the relevant README in the same change. Treat a significant package change—public API,
+  the relevant README in the same change. `.agents/skills/<name>/` and
+  `.claude/skills/<name>/` are real directories here, not the symlink pair mblt-model-ops
+  uses, so a skill edit has to be written to both copies: editing one leaves the other
+  stating the old contract to whichever tool reads it. `diff` the pair before committing. Treat a significant package change—public API,
   dependency/runtime, artifact layout, CLI, or tooling structure—as a required guide-and-skill
   synchronization point.
 - For documentation-only changes, run `git diff --check` and verify headings and links. Report

@@ -526,3 +526,60 @@ def test_dota_export_rejects_mismatched_detection_fields() -> None:
             ("first",),
             postprocess,
         )
+
+
+def test_dota_threshold_collapse_survives_tied_ious() -> None:
+    """One IoU-sorted pass must equal a per-threshold pass, ties included.
+
+    The collapse rests on the candidate set at a higher threshold being a
+    prefix of the sorted set at the lowest one. An unstable sort breaks that:
+    equal IoUs can be ordered one way in the full set and another once the
+    lower entries are gone, so the prefix stops being the prefix. The matrix
+    below is the minimal case — two targets, two predictions, one tied pair.
+
+    It also pins monotonicity. Re-sorting each threshold independently could
+    make a prediction a true positive at IoU >= 0.75 while not being one at
+    IoU >= 0.50; comparing one matched IoU against the threshold vector cannot.
+    """
+    import numpy as np
+    import torch
+
+    module = eval_dota_module
+    classes = torch.zeros(2, dtype=torch.int64)
+
+    def per_threshold(iou: torch.Tensor, iouv: torch.Tensor) -> np.ndarray:
+        """Match independently at each threshold, with the same stable order."""
+        correct = np.zeros((2, iouv.shape[0]), dtype=bool)
+        iou_np = (iou * (classes[:, None] == classes)).numpy()
+        for index, threshold in enumerate(iouv.tolist()):
+            matches = np.array(np.nonzero(iou_np >= threshold)).T
+            if matches.shape[0] == 0:
+                continue
+            if matches.shape[0] > 1:
+                values = iou_np[matches[:, 0], matches[:, 1]]
+                matches = matches[values.argsort(kind="stable")[::-1]]
+                matches = matches[
+                    np.sort(np.unique(matches[:, 1], return_index=True)[1])
+                ]
+                matches = matches[
+                    np.sort(np.unique(matches[:, 0], return_index=True)[1])
+                ]
+            correct[matches[:, 1].astype(int), index] = True
+        return correct
+
+    tied = torch.tensor([[0.75, 0.75], [0.50, 0.50]], dtype=torch.float32)
+    pair = torch.tensor([0.5, 0.75])
+    np.testing.assert_array_equal(
+        module._match_predictions(classes, classes, tied, pair),
+        per_threshold(tied, pair),
+    )
+
+    rng = np.random.default_rng(0)
+    iouv = torch.linspace(0.5, 0.95, 10)
+    for _ in range(200):
+        # Quantised hard, so exact ties are the norm rather than the exception.
+        values = np.round(rng.uniform(0.4, 1.0, (2, 2)), 2).astype(np.float32)
+        iou = torch.from_numpy(values)
+        matched = module._match_predictions(classes, classes, iou, iouv)
+        np.testing.assert_array_equal(matched, per_threshold(iou, iouv))
+        assert not (matched[:, 1:] & ~matched[:, :-1]).any(), values
