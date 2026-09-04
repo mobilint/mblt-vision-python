@@ -41,6 +41,21 @@ class SemanticSegmentationResult(NamedTuple):
 ADE20KResult = SemanticSegmentationResult
 
 
+def _class_id_mask(values: np.ndarray, nc: int) -> np.ndarray:
+    """Whether each entry is a finite, integral class ID in ``[0, nc)``.
+
+    The range test already rejects NaN and both infinities, so only a
+    floating-point array needs the integral test on top of it and an integer
+    array needs neither. On a full-resolution class map each of those passes
+    costs about as much as the histogram they guard.
+    """
+
+    inside = (values >= 0) & (values < nc)
+    if np.issubdtype(np.asarray(values).dtype, np.integer):
+        return inside
+    return inside & (values == np.floor(values))
+
+
 class SemanticMetricAccumulator:
     """Accumulate an ignore-aware semantic confusion matrix."""
 
@@ -73,12 +88,7 @@ class SemanticMetricAccumulator:
             raise ValueError(
                 f"Semantic prediction and target shapes must match, got {prediction.shape} and {target.shape}."
             )
-        valid_target = (
-            np.isfinite(target)
-            & (target >= 0)
-            & (target < self.nc)
-            & (target == np.floor(target))
-        )
+        valid_target = _class_id_mask(target, self.nc)
         allowed_target = valid_target | (target == self.ignore_label)
         if not bool(allowed_target.all()):
             invalid_values = np.asarray(np.unique(target[~allowed_target]))
@@ -86,23 +96,23 @@ class SemanticMetricAccumulator:
                 f"Semantic targets must be finite class IDs in [0, {self.nc - 1}] "
                 f"or ignore label {self.ignore_label}; got {invalid_values.tolist()}."
             )
-        valid_prediction = (
-            np.isfinite(prediction)
-            & (prediction >= 0)
-            & (prediction < self.nc)
-            & (prediction == np.floor(prediction))
-        )
-        invalid_prediction = valid_target & ~valid_prediction
-        if invalid_prediction.any():
-            invalid_values = np.asarray(np.unique(prediction[invalid_prediction]))
+        # Gather both class maps once: on a full-resolution map the boolean
+        # gather costs about as much as the histogram, and validating
+        # predictions only ever concerned the pixels with a valid target, so
+        # checking the gathered values is the same test over far fewer of them.
+        valid_targets = target[valid_target].astype(np.int64, copy=False)
+        valid_predictions = prediction[valid_target]
+        valid_prediction = _class_id_mask(valid_predictions, self.nc)
+        if not bool(valid_prediction.all()):
+            invalid_values = np.asarray(np.unique(valid_predictions[~valid_prediction]))
             raise ValueError(
                 f"Semantic predictions at valid target pixels must be finite class IDs in [0, {self.nc - 1}], "
                 f"got {invalid_values.tolist()}."
             )
-        if valid_target.any():
+        if valid_targets.size:
             histogram = np.bincount(
-                self.nc * target[valid_target].astype(np.int64)
-                + prediction[valid_target].astype(np.int64),
+                self.nc * valid_targets
+                + valid_predictions.astype(np.int64, copy=False),
                 minlength=self.nc**2,
             )
             self.matrix += histogram.reshape(self.nc, self.nc)

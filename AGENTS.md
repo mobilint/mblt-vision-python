@@ -293,6 +293,33 @@ The current ownership boundary is deliberate:
 - Use a deterministic default seed of 0 for any public API that samples or otherwise uses
   randomness.
 
+## Postprocess and Scoring Performance
+
+- Postprocessing and metric scoring are a real share of an evaluation run, and several
+  hot paths here are shaped for cost rather than only for clarity. Keep those shapes:
+  `rotated_nms` tiles pairwise probIoU in `ROTATED_NMS_BLOCK`-wide blocks and drops a
+  column as soon as any higher-scored candidate suppresses it, which preserves the
+  Fast-NMS verdict while bounding every intermediate at `ROTATED_NMS_BLOCK ** 2` — the
+  single-matrix form needs tens of gigabytes at the candidate caps a dense OBB head
+  reaches. `to_string` encodes all RLE counts in lockstep instead of one Python loop per
+  count, which is 5x on a 300-mask image. `_match_predictions` sorts and filters once and
+  compares the matched IoU against the threshold vector, because the candidate set at a
+  higher threshold is a prefix of the sorted set at the lowest one. `eval_widerface`
+  scores Easy, Medium and Hard from one pass, because the IoU matrix does not depend on
+  which faces a setting ignores.
+- A speed change to any of these must be shown to keep the metric, not argued to: run the
+  old and the new implementation on the same randomized inputs, degenerate cases included
+  (no predictions, no annotated targets, tied scores, unsorted scores, empty count lists),
+  and require identical output. Then measure. Not every port lands: compacting the
+  candidate tensors inside `non_max_suppression` is 1.8x in numpy and measured ~2x
+  *slower* here, because six boolean index operations per iteration cost more in torch
+  than one gather through a shrinking index; that measurement is recorded in the function.
+- `mblt-model-ops`'s `datasets/*/evaluator.py` are the counterparts of
+  `mblt_vision/utils/evaluation/eval_*.py`, and nothing compares them automatically. A
+  scoring change on one side is owed to the other, verified separately on each, since the
+  two do not share conventions everywhere. When a release carries such work, bump
+  `mblt_vision.__version__` so the other repository's parity pin can move to it.
+
 ## Code Quality and Documentation
 
 - Use four-space indentation, PEP 484 type annotations, clear docstrings for public APIs, and

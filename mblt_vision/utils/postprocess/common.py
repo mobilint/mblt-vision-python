@@ -367,13 +367,18 @@ def batch_probiou(
     return 1 - hd
 
 
+# Column/row tile width for rotated suppression. Bounds every pairwise IoU
+# intermediate at ROTATED_NMS_BLOCK ** 2 entries.
+ROTATED_NMS_BLOCK = 512
+
+
 def rotated_nms(
     boxes: torch.Tensor,
     scores: torch.Tensor,
     iou_threshold: float,
     iou_func: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = batch_probiou,
 ) -> torch.Tensor:
-    """Apply fast rotated NMS using an upper-triangular pairwise IoU matrix.
+    """Apply fast rotated NMS over a tiled upper-triangular pairwise IoU.
 
     Args:
         boxes: OBBs in ``xywhr`` format.
@@ -388,8 +393,37 @@ def rotated_nms(
         return torch.empty((0,), dtype=torch.int64, device=boxes.device)
     sorted_idx = torch.argsort(scores, descending=True)
     sorted_boxes = boxes[sorted_idx]
-    ious = iou_func(sorted_boxes, sorted_boxes).triu_(diagonal=1)
-    keep = torch.nonzero((ious >= iou_threshold).sum(0) <= 0).squeeze_(-1)
+    count = int(sorted_boxes.shape[0])
+    suppressed = torch.zeros(count, dtype=torch.bool, device=sorted_boxes.device)
+    # The verdict is still "a candidate falls when ANY higher-scored candidate
+    # overlaps it", but the pairwise IoU is tiled instead of materialised as one
+    # ``count x count`` matrix: at the 30000-candidate cap a dense OBB head can
+    # reach, that matrix alone is 3.4 GiB in float32 and probIoU builds about
+    # ten intermediates of the same size. Tiling also lets a suppressed column
+    # be dropped from the remaining row chunks, which cannot change its verdict
+    # and keeps the work near ``count x block`` wherever suppression is dense.
+    for start in range(0, count, ROTATED_NMS_BLOCK):
+        stop = min(start + ROTATED_NMS_BLOCK, count)
+        pending = torch.arange(start, stop, device=sorted_boxes.device)
+        for row_start in range(0, start, ROTATED_NMS_BLOCK):
+            row_stop = min(row_start + ROTATED_NMS_BLOCK, start)
+            overlaps = iou_func(sorted_boxes[row_start:row_stop], sorted_boxes[pending])
+            fallen = (overlaps >= iou_threshold).any(dim=0)
+            suppressed[pending[fallen]] = True
+            pending = pending[~fallen]
+            if pending.numel() == 0:
+                break
+        if pending.numel() == 0:
+            continue
+        # The block's own triangle. Masking ``row >= column`` to zero is what
+        # the ``triu_(diagonal=1)`` of the single-matrix form did, so a
+        # candidate never suppresses itself or anything scored above it.
+        overlaps = iou_func(sorted_boxes[start:stop], sorted_boxes[pending])
+        rows = torch.arange(start, stop, device=sorted_boxes.device)[:, None]
+        suppressed[pending] |= (
+            overlaps.masked_fill(rows >= pending[None, :], 0.0) >= iou_threshold
+        ).any(dim=0)
+    keep = torch.nonzero(~suppressed).squeeze_(-1)
     return sorted_idx[keep]
 
 
@@ -420,6 +454,11 @@ def non_max_suppression(
     areas = (end_x - start_x) * (end_y - start_y)
     # Create an index order (assumed scores are already sorted in descending order)
     order = torch.arange(scores.size(0)).to(boxes.device)
+    # Compacting these tensors after every pass, the way the numpy port in
+    # mblt-model-ops does, measured ~2x SLOWER here: six boolean index
+    # operations per iteration cost more in torch than one gather through the
+    # shrinking index. The areas are already hoisted, which is the win that
+    # transfers.
     while order.numel() > 0 and len(picked_indices) < max_output:
         # The index with the highest score
         index = int(order[0].item())
@@ -1169,31 +1208,42 @@ def to_string(counts: list[int]) -> str:
     Returns:
         str: Compact string representation of the RLE object.
     """
-    result = []
+    values = np.asarray(counts, dtype=np.int64).reshape(-1)
+    if values.size == 0:
+        return ""
 
-    for i, x in enumerate(counts):
-        x = int(x)
+    # Delta-encode every count after the second entry.
+    deltas = values.copy()
+    if values.size > 3:
+        deltas[3:] = values[3:] - values[1:-2]
 
-        # Apply delta encoding for all counts after the second entry
-        if i > 2:
-            x -= int(counts[i - 2])
+    # Variable-length encode all counts in lockstep instead of one Python loop
+    # per count: a segmentation mask can produce hundreds of thousands of
+    # counts, and each needs at most a handful of 5-bit chunks. ``emitting``
+    # tracks which counts still have chunks left, so a count that has finished
+    # contributes nothing to later rounds.
+    remainder = deltas
+    emitting = np.ones(values.size, dtype=bool)
+    rounds: list[tuple[np.ndarray, np.ndarray]] = []
+    while emitting.any():
+        chunk = remainder & 0x1F  # Take 5 bits
+        remainder = remainder >> 5
+        # If the sign bit (0x10) is set, continue if the remainder != -1;
+        # otherwise, continue if it != 0
+        more = np.where(chunk & 0x10, remainder != -1, remainder != 0)
+        # Set the continuation bit, then shift to ASCII
+        rounds.append((np.where(more, chunk | 0x20, chunk) + 48, emitting.copy()))
+        emitting = emitting & more
+        remainder = np.where(emitting, remainder, 0)
 
-        # Variable-length encode the value
-        while True:
-            c = x & 0x1F  # Take 5 bits
-            x >>= 5
-
-            # If the sign bit (0x10) is set, continue if x != -1;
-            # otherwise, continue if x != 0
-            more = (x != -1) if (c & 0x10) else (x != 0)
-            if more:
-                c |= 0x20  # Set continuation bit
-            c += 48  # Shift to ASCII
-            result.append(chr(c))
-            if not more:
-                break
-
-    return "".join(result)
+    # Row-major extraction emits every chunk of one count before moving to the
+    # next, which is the order the per-count loop produced.
+    table = np.zeros((values.size, len(rounds)), dtype=np.uint8)
+    written = np.zeros((values.size, len(rounds)), dtype=bool)
+    for index, (chunk, active) in enumerate(rounds):
+        table[:, index] = chunk.astype(np.uint8)
+        written[:, index] = active
+    return table[written].tobytes().decode("ascii")
 
 
 def multi_encode(pixels: torch.Tensor) -> list[list[int]]:

@@ -319,38 +319,71 @@ def norm_score(pred: dict[str, Any]) -> dict[str, Any]:
     return pred
 
 
+def image_matches(
+    pred: np.ndarray, gt: np.ndarray, iou_thresh: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Best-matching face per prediction, independent of the difficulty setting.
+
+    Which faces a setting ignores is the only per-setting input to
+    :func:`image_eval`, so the IoU matrix and the arg-max over it are computed
+    here once per image and reused for Easy, Medium and Hard instead of three
+    times over.
+    """
+
+    _pred = pred.copy()
+    _gt = gt.copy()
+    _pred[:, 2] = _pred[:, 2] + _pred[:, 0]
+    _pred[:, 3] = _pred[:, 3] + _pred[:, 1]
+    _gt[:, 2] = _gt[:, 2] + _gt[:, 0]
+    _gt[:, 3] = _gt[:, 3] + _gt[:, 1]
+    overlaps = bbox_overlaps(_pred[:, :4], _gt)
+    best = overlaps.argmax(1)
+    return best, overlaps[np.arange(_pred.shape[0]), best] >= iou_thresh
+
+
+def matched_image_eval(
+    best: np.ndarray, matched: np.ndarray, ignore: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Turn shared per-image matches into this setting's recall and proposals.
+
+    Equivalent to the official per-prediction loop, without the loop: a
+    prediction only leaves the proposal list when it matched a face this
+    setting ignores, and a face is recalled once, at the first prediction that
+    matched it, so the running count is a cumulative sum over first
+    occurrences.
+    """
+
+    ignored = ignore[best] == 0
+    proposal_list = np.where(matched & ignored, -1.0, 1.0)
+    hits = np.flatnonzero(matched & ~ignored)
+    first = np.zeros(len(best), dtype=np.int64)
+    if hits.size:
+        first[hits[np.unique(best[hits], return_index=True)[1]]] = 1
+    return np.cumsum(first).astype(np.float64), proposal_list
+
+
 def image_eval(
     pred: np.ndarray, gt: np.ndarray, ignore: np.ndarray, iou_thresh: float
 ) -> tuple[np.ndarray, np.ndarray]:
     """Evaluate one image worth of WiderFace predictions."""
 
-    _pred = pred.copy()
-    _gt = gt.copy()
-    pred_recall = np.zeros(_pred.shape[0])
-    recall_list = np.zeros(_gt.shape[0])
-    proposal_list = np.ones(_pred.shape[0])
+    best, matched = image_matches(pred, gt, iou_thresh)
+    return matched_image_eval(best, matched, ignore)
 
-    _pred[:, 2] = _pred[:, 2] + _pred[:, 0]
-    _pred[:, 3] = _pred[:, 3] + _pred[:, 1]
-    _gt[:, 2] = _gt[:, 2] + _gt[:, 0]
-    _gt[:, 3] = _gt[:, 3] + _gt[:, 1]
 
-    overlaps = bbox_overlaps(_pred[:, :4], _gt)
+def score_threshold_index(pred_info: np.ndarray, thresh_num: int) -> np.ndarray:
+    """Last prediction index at or above each score threshold, ``-1`` if none.
 
-    for prediction_index in range(_pred.shape[0]):
-        gt_overlap = overlaps[prediction_index]
-        max_overlap = np.max(gt_overlap)
-        max_idx = np.argmax(gt_overlap)
-        if max_overlap >= iou_thresh:
-            if ignore[max_idx] == 0:
-                recall_list[max_idx] = -1
-                proposal_list[prediction_index] = -1
-            elif recall_list[max_idx] == 0:
-                recall_list[max_idx] = 1
+    The official curve walks ``thresh_num`` evenly spaced cut-offs and needs
+    only that index at each one. Predictions are not assumed to be sorted, so
+    the running suffix maximum is what makes the qualifying indices a prefix
+    and lets one ``searchsorted`` replace the per-threshold scan.
+    """
 
-        r_keep_index = np.where(recall_list == 1)[0]
-        pred_recall[prediction_index] = len(r_keep_index)
-    return pred_recall, proposal_list
+    scores = np.asarray(pred_info[:, 4], dtype=np.float64)
+    thresholds = 1 - np.arange(1, thresh_num + 1) / thresh_num
+    suffix_maximum = np.maximum.accumulate(scores[::-1])[::-1]
+    return np.searchsorted(-suffix_maximum, -thresholds, side="right") - 1
 
 
 def img_pr_info(
@@ -362,17 +395,14 @@ def img_pr_info(
     """Compute precision and recall contributions for one image."""
 
     pr_info = np.zeros((thresh_num, 2), dtype=np.float32)
-    for threshold_index in range(thresh_num):
-        thresh = 1 - (threshold_index + 1) / thresh_num
-        recall_index = np.where(pred_info[:, 4] >= thresh)[0]
-        if len(recall_index) == 0:
-            pr_info[threshold_index, 0] = 0
-            pr_info[threshold_index, 1] = 0
-        else:
-            last_index = recall_index[-1]
-            proposal_index = np.where(proposal_list[: last_index + 1] == 1)[0]
-            pr_info[threshold_index, 0] = len(proposal_index)
-            pr_info[threshold_index, 1] = pred_recall[last_index]
+    last_index = score_threshold_index(pred_info, thresh_num)
+    reached = last_index >= 0
+    if not reached.any():
+        return pr_info
+    index = last_index[reached]
+    proposals = np.cumsum(proposal_list == 1)
+    pr_info[reached, 0] = proposals[index]
+    pr_info[reached, 1] = np.asarray(pred_recall)[index]
     return pr_info
 
 
@@ -417,48 +447,60 @@ def evaluation(
     )
     event_num = len(event_list)
     thresh_num = 1000
-    settings = ["easy", "medium", "hard"]
     setting_gts = [easy_gt_list, medium_gt_list, hard_gt_list]
-    aps = []
-    for setting_id in range(3):
-        gt_list = setting_gts[setting_id]
-        count_face = 0
-        pr_curve = np.zeros((thresh_num, 2), dtype=np.float32)
-        pbar = tqdm(range(event_num))
-        for event_index in pbar:
-            pbar.set_description(f"Processing {settings[setting_id]}")
-            event_name = str(event_list[event_index][0][0])
-            img_list = file_list[event_index][0]
-            pred_list = pred[event_name]
-            sub_gt_list = gt_list[event_index][0]
-            gt_bbx_list = facebox_list[event_index][0]
-            for image_index, img_info in enumerate(img_list):
-                pred_info = pred_list[str(img_info[0][0])]
-                gt_boxes = _normalize_ground_truth_boxes(
-                    np.array(gt_bbx_list[image_index][0], dtype=np.float32)
-                )
-                keep_index = np.array(sub_gt_list[image_index][0], dtype=np.int64)
-                count_face += len(keep_index)
-
-                if len(gt_boxes) == 0:
-                    if len(pred_info) != 0:
-                        pr_curve += _empty_ground_truth_prediction_contribution(
-                            thresh_num, pred_info
-                        )
-                    continue
-                if len(pred_info) == 0:
-                    continue
+    count_faces = [0, 0, 0]
+    pr_curves = [np.zeros((thresh_num, 2), dtype=np.float32) for _ in range(3)]
+    # One pass over the images scoring all three settings, because the IoU
+    # matrix is the expensive part and does not depend on the setting.
+    pbar = tqdm(range(event_num))
+    for event_index in pbar:
+        pbar.set_description("Processing easy/medium/hard")
+        event_name = str(event_list[event_index][0][0])
+        img_list = file_list[event_index][0]
+        pred_list = pred[event_name]
+        gt_bbx_list = facebox_list[event_index][0]
+        for image_index, img_info in enumerate(img_list):
+            pred_info = pred_list[str(img_info[0][0])]
+            gt_boxes = _normalize_ground_truth_boxes(
+                np.array(gt_bbx_list[image_index][0], dtype=np.float32)
+            )
+            keep_indices = [
+                np.array(setting_gt[event_index][0][image_index][0], dtype=np.int64)
+                for setting_gt in setting_gts
+            ]
+            for setting_id, keep_index in enumerate(keep_indices):
+                count_faces[setting_id] += len(keep_index)
+            if len(gt_boxes) == 0:
+                if len(pred_info) != 0:
+                    contribution = _empty_ground_truth_prediction_contribution(
+                        thresh_num, pred_info
+                    )
+                    for pr_curve in pr_curves:
+                        pr_curve += contribution
+                continue
+            if len(pred_info) == 0:
+                continue
+            best, matched = image_matches(pred_info, gt_boxes, iou_thresh)
+            last_index = score_threshold_index(pred_info, thresh_num)
+            reached = last_index >= 0
+            index = last_index[reached]
+            for setting_id, keep_index in enumerate(keep_indices):
                 ignore = np.zeros(gt_boxes.shape[0])
                 if len(keep_index) != 0:
                     ignore[keep_index - 1] = 1
-                pred_recall, proposal_list = image_eval(
-                    pred_info, gt_boxes, ignore, iou_thresh
-                )
-                pr_curve += img_pr_info(
-                    thresh_num, pred_info, proposal_list, pred_recall
-                )
-        pbar.close()
-        pr_curve = dataset_pr_info(thresh_num, pr_curve, count_face)
+                pred_recall, proposal_list = matched_image_eval(best, matched, ignore)
+                if not reached.any():
+                    continue
+                pr_curves[setting_id][reached, 0] += np.cumsum(proposal_list == 1)[
+                    index
+                ]
+                pr_curves[setting_id][reached, 1] += pred_recall[index]
+    pbar.close()
+    aps = []
+    for setting_id in range(3):
+        pr_curve = dataset_pr_info(
+            thresh_num, pr_curves[setting_id], count_faces[setting_id]
+        )
         aps.append(voc_ap(pr_curve[:, 1], pr_curve[:, 0]))
 
     print("==================== Results ====================")
