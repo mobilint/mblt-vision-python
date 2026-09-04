@@ -393,10 +393,22 @@ def score_threshold_index(pred_info: np.ndarray, thresh_num: int) -> np.ndarray:
     only that index at each one. Predictions are not assumed to be sorted, so
     the running suffix maximum is what makes the qualifying indices a prefix
     and lets one ``searchsorted`` replace the per-threshold scan.
+
+    The cut-offs are cast to the score dtype, and that is the whole comparison,
+    not housekeeping. The loop this replaces compared a float32 score array
+    against a Python float, which numpy resolves in float32 by value-based
+    casting, so a score stored as ``float32(0.9)`` *reaches* the 0.9 cut-off.
+    Widening the scores to float64 instead makes the same score
+    0.899999976... and drops it, moving the proposal and recall counts at every
+    cut-off a score lands on exactly -- and ``norm_score`` maps the highest
+    score to exactly 1.0, so landing there is routine. Integer scores are
+    widened to float64, which is what the original comparison promoted them to.
     """
 
-    scores = np.asarray(pred_info[:, 4], dtype=np.float64)
-    thresholds = 1 - np.arange(1, thresh_num + 1) / thresh_num
+    scores = np.asarray(pred_info[:, 4])
+    if not np.issubdtype(scores.dtype, np.floating):
+        scores = scores.astype(np.float64)
+    thresholds = (1 - np.arange(1, thresh_num + 1) / thresh_num).astype(scores.dtype)
     suffix_maximum = np.maximum.accumulate(scores[::-1])[::-1]
     return np.searchsorted(-suffix_maximum, -thresholds, side="right") - 1
 

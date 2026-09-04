@@ -227,3 +227,39 @@ def test_widerface_image_eval_handles_empty_prediction_and_ground_truth() -> Non
     )
     np.testing.assert_array_equal(proposals, np.ones(2))
     np.testing.assert_array_equal(recall, np.zeros(2))
+
+
+def test_widerface_cutoffs_are_compared_in_the_score_dtype() -> None:
+    """A score sitting exactly on a cut-off must reach it, as float32.
+
+    The official loop compares a float32 score array against a Python float,
+    which numpy resolves in float32 by value-based casting, so `float32(0.9)`
+    reaches the 0.9 cut-off. Widening the scores to float64 first makes the
+    same score 0.899999976... and drops it, which would shift the proposal and
+    recall counts at every cut-off a score lands on exactly — and `norm_score`
+    maps the highest score to exactly 1.0, so that is the common case.
+    """
+
+    for thresh_num in (10, 200, 1000):
+        cutoffs = (1 - np.arange(1, thresh_num + 1) / thresh_num).astype(np.float32)
+        for scores in (
+            cutoffs,
+            cutoffs[::-1].copy(),
+            np.concatenate([cutoffs, cutoffs]),
+        ):
+            predictions = np.zeros((len(scores), 5), dtype=np.float32)
+            predictions[:, 4] = scores
+            last = eval_widerface_module.score_threshold_index(predictions, thresh_num)
+            expected = []
+            for index in range(thresh_num):
+                cutoff = 1 - (index + 1) / thresh_num
+                qualifying = np.flatnonzero(scores >= cutoff)
+                expected.append(int(qualifying[-1]) if len(qualifying) else -1)
+            np.testing.assert_array_equal(last, expected)
+        # Every cut-off is reached by the score built from it, which is the
+        # property a widened comparison breaks.
+        predictions = np.zeros((len(cutoffs), 5), dtype=np.float32)
+        predictions[:, 4] = cutoffs
+        assert (
+            eval_widerface_module.score_threshold_index(predictions, thresh_num) >= 0
+        ).all()
