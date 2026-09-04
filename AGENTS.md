@@ -59,6 +59,12 @@ The current ownership boundary is deliberate:
 - Keep each model YAML's file_cfg, pre_cfg, and post_cfg shape stable.
   file_cfg.filename is the canonical MXQ Hub artifact; derive the same-stem ONNX filename
   unless the Hub artifact requires an explicit onnx_filename.
+- Keep a timm classifier's pre_cfg identical to the same model's pipeline.yaml in
+  mblt-model-ops, which derives it from the timm id's default pretrained configuration.
+  Resize.size there is floor(input_size / crop_pct) — timm's own transforms_factory
+  floors, and rounding differs by a pixel at 224/0.9 and 224/0.95. Several names
+  (ConvNext_Base) resolve in timm yet carry torchvision's transform here, so read the
+  expected value from that model's source.yaml provenance rather than from the name.
 - Require post_cfg.dataset in every model YAML and resolve output class counts using the
   dataset/task pair. Do not assume one output taxonomy for every model in a task.
 - Preserve automatic .mxq/.onnx framework detection and the fail-fast error when a local
