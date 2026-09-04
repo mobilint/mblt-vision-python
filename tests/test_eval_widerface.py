@@ -196,3 +196,34 @@ def test_widerface_evaluation_counts_predictions_on_no_face_image() -> None:
 
     np.testing.assert_array_equal(contribution[:, 0], np.ones(2))
     np.testing.assert_array_equal(contribution[:, 1], np.zeros(2))
+
+
+def test_widerface_image_eval_handles_empty_prediction_and_ground_truth() -> None:
+    """The vectorised match must keep the degenerate cases the loop allowed.
+
+    `argmax` raises on an empty axis where the per-prediction loop it replaces
+    simply never ran, so an image with no predictions, or with no annotated
+    faces, has to short-circuit rather than reduce an empty overlap matrix.
+    """
+
+    empty_predictions = np.zeros((0, 5), dtype=np.float32)
+    empty_faces = np.zeros((0, 4), dtype=np.float32)
+    predictions = np.array(
+        [[10.0, 10.0, 20.0, 20.0, 0.9], [50.0, 50.0, 10.0, 10.0, 0.4]],
+        dtype=np.float32,
+    )
+    faces = np.array([[10.0, 10.0, 20.0, 20.0]], dtype=np.float32)
+
+    for pred, gt in ((empty_predictions, empty_faces), (empty_predictions, faces)):
+        recall, proposals = eval_widerface_module.image_eval(
+            pred, gt, np.ones(len(gt)), 0.5
+        )
+        assert recall.shape == (0,) and proposals.shape == (0,)
+        assert eval_widerface_module.img_pr_info(4, pred, proposals, recall).sum() == 0
+
+    # No annotated faces: every prediction stays a proposal, nothing is recalled.
+    recall, proposals = eval_widerface_module.image_eval(
+        predictions, empty_faces, np.ones(0), 0.5
+    )
+    np.testing.assert_array_equal(proposals, np.ones(2))
+    np.testing.assert_array_equal(recall, np.zeros(2))

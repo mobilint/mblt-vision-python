@@ -330,6 +330,16 @@ def image_matches(
     times over.
     """
 
+    if len(pred) == 0 or len(gt) == 0:
+        # Nothing to reduce over: `argmax` raises on an empty axis, while the
+        # per-prediction loop this replaces simply never ran for an empty
+        # prediction table, and an empty ground-truth table matches nothing
+        # either. Both return "no prediction matched anything", which is what
+        # the caller's own no-face branch assumes.
+        return (
+            np.zeros(len(pred), dtype=np.int64),
+            np.zeros(len(pred), dtype=bool),
+        )
     _pred = pred.copy()
     _gt = gt.copy()
     _pred[:, 2] = _pred[:, 2] + _pred[:, 0]
@@ -353,6 +363,11 @@ def matched_image_eval(
     occurrences.
     """
 
+    if len(ignore) == 0:
+        # No annotated faces, so nothing can be matched or ignored: every
+        # prediction stays a proposal and nothing is recalled, which is what
+        # the caller's own no-face branch counts.
+        return np.zeros(len(best), dtype=np.float64), np.ones(len(best))
     ignored = ignore[best] == 0
     proposal_list = np.where(matched & ignored, -1.0, 1.0)
     hits = np.flatnonzero(matched & ~ignored)

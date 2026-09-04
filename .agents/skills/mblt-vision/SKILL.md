@@ -74,6 +74,13 @@ description: >-
 
 ## Processing and Results
 
+- Derive a timm classifier's pre_cfg from the timm id's default pretrained configuration,
+  and size the pre-crop resize as floor(input_size / crop_pct) — timm's own
+  transforms_factory floors, and rounding differs by a pixel at the two commonest
+  settings (224/0.9, 224/0.95), which shifts every interpolated pixel. Several names
+  (ConvNext_Base) resolve in timm yet carry torchvision's transform here, so read the
+  expected value from that model's source.yaml provenance in mblt-model-ops rather than
+  from the name. Keep the value identical to that model's pipeline.yaml.
 - Reuse the shared letterbox geometry for both preprocessing and inverse coordinate restoration.
 - Detection requires pre_cfg.LetterBox. Keep semantic metadata (img0_shape and
   ratio_pad) through postprocessing so logits restore to the original geometry before
@@ -84,6 +91,15 @@ description: >-
   maps are finite, integral, and in-range before converting them to integer class IDs.
 - Keep result shapes, ordering, coordinates, dtype, and empty-result behavior compatible with
   the Model Zoo reference.
+- Treat the shape of the postprocess and scoring hot paths as load-bearing: `rotated_nms`
+  tiles probIoU and drops suppressed columns (bounding every intermediate at
+  `ROTATED_NMS_BLOCK ** 2`, which is what makes a 30000-candidate OBB head feasible),
+  `to_string` encodes all RLE counts in lockstep, `_match_predictions` sorts once and
+  compares the matched IoU against the threshold vector, and `eval_widerface` scores all
+  three difficulty settings from one IoU pass. Prove any speed change output-identical
+  against the implementation it replaces on randomized and degenerate inputs, then
+  measure — and mirror it into `mblt-model-ops`'s matching `datasets/*/evaluator.py`,
+  which no test compares against these. See AGENTS.md, Postprocess and Scoring Performance.
 - Rank WiderFace evaluation by Hard-set AP. Expose Medium-set then Easy-set AP
   as secondary metrics, and do not compute mean AP across difficulty splits.
 - Treat face_detection as a single-class WiderFace task. Each YOLO head family gets a thin

@@ -74,6 +74,13 @@ description: >-
 
 ## Processing and Results
 
+- Derive a timm classifier's pre_cfg from the timm id's default pretrained configuration,
+  and size the pre-crop resize as floor(input_size / crop_pct) — timm's own
+  transforms_factory floors, and rounding differs by a pixel at the two commonest
+  settings (224/0.9, 224/0.95), which shifts every interpolated pixel. Several names
+  (ConvNext_Base) resolve in timm yet carry torchvision's transform here, so read the
+  expected value from that model's source.yaml provenance in mblt-model-ops rather than
+  from the name. Keep the value identical to that model's pipeline.yaml.
 - Reuse the shared letterbox geometry for both preprocessing and inverse coordinate restoration.
 - Detection requires pre_cfg.LetterBox. Keep semantic metadata (img0_shape and
   ratio_pad) through postprocessing so logits restore to the original geometry before

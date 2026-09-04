@@ -333,7 +333,10 @@ The current ownership boundary is deliberate:
   language-tagged code fences, and concise paragraphs. Keep examples executable against the
   public mblt_vision namespace and do not document Model Zoo CLI commands as standalone features.
 - When a durable public fact changes, update this guide, the matching agent skill, CLAUDE.md, and
-  the relevant README in the same change. Treat a significant package change—public API,
+  the relevant README in the same change. `.agents/skills/<name>/` and
+  `.claude/skills/<name>/` are real directories here, not the symlink pair mblt-model-ops
+  uses, so a skill edit has to be written to both copies: editing one leaves the other
+  stating the old contract to whichever tool reads it. `diff` the pair before committing. Treat a significant package change—public API,
   dependency/runtime, artifact layout, CLI, or tooling structure—as a required guide-and-skill
   synchronization point.
 - For documentation-only changes, run `git diff --check` and verify headings and links. Report
