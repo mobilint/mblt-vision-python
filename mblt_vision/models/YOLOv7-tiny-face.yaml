@@ -3,6 +3,7 @@ DEFAULT:
     repo_id: mobilint/YOLOv7-tiny-face
     filename: yolov7-tiny-face.mxq
     revision: main
+    local_artifact_only: true
   pre_cfg:
     Reader:
       style: numpy

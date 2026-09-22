@@ -733,6 +733,7 @@ class MBLT_Engine:
     def file_config_cleansing(self) -> None:
         """Validates and resolves the MXQ and ONNX model file paths in ``self.file_cfg``."""
         framework = getattr(self, "framework", "mxq")
+        local_artifact_only = self.file_cfg.pop("local_artifact_only", False)
         model_path = self.file_cfg.pop("model_path", "")
         if model_path:
             mxq_path, onnx_path = _split_model_paths(
@@ -771,6 +772,12 @@ class MBLT_Engine:
         revision = self.file_cfg.pop("revision", None)
         if not repo_id or not revision:
             return
+        if local_artifact_only:
+            raise RuntimeError(
+                f"Remote artifacts for '{repo_id}' are disabled because this model does not "
+                "have a repository-pinned immutable revision and SHA-256 digest. Supply a "
+                "trusted local model_path, mxq_path, or onnx_path instead."
+            )
 
         if filename and framework == "mxq":
             target_device = self.file_cfg.get("target_device", "aries-rb")

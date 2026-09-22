@@ -3,6 +3,7 @@ DEFAULT:
     repo_id: mobilint/YOLOv5m-face
     filename: yolov5m-face.mxq
     revision: main
+    local_artifact_only: true
   pre_cfg:
     Reader:
       style: numpy

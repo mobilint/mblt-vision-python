@@ -261,6 +261,12 @@ model is trained and served at 640x640 except `YOLOv8m-face` and `YOLOv8l-face`,
 whose released weights record `imgsz: 960` in their embedded `train_args`; those
 two use 960x960 and must not be normalized down to 640.
 
+The `YOLOv5*-face` and `YOLOv7*-face` Hub repositories do not currently have
+project-pinned immutable revisions and artifact SHA-256 digests. To prevent an
+unverified remote artifact from reaching a native runtime, construct these models
+with a trusted local `model_path`, `mxq_path`, or `onnx_path`. Automatic Hub
+downloads are disabled for these families.
+
 The `YOLOv5*-face` and `YOLOv7*-face` families are anchor-based and carry an
 `anchors` list in `post_cfg` with `iou_thres: 0.5`; every other face model is
 anchorless or NMS-free with `iou_thres: 0.7`. Their published ONNX exports emit
