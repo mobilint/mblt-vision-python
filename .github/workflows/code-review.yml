@@ -31,4 +31,4 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: mobilint/.github/.github/workflows/codex-pr-review.yml@main
+    uses: mobilint/.github/.github/workflows/codex-pr-review.yml@44935ce7c8a5e6a27fd75f17dd4202c262a01b60
