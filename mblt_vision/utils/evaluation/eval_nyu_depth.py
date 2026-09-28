@@ -220,7 +220,13 @@ def eval_nyu_depth(
         return metrics
 
     accumulator = NYUDepthMetricAccumulator()
-    batches = map_batched_inference(loader, lambda batch: model(batch[0]), decode)
+    # A depth batch retains both decoded source images and full-resolution target
+    # arrays. Do not prepare several attacker-supplied batches concurrently: unlike
+    # the other validation datasets, NYU targets are unrestricted ``.npy`` arrays,
+    # so bounding this pipeline only by batch count would not bound its memory use.
+    batches = map_batched_inference(
+        loader, lambda batch: model(batch[0]), decode, prefetch_batches=1
+    )
     for image_metrics in tqdm(batches, total=len(loader), desc="Evaluating NYU Depth"):
         for metrics in image_metrics:
             accumulator.add(metrics)
