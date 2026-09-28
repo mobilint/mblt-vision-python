@@ -812,13 +812,18 @@ class MBLT_Engine:
             raise TypeError(f"Got unexpected type for ONNX input x={type(x)}.")
 
         graph_input = self._require_onnx_session().get_inputs()[0]
-        # A pipeline without a Normalize step (YOLOX, DAMO-YOLO: both take the
-        # unscaled 0-255 image) leaves LetterBox's byte tensor as the input, while
-        # the graph declares float. Cast to the declared element type; every other
-        # dtype reaches the graph unchanged, as before.
+        # Cast any numeric input to the float element type the graph declares:
+        # ONNX Runtime rejects a mismatch rather than converting. That covers the
+        # byte tensor a pipeline without Normalize leaves (YOLOX, DAMO-YOLO take
+        # the unscaled 0-255 image) as well as Normalize's float32 fed to a
+        # float16 or double graph. A graph declaring no float type keeps the old
+        # rule: only float64 is narrowed, to float32.
         graph_dtype = _ONNX_FLOAT_DTYPES.get(getattr(graph_input, "type", None))
-        if graph_dtype is not None and x_np.dtype != graph_dtype:
-            if np.issubdtype(x_np.dtype, np.integer) or x_np.dtype == np.float64:
+        if graph_dtype is not None:
+            if x_np.dtype != graph_dtype and (
+                np.issubdtype(x_np.dtype, np.integer)
+                or np.issubdtype(x_np.dtype, np.floating)
+            ):
                 x_np = x_np.astype(graph_dtype)
         elif x_np.dtype == np.float64:
             x_np = x_np.astype(np.float32)

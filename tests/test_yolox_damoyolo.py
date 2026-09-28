@@ -147,16 +147,37 @@ def test_reader_rejects_bgr_from_the_rgb_only_pil_style() -> None:
         Reader("numpy", color_mode="YUV")
 
 
-def test_onnx_inputs_cast_unnormalized_bytes_to_the_graph_dtype() -> None:
+def _onnx_engine(graph_type: str) -> MBLT_Engine:
     engine = object.__new__(MBLT_Engine)
     engine.input_name = "images"
-    graph_input = SimpleNamespace(type="tensor(float)", shape=[1, 3, 64, 64])
+    graph_input = SimpleNamespace(type=graph_type, shape=[1, 3, 64, 64])
     engine._onnx_session = SimpleNamespace(get_inputs=lambda: [graph_input])
     engine._require_onnx_session = lambda: engine._onnx_session
+    return engine
 
-    inputs = engine._prepare_onnx_inputs(torch.full((64, 64, 3), 7, dtype=torch.uint8))
 
-    assert inputs["images"].dtype == np.float32
+@pytest.mark.parametrize(
+    ("input_dtype", "graph_type", "expected_dtype"),
+    [
+        # No Normalize step: LetterBox's bytes into a float graph.
+        (torch.uint8, "tensor(float)", np.float32),
+        # Normalize's float32 into reduced- or double-precision graphs.
+        (torch.float32, "tensor(float16)", np.float16),
+        (torch.float32, "tensor(double)", np.float64),
+        (torch.float64, "tensor(float)", np.float32),
+        (torch.float32, "tensor(float)", np.float32),
+        # A graph declaring no float type keeps the old rule: bytes pass through.
+        (torch.uint8, "tensor(uint8)", np.uint8),
+    ],
+)
+def test_onnx_inputs_are_cast_to_the_declared_float_dtype(
+    input_dtype: torch.dtype, graph_type: str, expected_dtype: type
+) -> None:
+    engine = _onnx_engine(graph_type)
+
+    inputs = engine._prepare_onnx_inputs(torch.full((64, 64, 3), 7, dtype=input_dtype))
+
+    assert inputs["images"].dtype == expected_dtype
     assert inputs["images"].shape == (1, 3, 64, 64)
     assert float(inputs["images"].max()) == 7.0
 
