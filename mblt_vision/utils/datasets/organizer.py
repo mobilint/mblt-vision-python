@@ -4,6 +4,7 @@ Utilities for organizing datasets.
 
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import cv2
 import hashlib
@@ -1311,7 +1312,6 @@ def _read_bounded_npy_header(
         }.get(version)
         if length_format is None:
             raise ValueError(f"unsupported NPY format version {version}")
-        header_length_position = depth_file.tell()
         length_size = struct.calcsize(length_format)
         length_bytes = depth_file.read(length_size)
         if len(length_bytes) != length_size:
@@ -1327,12 +1327,43 @@ def _read_bounded_npy_header(
             raise ValueError(
                 f"NPY header length {header_length} exceeds the remaining file size"
             )
-        depth_file.seek(header_length_position)
-        return np.lib.format._read_array_header(
-            depth_file,
-            version,
-            max_header_size=NYU_DEPTH_MAX_NPY_HEADER_BYTES,
-        )
+        header_bytes = depth_file.read(header_length)
+        if len(header_bytes) != header_length:
+            raise EOFError("EOF while reading NPY array header")
+        encoding = "utf-8" if version == (3, 0) else "latin1"
+        try:
+            header = ast.literal_eval(header_bytes.decode(encoding))
+        except (
+            MemoryError,
+            RecursionError,
+            SyntaxError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:
+            raise ValueError("unable to parse NPY array header") from exc
+        if not isinstance(header, dict) or set(header) != {
+            "descr",
+            "fortran_order",
+            "shape",
+        }:
+            raise ValueError("NPY header must contain descr, fortran_order, and shape")
+        shape = header["shape"]
+        fortran_order = header["fortran_order"]
+        if (
+            not isinstance(shape, tuple)
+            or any(
+                not isinstance(axis, int) or isinstance(axis, bool) or axis < 0
+                for axis in shape
+            )
+            or not isinstance(fortran_order, bool)
+        ):
+            raise ValueError("NPY header contains an invalid shape or fortran_order")
+        try:
+            dtype = np.dtype(header["descr"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("NPY header contains an invalid dtype descriptor") from exc
+        return shape, fortran_order, dtype
 
 
 def _validate_staged_nyu_depth(staging_dir: str) -> None:

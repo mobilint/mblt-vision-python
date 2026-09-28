@@ -1098,13 +1098,22 @@ def test_staged_nyu_depth_validation_accepts_npy_v3(tmp_path: Path) -> None:
     depth_dir.mkdir()
     Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
     depth = np.ones((1, 1), dtype=np.float32)
-    header = {
-        "descr": np.lib.format.dtype_to_descr(depth.dtype),
-        "fortran_order": False,
-        "shape": depth.shape,
-    }
+    header = repr(
+        {
+            "descr": depth.dtype.str,
+            "fortran_order": False,
+            "shape": depth.shape,
+        }
+    ).encode("utf-8")
+    header_length = len(header) + 1
+    padding = 64 - ((8 + 4 + header_length) % 64)
     (depth_dir / "sample.npy").write_bytes(
-        np.lib.format._wrap_header(repr(header), (3, 0)) + depth.tobytes()
+        b"\x93NUMPY\x03\x00"
+        + struct.pack("<I", header_length + padding)
+        + header
+        + b" " * padding
+        + b"\n"
+        + depth.tobytes()
     )
 
     organizer._validate_staged_nyu_depth(str(tmp_path))
