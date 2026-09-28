@@ -49,6 +49,49 @@ def test_nyu_depth_evaluation_rejects_surplus_output_batch(
         eval_nyu_depth_module.eval_nyu_depth(_Model(), "/dataset", batch_size=1)
 
 
+def test_nyu_depth_evaluation_does_not_prefetch_unbounded_targets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep only one unrestricted image/depth batch resident at a time."""
+
+    class _Model:
+        post_cfg = {"dataset": "nyu-depth"}
+        pre_cfg = {"LetterBox": {"img_size": [2, 2]}}
+
+        def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
+            return inputs
+
+        def postprocess(self, output: torch.Tensor) -> SimpleNamespace:
+            del output
+            return SimpleNamespace(depth=np.ones((2, 2), dtype=np.float32))
+
+    batch = (
+        torch.zeros((1, 2, 2, 3)),
+        np.ones((1, 2, 2), dtype=np.float32),
+        [(2, 2)],
+        [None],
+        ("sample",),
+    )
+
+    def map_without_prefetch(batches, infer, decode, *, prefetch_batches):
+        assert prefetch_batches == 1
+        for prepared_batch in batches:
+            yield decode(prepared_batch, infer(prepared_batch))
+
+    monkeypatch.setattr(eval_nyu_depth_module, "CustomNYUDepth", lambda _: object())
+    monkeypatch.setattr(
+        eval_nyu_depth_module, "get_nyu_depth_loader", lambda *_args, **_kwargs: [batch]
+    )
+    monkeypatch.setattr(eval_nyu_depth_module, "build_preprocess", lambda _: object())
+    monkeypatch.setattr(
+        eval_nyu_depth_module, "map_batched_inference", map_without_prefetch
+    )
+
+    result = eval_nyu_depth_module.eval_nyu_depth(_Model(), "/dataset", batch_size=1)
+
+    assert result.delta1 == 1.0
+
+
 @pytest.mark.parametrize("invalid_value", [float("nan"), float("inf"), -1.0])
 def test_nyu_depth_metrics_reject_invalid_targets(invalid_value: float) -> None:
     """Keep direct metric callers from silently excluding corrupt depth targets."""
