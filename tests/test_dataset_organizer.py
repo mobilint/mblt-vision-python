@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import shutil
+import struct
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -1020,6 +1021,28 @@ def test_staged_nyu_depth_validation_rejects_oversized_image_before_decode(
         organizer._validate_staged_nyu_depth(str(tmp_path))
 
 
+def test_staged_nyu_depth_validation_rejects_oversized_encoded_image_before_pillow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bound hostile PNG chunks before Pillow parses or verifies the image."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    (image_dir / "sample.png").write_bytes(b"oversized encoded image")
+    np.save(depth_dir / "sample.npy", np.ones((1, 1), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES", 8)
+    monkeypatch.setattr(
+        organizer.Image,
+        "open",
+        lambda *_: pytest.fail("oversized encoded image reached Pillow"),
+    )
+
+    with pytest.raises(ValueError, match="Staged NYU Depth image is unreadable"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
 def test_staged_nyu_depth_validation_rejects_oversized_depth_before_load(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1040,6 +1063,51 @@ def test_staged_nyu_depth_validation_rejects_oversized_depth_before_load(
 
     with pytest.raises(ValueError, match="element limit"):
         organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_rejects_oversized_npy_v2_header_before_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject a forged v2 header length before NumPy attempts the declared read."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    (depth_dir / "sample.npy").write_bytes(
+        np.lib.format.magic(2, 0)
+        + struct.pack("<I", organizer.NYU_DEPTH_MAX_NPY_HEADER_BYTES + 1)
+    )
+    monkeypatch.setattr(
+        organizer.np.lib.format,
+        "_read_array_header",
+        lambda *_args, **_kwargs: pytest.fail("oversized NPY header was read"),
+    )
+
+    with pytest.raises(ValueError, match="NPY header length.*byte limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_accepts_npy_v3(tmp_path: Path) -> None:
+    """Preserve support for valid UTF-8 NPY 3.0 depth targets."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    depth = np.ones((1, 1), dtype=np.float32)
+    header = {
+        "descr": np.lib.format.dtype_to_descr(depth.dtype),
+        "fortran_order": False,
+        "shape": depth.shape,
+    }
+    (depth_dir / "sample.npy").write_bytes(
+        np.lib.format._wrap_header(repr(header), (3, 0)) + depth.tobytes()
+    )
+
+    organizer._validate_staged_nyu_depth(str(tmp_path))
 
 
 def test_staged_nyu_depth_validation_enforces_aggregate_pixel_limit(

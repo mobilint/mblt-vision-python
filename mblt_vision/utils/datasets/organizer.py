@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import tarfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -68,6 +69,8 @@ NYU_DEPTH_URL = (
 )
 NYU_DEPTH_MAX_SAMPLE_PIXELS = 1_000_000
 NYU_DEPTH_MAX_VALIDATION_PIXELS = 250_000_000
+NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES = 64 * 1024 * 1024
+NYU_DEPTH_MAX_NPY_HEADER_BYTES = 10_000
 ADE20K_URL = ADE20K_DOWNLOAD_CONFIG["url"]
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
@@ -1294,6 +1297,44 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
     )
 
 
+def _read_bounded_npy_header(
+    depth_path: Path,
+) -> tuple[tuple[int, ...], bool, np.dtype]:
+    """Read an NPY header only after bounding its declared byte length."""
+
+    with depth_path.open("rb") as depth_file:
+        version = np.lib.format.read_magic(depth_file)
+        length_format = {
+            (1, 0): "<H",
+            (2, 0): "<I",
+            (3, 0): "<I",
+        }.get(version)
+        if length_format is None:
+            raise ValueError(f"unsupported NPY format version {version}")
+        header_length_position = depth_file.tell()
+        length_size = struct.calcsize(length_format)
+        length_bytes = depth_file.read(length_size)
+        if len(length_bytes) != length_size:
+            raise EOFError("EOF while reading NPY array header length")
+        header_length = struct.unpack(length_format, length_bytes)[0]
+        if header_length > NYU_DEPTH_MAX_NPY_HEADER_BYTES:
+            raise ValueError(
+                f"NPY header length {header_length} exceeds the "
+                f"{NYU_DEPTH_MAX_NPY_HEADER_BYTES}-byte limit"
+            )
+        remaining_bytes = depth_path.stat().st_size - depth_file.tell()
+        if header_length > remaining_bytes:
+            raise ValueError(
+                f"NPY header length {header_length} exceeds the remaining file size"
+            )
+        depth_file.seek(header_length_position)
+        return np.lib.format._read_array_header(
+            depth_file,
+            version,
+            max_header_size=NYU_DEPTH_MAX_NPY_HEADER_BYTES,
+        )
+
+
 def _validate_staged_nyu_depth(staging_dir: str) -> None:
     """Decode staged NYU pairs before they can replace an existing cache."""
 
@@ -1305,9 +1346,14 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
             continue
         depth_path = depth_dir / f"{image_path.stem}.npy"
         try:
+            encoded_image_bytes = image_path.stat().st_size
+            if encoded_image_bytes > NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES:
+                raise ValueError(
+                    f"encoded image size {encoded_image_bytes} exceeds the "
+                    f"{NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES}-byte limit"
+                )
             with Image.open(image_path) as encoded_image:
                 image_shape = (encoded_image.height, encoded_image.width)
-                encoded_image.verify()
         except (OSError, SyntaxError, ValueError) as exc:
             raise ValueError(
                 f"Staged NYU Depth image is unreadable: {image_path}."
@@ -1325,18 +1371,7 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
                 f"{NYU_DEPTH_MAX_VALIDATION_PIXELS}."
             )
         try:
-            with depth_path.open("rb") as depth_file:
-                version = np.lib.format.read_magic(depth_file)
-                if version == (1, 0):
-                    depth_shape, _, depth_dtype = np.lib.format.read_array_header_1_0(
-                        depth_file
-                    )
-                elif version == (2, 0):
-                    depth_shape, _, depth_dtype = np.lib.format.read_array_header_2_0(
-                        depth_file
-                    )
-                else:
-                    raise ValueError(f"unsupported NPY format version {version}")
+            depth_shape, _, depth_dtype = _read_bounded_npy_header(depth_path)
         except (EOFError, OSError, ValueError) as exc:
             raise ValueError(
                 f"Unable to read staged NYU Depth target header {depth_path}: {exc}."
