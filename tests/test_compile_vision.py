@@ -958,6 +958,29 @@ def test_compile_ignores_missing_local_path_and_uses_hosted_onnx(
     assert calls["calibration_kwargs"]["output"] == 1
 
 
+def test_compile_resolver_rejects_unverified_remote_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Do not pass a mutable, unverified Hub artifact to the compiler."""
+
+    monkeypatch.setattr(
+        compile_module,
+        "hf_hub_download",
+        lambda **_: pytest.fail("hf_hub_download should not be called"),
+    )
+
+    with pytest.raises(RuntimeError, match="repository-pinned immutable revision"):
+        compile_module._resolve_compile_onnx_path(
+            {
+                "repo_id": "mobilint/example",
+                "filename": "model.mxq",
+                "revision": "main",
+                "local_artifact_only": True,
+            },
+            tmp_path / "missing.onnx",
+        )
+
+
 def test_compile_routes_semantic_calibration_by_model_dataset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

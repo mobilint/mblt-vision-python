@@ -882,6 +882,13 @@ def _resolve_compile_onnx_path(
     repo_id = file_cfg.get("repo_id")
     revision = file_cfg.get("revision")
     filename = _configured_onnx_filename(file_cfg)
+    if file_cfg.get("local_artifact_only"):
+        repository = repo_id if isinstance(repo_id, str) and repo_id else "this model"
+        raise RuntimeError(
+            f"Remote artifacts for '{repository}' are disabled because this model does not "
+            "have a repository-pinned immutable revision and SHA-256 digest. Supply a "
+            "trusted local model_path or onnx_path instead."
+        )
     if isinstance(repo_id, str) and isinstance(revision, str) and filename:
         downloaded_path = Path(
             hf_hub_download(
