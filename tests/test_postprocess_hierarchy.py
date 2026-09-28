@@ -78,6 +78,27 @@ def test_classification_postprocessor_keeps_batched_singleton_outputs() -> None:
     assert output.shape == (2, 1000)
 
 
+def test_classification_postprocessor_accepts_channels_last_outputs() -> None:
+    """Accept single-image NPU logits shaped [1, 1, C]."""
+
+    postprocessor = ClsPost({}, {"task": "image_classification", "dataset": "imagenet"})
+    output = postprocessor(torch.zeros((1, 1, 1000), dtype=torch.float32))
+
+    assert output.shape == (1, 1000)
+
+
+def test_classification_postprocessor_preserves_channels_last_class_order() -> None:
+    """Keep class indices aligned when flattening [1, 1, C] logits."""
+
+    postprocessor = ClsPost({}, {"task": "image_classification", "dataset": "imagenet"})
+    scores = torch.zeros((1, 1, 1000), dtype=torch.float32)
+    scores[0, 0, 437] = 2.0
+    scores[0, 0, 12] = 1.0
+    output = postprocessor(scores)
+
+    assert output.topk(2, dim=-1).indices.tolist() == [[437, 12]]
+
+
 def test_nmsfree_postprocessor_accepts_decode_enabled_output_triplet() -> None:
     """Normalize QBCompiler's YOLOv10 score/confidence/box outputs."""
 

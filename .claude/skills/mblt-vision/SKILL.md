@@ -100,6 +100,11 @@ description: >-
   against the implementation it replaces on randomized and degenerate inputs, then
   measure — and mirror it into `mblt-model-ops`'s matching `datasets/*/evaluator.py`,
   which no test compares against these. See AGENTS.md, Postprocess and Scoring Performance.
+- Evaluators run through `map_batched_inference`: inference on the consuming thread,
+  batch preparation and postprocessing on separate bounded pools, results in input order.
+  Keep each `decode` callback pure, accumulate only in the consuming loop, and keep
+  preprocessing thread-safe (read `ratio_pad` from `LetterBox.with_ratio_pad`, never from
+  the shared instance attribute).
 - Rank WiderFace evaluation by Hard-set AP. Expose Medium-set then Easy-set AP
   as secondary metrics, and do not compute mean AP across difficulty splits.
 - Treat face_detection as a single-class WiderFace task. Each YOLO head family gets a thin
