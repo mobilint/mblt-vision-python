@@ -8,6 +8,7 @@ import ast
 import concurrent.futures
 import cv2
 import hashlib
+import io
 import json
 import math
 import os
@@ -16,6 +17,7 @@ import shutil
 import stat
 import struct
 import tarfile
+import tokenize
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
@@ -1298,6 +1300,28 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
     )
 
 
+def _filter_legacy_npy_header(header: str) -> str:
+    """Remove Python 2 long-integer suffixes accepted by NPY 1.0 and 2.0."""
+
+    tokens = []
+    last_token_was_number = False
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(header).readline):
+            token_type, token_string = token[:2]
+            if (
+                last_token_was_number
+                and token_type == tokenize.NAME
+                and token_string == "L"
+            ):
+                last_token_was_number = False
+                continue
+            tokens.append(token)
+            last_token_was_number = token_type == tokenize.NUMBER
+    except (IndentationError, tokenize.TokenError) as exc:
+        raise ValueError("unable to tokenize legacy NPY array header") from exc
+    return tokenize.untokenize(tokens)
+
+
 def _read_bounded_npy_header(
     depth_path: Path,
 ) -> tuple[tuple[int, ...], bool, np.dtype]:
@@ -1332,7 +1356,10 @@ def _read_bounded_npy_header(
             raise EOFError("EOF while reading NPY array header")
         encoding = "utf-8" if version == (3, 0) else "latin1"
         try:
-            header = ast.literal_eval(header_bytes.decode(encoding))
+            header_text = header_bytes.decode(encoding)
+            if version <= (2, 0):
+                header_text = _filter_legacy_npy_header(header_text)
+            header = ast.literal_eval(header_text)
         except (
             MemoryError,
             RecursionError,

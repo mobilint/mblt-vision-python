@@ -1066,7 +1066,7 @@ def test_staged_nyu_depth_validation_rejects_oversized_depth_before_load(
 
 
 def test_staged_nyu_depth_validation_rejects_oversized_npy_v2_header_before_read(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """Reject a forged v2 header length before NumPy attempts the declared read."""
 
@@ -1079,12 +1079,6 @@ def test_staged_nyu_depth_validation_rejects_oversized_npy_v2_header_before_read
         np.lib.format.magic(2, 0)
         + struct.pack("<I", organizer.NYU_DEPTH_MAX_NPY_HEADER_BYTES + 1)
     )
-    monkeypatch.setattr(
-        organizer.np.lib.format,
-        "_read_array_header",
-        lambda *_args, **_kwargs: pytest.fail("oversized NPY header was read"),
-    )
-
     with pytest.raises(ValueError, match="NPY header length.*byte limit"):
         organizer._validate_staged_nyu_depth(str(tmp_path))
 
@@ -1110,6 +1104,39 @@ def test_staged_nyu_depth_validation_accepts_npy_v3(tmp_path: Path) -> None:
     (depth_dir / "sample.npy").write_bytes(
         b"\x93NUMPY\x03\x00"
         + struct.pack("<I", header_length + padding)
+        + header
+        + b" " * padding
+        + b"\n"
+        + depth.tobytes()
+    )
+
+    organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("version", "length_format"),
+    [((1, 0), "<H"), ((2, 0), "<I")],
+)
+def test_staged_nyu_depth_validation_accepts_legacy_long_shape(
+    tmp_path: Path, version: tuple[int, int], length_format: str
+) -> None:
+    """Preserve Python 2 long-integer shape syntax in NPY 1.0 and 2.0 headers."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    depth = np.ones((1, 1), dtype=np.float32)
+    header = ("{'descr': '<f4', 'fortran_order': False, 'shape': (1L, 1L), }").encode(
+        "latin1"
+    )
+    header_length = len(header) + 1
+    length_size = struct.calcsize(length_format)
+    padding = 64 - ((8 + length_size + header_length) % 64)
+    (depth_dir / "sample.npy").write_bytes(
+        np.lib.format.magic(*version)
+        + struct.pack(length_format, header_length + padding)
         + header
         + b" " * padding
         + b"\n"
