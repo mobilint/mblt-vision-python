@@ -543,7 +543,7 @@ def _decode_coco_rle_counts(counts: str) -> list[int] | None:
 def _valid_coco_rle(
     segmentation: dict[str, Any], image_shape: tuple[int, int] | None
 ) -> bool:
-    """Validate and decode an RLE mask against its referenced COCO image shape."""
+    """Validate an RLE mask against its referenced COCO image shape."""
 
     counts = segmentation.get("counts")
     size = segmentation.get("size")
@@ -572,16 +572,14 @@ def _valid_coco_rle(
             return False
     if sum(run_counts) != math.prod(size):
         return False
-    try:
-        encoded = (
-            coco_mask.frPyObjects(segmentation, size[0], size[1])
-            if isinstance(counts, list)
-            else segmentation
-        )
-        decoded = np.asarray(coco_mask.decode(encoded))
-    except (RuntimeError, TypeError, ValueError):
-        return False
-    return decoded.shape == tuple(size) and bool(np.any(decoded))
+    # COCO RLE alternates background and foreground runs, beginning with
+    # background.  Inspecting the foreground runs proves that the mask is
+    # nonempty without materializing an attacker-sized dense mask.
+    return any(
+        run_count > 0
+        for index, run_count in enumerate(run_counts)
+        if index % 2 == 1
+    )
 
 
 def _coco_ready(root: Path, task: str) -> bool:
