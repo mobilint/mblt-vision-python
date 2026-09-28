@@ -478,6 +478,34 @@ def test_coco_polygon_validation_does_not_decode_dense_mask(
     )
 
 
+def test_coco_polygon_validation_encodes_components_incrementally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain at most one component RLE while checking a polygon union."""
+
+    encoded_components: list[list[int | float]] = []
+
+    def encode(polygons: list[list[int | float]], *_: int) -> dict[str, int]:
+        assert len(polygons) == 1
+        encoded_components.append(polygons[0])
+        return {"index": len(encoded_components) - 1}
+
+    monkeypatch.setattr(readiness.coco_mask, "frPyObjects", encode)
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "area",
+        lambda encoded: np.asarray([encoded["index"]], dtype=np.float64),
+    )
+    polygons = [
+        [0, 0, 1, 0, 1, 1],
+        [2, 2, 4, 2, 4, 4],
+        [5, 5, 7, 5, 7, 7],
+    ]
+
+    assert readiness._polygon_union_has_rasterized_foreground(polygons, (10, 10))
+    assert encoded_components == polygons[:2]
+
+
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

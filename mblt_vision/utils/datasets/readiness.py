@@ -164,12 +164,18 @@ def _polygon_union_has_rasterized_foreground(
         > COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION
     ):
         return False
-    try:
-        encoded = coco_mask.frPyObjects(polygons, height, width)
-        area = np.asarray(coco_mask.area(encoded))
-    except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
-        return False
-    return bool(np.any(area > 0))
+    for polygon in polygons:
+        try:
+            # Encoding every component together retains one image-sized RLE per
+            # polygon. Process one at a time so hostile multi-component inputs
+            # cannot multiply the peak native allocation by the component count.
+            encoded = coco_mask.frPyObjects([polygon], height, width)
+            area = np.asarray(coco_mask.area(encoded))
+        except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
+            return False
+        if bool(np.any(area > 0)):
+            return True
+    return False
 
 
 def _canonicalize_quadrilateral(
@@ -602,9 +608,7 @@ def _valid_coco_rle(
     # background.  Inspecting the foreground runs proves that the mask is
     # nonempty without materializing an attacker-sized dense mask.
     return any(
-        run_count > 0
-        for index, run_count in enumerate(run_counts)
-        if index % 2 == 1
+        run_count > 0 for index, run_count in enumerate(run_counts) if index % 2 == 1
     )
 
 
