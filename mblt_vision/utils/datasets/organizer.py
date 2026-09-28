@@ -66,6 +66,8 @@ SAV_ARCHIVE = SAV_DOWNLOAD_CONFIG["archive"]
 NYU_DEPTH_URL = (
     "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 )
+NYU_DEPTH_MAX_SAMPLE_PIXELS = 1_000_000
+NYU_DEPTH_MAX_VALIDATION_PIXELS = 250_000_000
 ADE20K_URL = ADE20K_DOWNLOAD_CONFIG["url"]
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
@@ -1297,10 +1299,67 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
 
     image_dir = Path(staging_dir) / "images"
     depth_dir = Path(staging_dir) / "depth"
+    validation_pixels = 0
     for image_path in sorted(image_dir.iterdir()):
         if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
             continue
         depth_path = depth_dir / f"{image_path.stem}.npy"
+        try:
+            with Image.open(image_path) as encoded_image:
+                image_shape = (encoded_image.height, encoded_image.width)
+                encoded_image.verify()
+        except (OSError, SyntaxError, ValueError) as exc:
+            raise ValueError(
+                f"Staged NYU Depth image is unreadable: {image_path}."
+            ) from exc
+        image_pixels = math.prod(image_shape)
+        if image_pixels > NYU_DEPTH_MAX_SAMPLE_PIXELS:
+            raise ValueError(
+                "Staged NYU Depth image exceeds the per-sample pixel limit of "
+                f"{NYU_DEPTH_MAX_SAMPLE_PIXELS}: {image_path} has shape {image_shape}."
+            )
+        validation_pixels += image_pixels
+        if validation_pixels > NYU_DEPTH_MAX_VALIDATION_PIXELS:
+            raise ValueError(
+                "Staged NYU Depth images exceed the validation pixel limit of "
+                f"{NYU_DEPTH_MAX_VALIDATION_PIXELS}."
+            )
+        try:
+            with depth_path.open("rb") as depth_file:
+                version = np.lib.format.read_magic(depth_file)
+                if version == (1, 0):
+                    depth_shape, _, depth_dtype = np.lib.format.read_array_header_1_0(
+                        depth_file
+                    )
+                elif version == (2, 0):
+                    depth_shape, _, depth_dtype = np.lib.format.read_array_header_2_0(
+                        depth_file
+                    )
+                else:
+                    raise ValueError(f"unsupported NPY format version {version}")
+        except (EOFError, OSError, ValueError) as exc:
+            raise ValueError(
+                f"Unable to read staged NYU Depth target header {depth_path}: {exc}."
+            ) from exc
+        depth_pixels = math.prod(depth_shape)
+        if len(depth_shape) != 2 or depth_pixels > NYU_DEPTH_MAX_SAMPLE_PIXELS:
+            raise ValueError(
+                "Staged NYU Depth target must be a two-dimensional array within "
+                f"the {NYU_DEPTH_MAX_SAMPLE_PIXELS}-element limit, got "
+                f"{depth_shape}: {depth_path}."
+            )
+        if depth_shape != image_shape:
+            raise ValueError(
+                "Staged NYU Depth image and target shapes must match: "
+                f"image {image_shape}, depth {depth_shape}: {image_path}."
+            )
+        if not np.issubdtype(depth_dtype, np.number) or np.issubdtype(
+            depth_dtype, np.complexfloating
+        ):
+            raise ValueError(
+                "Staged NYU Depth target must use a real numeric dtype, "
+                f"got {depth_dtype}: {depth_path}."
+            )
         image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"Staged NYU Depth image is unreadable: {image_path}.")
@@ -1310,13 +1369,6 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
             raise ValueError(
                 f"Unable to load staged NYU Depth target {depth_path}: {exc}."
             ) from exc
-        if not np.issubdtype(raw_depth.dtype, np.number) or np.issubdtype(
-            raw_depth.dtype, np.complexfloating
-        ):
-            raise ValueError(
-                "Staged NYU Depth target must use a real numeric dtype, "
-                f"got {raw_depth.dtype}: {depth_path}."
-            )
         depth = np.asarray(raw_depth, dtype=np.float32)
         if depth.ndim != 2 or depth.shape != image.shape[:2]:
             raise ValueError(

@@ -998,6 +998,69 @@ def test_staged_nyu_depth_validation_rejects_malformed_payloads(
         organizer._validate_staged_nyu_depth(str(tmp_path))
 
 
+def test_staged_nyu_depth_validation_rejects_oversized_image_before_decode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject an oversized compressed image before OpenCV allocates its pixels."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (2, 2)).save(image_dir / "sample.png")
+    np.save(depth_dir / "sample.npy", np.ones((2, 2), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_SAMPLE_PIXELS", 3)
+
+    def _unexpected_decode(_: str) -> None:
+        pytest.fail("oversized image reached cv2.imread")
+
+    monkeypatch.setattr(organizer.cv2, "imread", _unexpected_decode)
+
+    with pytest.raises(ValueError, match="per-sample pixel limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_rejects_oversized_depth_before_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject an oversized NPY shape from its header before loading the array."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    np.save(depth_dir / "sample.npy", np.ones((2, 2), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_SAMPLE_PIXELS", 3)
+
+    def _unexpected_load(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized depth array reached np.load")
+
+    monkeypatch.setattr(organizer.np, "load", _unexpected_load)
+
+    with pytest.raises(ValueError, match="element limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_enforces_aggregate_pixel_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bound total work across individually valid NYU samples."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    for sample_id in ("first", "second"):
+        Image.new("RGB", (2, 2)).save(image_dir / f"{sample_id}.png")
+        np.save(depth_dir / f"{sample_id}.npy", np.ones((2, 2), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_SAMPLE_PIXELS", 4)
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_VALIDATION_PIXELS", 7)
+
+    with pytest.raises(ValueError, match="validation pixel limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
 @pytest.mark.parametrize("dataset", ["ade20k", "dotav1"])
 def test_staged_payload_validation_rejects_corrupt_files(
     tmp_path: Path, dataset: str
