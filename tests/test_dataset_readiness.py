@@ -421,6 +421,56 @@ def test_coco_readiness_rejects_polygon_union_without_rasterized_foreground(
     assert not readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
 
 
+def test_polygon_union_merges_components_before_decoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decode one merged union rather than an image-sized plane per component."""
+
+    encoded = [{"component": 1}, {"component": 2}]
+    merged = {"union": True}
+    monkeypatch.setattr(readiness.coco_mask, "frPyObjects", lambda *_: encoded)
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "merge",
+        lambda value: merged if value is encoded else None,
+    )
+
+    def decode(value: object) -> np.ndarray:
+        assert value is merged
+        return np.ones((10, 10), dtype=np.uint8)
+
+    monkeypatch.setattr(readiness.coco_mask, "decode", decode)
+
+    assert readiness._polygon_union_has_rasterized_foreground(
+        [[0, 0, 2, 0, 2, 2], [3, 3, 5, 3, 5, 5]], (10, 10)
+    )
+
+
+@pytest.mark.parametrize(
+    ("polygons", "image_shape"),
+    [
+        ([[0, 0, 2, 0, 2, 2]] * 2, (10, 10)),
+        ([[0, 0, 2, 0, 2, 2]], (11, 10)),
+    ],
+)
+def test_polygon_union_rejects_resource_limits_before_rasterizing(
+    monkeypatch: pytest.MonkeyPatch,
+    polygons: list[list[int]],
+    image_shape: tuple[int, int],
+) -> None:
+    """Reject oversized polygon masks before calling the allocating codec."""
+
+    monkeypatch.setattr(readiness, "COCO_MAX_POLYGONS_PER_ANNOTATION", 1)
+    monkeypatch.setattr(readiness, "COCO_MAX_IMAGE_DIMENSION", 10)
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "frPyObjects",
+        lambda *_: pytest.fail("oversized mask reached the COCO codec"),
+    )
+
+    assert not readiness._polygon_union_has_rasterized_foreground(polygons, image_shape)
+
+
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

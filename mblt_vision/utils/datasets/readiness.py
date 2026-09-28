@@ -25,6 +25,10 @@ IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
 IMAGENET_IMAGES_PER_CLASS = 50
 COCO_VALIDATION_SAMPLE_COUNT = 5000
+COCO_MAX_IMAGE_DIMENSION = 32_768
+COCO_MAX_MASK_PIXELS = 100_000_000
+COCO_MAX_POLYGONS_PER_ANNOTATION = 1_000
+COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION = 100_000
 DOTAV1_VALIDATION_SAMPLE_COUNT = 458
 WIDERFACE_EVENT_COUNT = 61
 WIDERFACE_VALIDATION_SAMPLE_COUNT = 3226
@@ -146,10 +150,22 @@ def _polygon_union_has_rasterized_foreground(
     if image_shape is None:
         return False
     height, width = image_shape
+    if (
+        height <= 0
+        or width <= 0
+        or height > COCO_MAX_IMAGE_DIMENSION
+        or width > COCO_MAX_IMAGE_DIMENSION
+        or height * width > COCO_MAX_MASK_PIXELS
+        or len(polygons) > COCO_MAX_POLYGONS_PER_ANNOTATION
+        or sum(len(polygon) // 2 for polygon in polygons)
+        > COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION
+    ):
+        return False
     try:
         encoded = coco_mask.frPyObjects(polygons, height, width)
-        decoded = np.asarray(coco_mask.decode(encoded))
-    except (RuntimeError, TypeError, ValueError):
+        merged = coco_mask.merge(encoded)
+        decoded = np.asarray(coco_mask.decode(merged))
+    except (MemoryError, RuntimeError, TypeError, ValueError):
         return False
     return bool(np.any(decoded))
 
@@ -447,6 +463,7 @@ def _coco_task_annotations_valid(
             if isinstance(segmentation, list):
                 if (
                     not segmentation
+                    or len(segmentation) > COCO_MAX_POLYGONS_PER_ANNOTATION
                     or any(
                         not isinstance(polygon, list)
                         or len(polygon) < 6
@@ -457,7 +474,12 @@ def _coco_task_annotations_valid(
                             or not np.isfinite(value)
                             for value in polygon
                         )
-                        or not _has_positive_polygon_area(polygon)
+                        for polygon in segmentation
+                    )
+                    or sum(len(polygon) // 2 for polygon in segmentation)
+                    > COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION
+                    or any(
+                        not _has_positive_polygon_area(polygon)
                         or not _polygon_has_positive_image_overlap(
                             polygon, image_shapes.get(image_id)
                         )
