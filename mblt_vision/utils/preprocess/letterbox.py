@@ -110,11 +110,27 @@ class LetterBox(PreOps):
     def __call__(self, x: TensorLike) -> torch.Tensor:
         """Executes YOLO preprocessing (letterbox resizing).
 
+        The call's geometry is also left in ``self.ratio_pad`` for compatibility.
+        That attribute is shared by every caller of this instance, so concurrent
+        callers must use ``with_ratio_pad`` instead.
+
         Args:
             x (TensorLike): Input image.
 
         Returns:
             torch.Tensor: Preprocessed image in HWC format on the selected device.
+        """
+        img, self.ratio_pad = self.with_ratio_pad(x)
+        return img
+
+    def with_ratio_pad(self, x: TensorLike) -> tuple[torch.Tensor, RatioPad]:
+        """Letterbox an image and return its geometry without touching instance state.
+
+        Args:
+            x (TensorLike): Input image.
+
+        Returns:
+            The preprocessed HWC image on the selected device and its ``ratio_pad``.
         """
         if isinstance(x, torch.Tensor):
             x = x.detach().cpu().numpy()
@@ -125,10 +141,10 @@ class LetterBox(PreOps):
         if x.ndim != 3:
             raise ValueError(f"LetterBox expects an HWC image, got shape {x.shape}.")
         x = normalize_uint8_rgb_array(x, operation="LetterBox")
-        img, self.ratio_pad = _apply_letterbox(
+        img, ratio_pad = _apply_letterbox(
             x,
             self.img_size,
             cv2.INTER_LINEAR,
             (114, 114, 114),
         )
-        return torch.from_numpy(img).to(self.device).byte()
+        return torch.from_numpy(img).to(self.device).byte(), ratio_pad

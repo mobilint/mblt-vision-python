@@ -314,6 +314,19 @@ The current ownership boundary is deliberate:
   candidate tensors inside `non_max_suppression` is 1.8x in numpy and measured ~2x
   *slower* here, because six boolean index operations per iteration cost more in torch
   than one gather through a shrinking index; that measurement is recorded in the function.
+- Every `eval_*` evaluator except `eval_sav` runs through
+  `utils/evaluation/_pipeline.map_batched_inference`, which prepares batches and runs
+  postprocessing on two separate bounded thread pools while inference stays on the consuming
+  thread, following `mblt-model-ops`'s helper of the same name. Results come back in input
+  order. Each evaluator's `decode` callback must be a pure function of its batch and raw
+  outputs; accumulate metrics only in the consuming loop, and keep that accumulation
+  order-exact (NYU adds per-image `image_metrics` in sample order; semantic segmentation
+  sums per-batch integer confusion matrices). A single-process `DataLoader` is fetched per
+  batch on the preparation pool, so datasets, collate functions, and preprocessing must be
+  thread-safe: `PreBase.with_metadata` takes `ratio_pad` from `LetterBox.with_ratio_pad`'s
+  return value, because the legacy `LetterBox.ratio_pad` attribute is shared per instance.
+  Do not share one pool between the two stages, because a slow decode would starve the
+  prefetch that feeds the NPU.
 - `mblt-model-ops`'s `datasets/*/evaluator.py` are the counterparts of
   `mblt_vision/utils/evaluation/eval_*.py`, and nothing compares them automatically. A
   scoring change on one side is owed to the other, verified separately on each, since the
