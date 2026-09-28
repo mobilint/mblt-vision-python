@@ -484,17 +484,29 @@ def test_coco_polygon_validation_encodes_components_incrementally(
     """Retain at most one component RLE while checking a polygon union."""
 
     encoded_components: list[list[int | float]] = []
+    live_encodings = 0
 
-    def encode(polygons: list[list[int | float]], *_: int) -> dict[str, int]:
+    class EncodedComponent:
+        def __init__(self, index: int) -> None:
+            nonlocal live_encodings
+            assert live_encodings == 0
+            self.index = index
+            live_encodings += 1
+
+        def __del__(self) -> None:
+            nonlocal live_encodings
+            live_encodings -= 1
+
+    def encode(polygons: list[list[int | float]], *_: int) -> EncodedComponent:
         assert len(polygons) == 1
         encoded_components.append(polygons[0])
-        return {"index": len(encoded_components) - 1}
+        return EncodedComponent(len(encoded_components) - 1)
 
     monkeypatch.setattr(readiness.coco_mask, "frPyObjects", encode)
     monkeypatch.setattr(
         readiness.coco_mask,
         "area",
-        lambda encoded: np.asarray([encoded["index"]], dtype=np.float64),
+        lambda encoded: np.asarray([encoded.index], dtype=np.float64),
     )
     polygons = [
         [0, 0, 1, 0, 1, 1],
@@ -504,6 +516,7 @@ def test_coco_polygon_validation_encodes_components_incrementally(
 
     assert readiness._polygon_union_has_rasterized_foreground(polygons, (10, 10))
     assert encoded_components == polygons[:2]
+    assert live_encodings == 0
 
 
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(

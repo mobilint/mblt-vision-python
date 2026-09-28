@@ -173,7 +173,12 @@ def _polygon_union_has_rasterized_foreground(
             area = np.asarray(coco_mask.area(encoded))
         except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
             return False
-        if bool(np.any(area > 0)):
+        has_foreground = bool(np.any(area > 0))
+        # Assignment would otherwise retain ``encoded`` while evaluating the
+        # next ``frPyObjects`` call, briefly keeping two native RLEs alive.
+        del area
+        del encoded
+        if has_foreground:
             return True
     return False
 
