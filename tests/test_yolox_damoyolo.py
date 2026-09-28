@@ -587,3 +587,29 @@ def test_dota_ground_truth_fallback_follows_the_models_anchoring() -> None:
 
     assert centered == (1.0, (0.0, 80.0))
     assert top_left == (1.0, (0.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    ("source_shape", "image_region"),
+    [
+        ((480, 640), (slice(0, 480), slice(None))),
+        ((640, 480), (slice(None), slice(0, 480))),
+    ],
+)
+def test_top_left_mask_crop_without_metadata_matches_the_explicit_pads(
+    source_shape, image_region
+) -> None:
+    """With no ratio_pad, a top-left crop starts at the origin, as its metadata would say."""
+
+    from mblt_vision.utils.postprocess.common import scale_masks
+
+    mask = torch.zeros((1, 640, 640))
+    mask[(0, *image_region)] = 1.0
+
+    derived = scale_masks(mask, source_shape, center=False)
+    explicit = scale_masks(
+        mask, source_shape, ratio_pad=((1.0, 1.0), (0, 0)), center=False
+    )
+
+    assert bool((derived > 0.5).all())
+    torch.testing.assert_close(derived, explicit, rtol=0, atol=0)

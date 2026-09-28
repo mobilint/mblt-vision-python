@@ -1236,7 +1236,11 @@ def scale_masks(
             (im1_w - round(im0_w * gain)),
             (im1_h - round(im0_h * gain)),
         )  # wh padding
-        if padding:
+        if not center:
+            # A top-left letterbox puts all of its padding at the bottom and
+            # right, so none of it precedes the image.
+            pad_w = pad_h = 0
+        elif padding:
             pad_w /= 2
             pad_h /= 2
     else:
