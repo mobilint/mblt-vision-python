@@ -309,3 +309,43 @@ def test_missing_ratio_pad_uses_the_models_own_anchoring() -> None:
 
     assert tl_boxes == [[0.0, 0.0, 64.0, 32.0]]
     assert c_boxes == [[0.0, 0.0, 64.0, 0.0]]
+
+
+# --- Backend dtypes --------------------------------------------------------------
+
+
+def test_damoyolo_decodes_float16_heads_like_float32() -> None:
+    """Float16 heads must not fail the bin projection, and decode in float32."""
+
+    post = build_postprocess(TOP_LEFT_640, DAMO_POST)
+    classes, boxes = _damo_heads()
+    classes[1][0, 3, 3, 7] = 0.9
+    half = [head.half() for head in [*classes, *boxes]]
+
+    detections_half = post(half)
+    detections_full = post([head.float() for head in half])
+
+    assert len(detections_half) == 1 and detections_half[0].shape[0] > 0
+    assert detections_half[0].dtype == torch.float32
+    torch.testing.assert_close(detections_half[0], detections_full[0])
+
+
+def test_yolox_decodes_float16_output_without_overflowing_exp() -> None:
+    """``exp`` of a float16 size regression above ~11 is inf unless decoded in float32."""
+
+    post = build_postprocess(TOP_LEFT_640, YOLOX_POST)
+    raw = torch.zeros((1, 8400, 85))
+    raw[..., 2:4] = -10.0
+    anchor = 8000  # the first stride-32 cell
+    raw[0, anchor, 2:4] = 2.0
+    raw[0, anchor, 4] = 0.9
+    raw[0, anchor, 5] = 0.8
+    raw[0, 0, :4] = torch.tensor([0.0, 0.0, 11.5, 11.5])
+    raw[0, 0, 4] = 0.9
+    raw[0, 0, 6] = 0.8
+
+    (detections,) = post(raw.half())
+
+    assert bool(torch.isfinite(detections).all())
+    torch.testing.assert_close(detections, post(raw.half().float())[0])
+    assert sorted(detections[:, 5].tolist()) == [0.0, 1.0]

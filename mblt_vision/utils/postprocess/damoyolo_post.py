@@ -64,7 +64,10 @@ class DAMOYOLODetectionPost(YOLOAnchorlessDetectionPost):
                 raise ValueError(
                     f"DAMO-YOLO head tensors must be 4D, got shape {tuple(output.shape)}."
                 )
-            heads.append(output)
+            # Decode in float32: the bin projection is a matmul against float32 bin
+            # values, which does not promote a float16 head, and a stride-32
+            # distance of up to 512 px is only resolved to ~0.5 px in float16.
+            heads.append(output.float())
         # One layout for the whole set. A 640 input's stride-8 class map is
         # 80x80x80, so its own shape cannot say which axis holds the classes; the
         # distribution maps (4 * bins channels) always can.

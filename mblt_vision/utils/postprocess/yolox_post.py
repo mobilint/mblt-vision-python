@@ -53,7 +53,12 @@ class YOLOXDetectionPost(YOLOAnchorlessDetectionPost):
         )
 
     def _raw_rows(self, x: list[torch.Tensor]) -> torch.Tensor:
-        """Return the single output as ``(batch, anchors, 5 + nc)``."""
+        """Return the single output as float32 ``(batch, anchors, 5 + nc)``.
+
+        Decoding runs in float32 whatever the backend returns: ``exp`` of a float16
+        size regression overflows to ``inf`` above about 11, before any promotion
+        against the float32 grid could help.
+        """
 
         if len(x) != 1:
             raise ValueError(f"YOLOX exports one output tensor, got {len(x)}.")
@@ -64,9 +69,9 @@ class YOLOXDetectionPost(YOLOAnchorlessDetectionPost):
             raw = raw.squeeze(0 if raw.shape[0] == 1 else 1)
         width, anchors = 5 + self.nc, self.grid.shape[0]
         if raw.ndim == 3 and raw.shape[1:] == (anchors, width):
-            return raw
+            return raw.float()
         if raw.ndim == 3 and raw.shape[1:] == (width, anchors):
-            return raw.transpose(1, 2)
+            return raw.transpose(1, 2).float()
         raise ValueError(
             f"YOLOX output must be (batch, {anchors}, {width}) for a "
             f"{self.imh}x{self.imw} input, got {tuple(x[0].shape)}."
