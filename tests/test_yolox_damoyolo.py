@@ -516,3 +516,74 @@ def test_dense_fallback_follows_the_models_top_left_anchoring() -> None:
 
     assert restored.shape == (480, 640)
     assert float(restored.min()) == pytest.approx(1.0)
+
+
+# --- Top-left semantic targets ---------------------------------------------------
+
+
+@pytest.mark.parametrize("loader_name", ["get_ade20k_loader", "get_cityscapes_loader"])
+def test_semantic_targets_follow_a_top_left_letterbox(loader_name: str) -> None:
+    """A non-square target must be anchored like its image, not centered."""
+
+    from mblt_vision.utils.datasets import dataloader
+
+    top_left = {"LetterBox": {"img_size": [64, 64], "center": False}}
+    preprocess = build_preprocess(top_left)
+    image = np.full((48, 64, 3), 100, dtype=np.uint8)
+    target = np.full((48, 64), 3, dtype=np.uint8)
+    loader = getattr(dataloader, loader_name)(
+        [(image, target, "sample")],
+        1,
+        preprocess.with_metadata,
+        image_size=(64, 64),
+        center=False,
+    )
+
+    _, targets, _, ratio_pads, _ = next(iter(loader))
+
+    assert ratio_pads == [((1.0, 1.0), (0, 0))]
+    assert bool((targets[0][:48] == 3).all())
+    assert bool((targets[0][48:] == 255).all())
+
+
+def test_semantic_evaluation_passes_the_models_anchoring_to_its_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    eval_module = importlib.import_module("mblt_vision.utils.evaluation.eval_ade20k")
+    seen: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_loader(*args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(eval_module, "CustomADE20K", lambda _root: object())
+    monkeypatch.setattr(eval_module, "get_ade20k_loader", fake_loader)
+    model = SimpleNamespace(
+        post_cfg={"dataset": "ade20k"},
+        pre_cfg={"LetterBox": {"img_size": [64, 64], "center": False}},
+        preprocess_with_metadata=None,
+    )
+
+    with pytest.raises(_Stop):
+        eval_module.eval_semantic_segmentation(model, "/ade20k", 1)
+
+    assert seen["center"] is False
+
+
+def test_dota_ground_truth_fallback_follows_the_models_anchoring() -> None:
+    import importlib
+
+    eval_dota = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
+
+    centered = eval_dota._ratio_pad_for_shape((640, 640), (480, 640), None)
+    top_left = eval_dota._ratio_pad_for_shape(
+        (640, 640), (480, 640), None, center=False
+    )
+
+    assert centered == (1.0, (0.0, 80.0))
+    assert top_left == (1.0, (0.0, 0.0))

@@ -42,6 +42,7 @@ def test_eval_dota_rejects_truncated_postprocess_batches(
 
     class _FakeModel:
         post_cfg = {"task": "obb", "dataset": "dotav1"}
+        pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
         preprocess_with_metadata = object()
 
         def set_postprocess_thresholds(self, **kwargs) -> None:

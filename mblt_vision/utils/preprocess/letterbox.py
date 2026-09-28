@@ -66,6 +66,7 @@ def letterbox_semantic_mask(
     mask: np.ndarray,
     img_size: list[int],
     ignore_label: int = 255,
+    center: bool = True,
 ) -> tuple[np.ndarray, RatioPad]:
     """Letterbox a semantic mask without interpolating class IDs.
 
@@ -73,6 +74,8 @@ def letterbox_semantic_mask(
         mask: Two-dimensional semantic class map.
         img_size: Target size as ``[height, width]``.
         ignore_label: Class value used for padded pixels.
+        center: Center the mask, or anchor it top-left. Pass the model's
+            ``LetterBox.center`` so the target matches its image's geometry.
 
     Returns:
         The letterboxed mask and its resize/padding metadata.
@@ -85,7 +88,7 @@ def letterbox_semantic_mask(
         raise ValueError(
             f"Semantic masks must be two-dimensional, got shape {mask.shape}."
         )
-    return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label)
+    return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label, center)
 
 
 class LetterBox(PreOps):
