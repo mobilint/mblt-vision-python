@@ -25,6 +25,9 @@ IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
 IMAGENET_IMAGES_PER_CLASS = 50
 COCO_VALIDATION_SAMPLE_COUNT = 5000
+COCO_MAX_IMAGE_DIMENSION = 32_768
+COCO_MAX_POLYGONS_PER_ANNOTATION = 1_000
+COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION = 100_000
 # Bound annotation-controlled geometry before passing it to native COCO mask
 # routines.  This comfortably exceeds the largest official COCO image while
 # preventing hostile metadata from requesting multi-gigabyte raster buffers.
@@ -150,14 +153,34 @@ def _polygon_union_has_rasterized_foreground(
     if image_shape is None:
         return False
     height, width = image_shape
-    if height * width > COCO_MAX_IMAGE_PIXELS:
+    if (
+        height <= 0
+        or width <= 0
+        or height > COCO_MAX_IMAGE_DIMENSION
+        or width > COCO_MAX_IMAGE_DIMENSION
+        or height * width > COCO_MAX_IMAGE_PIXELS
+        or len(polygons) > COCO_MAX_POLYGONS_PER_ANNOTATION
+        or sum(len(polygon) // 2 for polygon in polygons)
+        > COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION
+    ):
         return False
-    try:
-        encoded = coco_mask.frPyObjects(polygons, height, width)
-        area = np.asarray(coco_mask.area(encoded))
-    except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
-        return False
-    return bool(np.any(area > 0))
+    for polygon in polygons:
+        try:
+            # Encoding every component together retains one image-sized RLE per
+            # polygon. Process one at a time so hostile multi-component inputs
+            # cannot multiply the peak native allocation by the component count.
+            encoded = coco_mask.frPyObjects([polygon], height, width)
+            area = np.asarray(coco_mask.area(encoded))
+        except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
+            return False
+        has_foreground = bool(np.any(area > 0))
+        # Assignment would otherwise retain ``encoded`` while evaluating the
+        # next ``frPyObjects`` call, briefly keeping two native RLEs alive.
+        del area
+        del encoded
+        if has_foreground:
+            return True
+    return False
 
 
 def _canonicalize_quadrilateral(
@@ -455,6 +478,7 @@ def _coco_task_annotations_valid(
             if isinstance(segmentation, list):
                 if (
                     not segmentation
+                    or len(segmentation) > COCO_MAX_POLYGONS_PER_ANNOTATION
                     or any(
                         not isinstance(polygon, list)
                         or len(polygon) < 6
@@ -465,7 +489,12 @@ def _coco_task_annotations_valid(
                             or not np.isfinite(value)
                             for value in polygon
                         )
-                        or not _has_positive_polygon_area(polygon)
+                        for polygon in segmentation
+                    )
+                    or sum(len(polygon) // 2 for polygon in segmentation)
+                    > COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION
+                    or any(
+                        not _has_positive_polygon_area(polygon)
                         or not _polygon_has_positive_image_overlap(
                             polygon, image_shapes.get(image_id)
                         )
@@ -584,9 +613,7 @@ def _valid_coco_rle(
     # background.  Inspecting the foreground runs proves that the mask is
     # nonempty without materializing an attacker-sized dense mask.
     return any(
-        run_count > 0
-        for index, run_count in enumerate(run_counts)
-        if index % 2 == 1
+        run_count > 0 for index, run_count in enumerate(run_counts) if index % 2 == 1
     )
 
 

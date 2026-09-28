@@ -437,6 +437,31 @@ def test_coco_readiness_rejects_polygon_union_without_rasterized_foreground(
     assert not readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
 
 
+@pytest.mark.parametrize(
+    ("polygons", "image_shape"),
+    [
+        ([[0, 0, 2, 0, 2, 2]] * 2, (10, 10)),
+        ([[0, 0, 2, 0, 2, 2]], (11, 10)),
+    ],
+)
+def test_polygon_union_rejects_resource_limits_before_rasterizing(
+    monkeypatch: pytest.MonkeyPatch,
+    polygons: list[list[int]],
+    image_shape: tuple[int, int],
+) -> None:
+    """Reject oversized polygon masks before calling the allocating codec."""
+
+    monkeypatch.setattr(readiness, "COCO_MAX_POLYGONS_PER_ANNOTATION", 1)
+    monkeypatch.setattr(readiness, "COCO_MAX_IMAGE_DIMENSION", 10)
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "frPyObjects",
+        lambda *_: pytest.fail("oversized mask reached the COCO codec"),
+    )
+
+    assert not readiness._polygon_union_has_rasterized_foreground(polygons, image_shape)
+
+
 def test_coco_polygon_validation_does_not_decode_dense_mask(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -451,6 +476,47 @@ def test_coco_polygon_validation_does_not_decode_dense_mask(
     assert readiness._polygon_union_has_rasterized_foreground(
         [[0, 0, 2, 0, 2, 2, 0, 2]], (10, 10)
     )
+
+
+def test_coco_polygon_validation_encodes_components_incrementally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain at most one component RLE while checking a polygon union."""
+
+    encoded_components: list[list[int | float]] = []
+    live_encodings = 0
+
+    class EncodedComponent:
+        def __init__(self, index: int) -> None:
+            nonlocal live_encodings
+            assert live_encodings == 0
+            self.index = index
+            live_encodings += 1
+
+        def __del__(self) -> None:
+            nonlocal live_encodings
+            live_encodings -= 1
+
+    def encode(polygons: list[list[int | float]], *_: int) -> EncodedComponent:
+        assert len(polygons) == 1
+        encoded_components.append(polygons[0])
+        return EncodedComponent(len(encoded_components) - 1)
+
+    monkeypatch.setattr(readiness.coco_mask, "frPyObjects", encode)
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "area",
+        lambda encoded: np.asarray([encoded.index], dtype=np.float64),
+    )
+    polygons = [
+        [0, 0, 1, 0, 1, 1],
+        [2, 2, 4, 2, 4, 4],
+        [5, 5, 7, 5, 7, 7],
+    ]
+
+    assert readiness._polygon_union_has_rasterized_foreground(polygons, (10, 10))
+    assert encoded_components == polygons[:2]
+    assert live_encodings == 0
 
 
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(
