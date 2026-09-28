@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 import torch
@@ -14,6 +14,7 @@ from ..datasets import (
     get_ade20k_loader,
     get_cityscapes_loader,
 )
+from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -194,11 +195,11 @@ def _evaluate_semantic_loader(
         ValueError: If postprocessing returns no class maps or no valid targets exist.
     """
 
-    accumulator = SemanticMetricAccumulator(nc=nc)
-    for inputs, targets, _shapes, _ratio_pads, _ in tqdm(loader, desc=description):
+    def decode(batch: Any, output: Any) -> np.ndarray:
         # TODO: Restore logits to original geometry using shapes and ratio_pads when
         # Ultralytics adopts native-geometry semantic validation metrics.
-        result = model.postprocess(model(inputs))
+        targets = batch[1]
+        result = model.postprocess(output)
         semantic_mask = result.semantic_mask
         if semantic_mask is None:
             raise ValueError("Semantic postprocessor returned no class maps.")
@@ -207,7 +208,16 @@ def _evaluate_semantic_loader(
             if isinstance(semantic_mask, torch.Tensor)
             else semantic_mask
         )
-        accumulator.update(np.asarray(prediction), targets)
+        # A private accumulator per batch keeps decode free of shared state; the
+        # confusion matrices are integer counts, so summing them is exact.
+        batch_accumulator = SemanticMetricAccumulator(nc=nc)
+        batch_accumulator.update(np.asarray(prediction), targets)
+        return batch_accumulator.matrix
+
+    accumulator = SemanticMetricAccumulator(nc=nc)
+    batches = map_batched_inference(loader, lambda batch: model(batch[0]), decode)
+    for matrix in tqdm(batches, total=len(loader), desc=description):
+        accumulator.matrix += matrix
     return accumulator.result()
 
 
