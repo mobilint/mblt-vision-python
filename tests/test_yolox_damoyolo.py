@@ -370,3 +370,43 @@ def test_yolox_decodes_float16_output_without_overflowing_exp() -> None:
     assert bool(torch.isfinite(detections).all())
     torch.testing.assert_close(detections, post(raw.half().float())[0])
     assert sorted(detections[:, 5].tolist()) == [0.0, 1.0]
+
+
+@pytest.mark.parametrize(
+    ("img0_shapes", "ratio_pad"),
+    [
+        # One shared shape for the whole batch, with and without metadata.
+        ((320, 640), None),
+        ((320, 640), ((1.0, 1.0), (0, 0))),
+        # Per-image shapes, and per-image metadata over a shared shape.
+        ([(320, 640), (320, 640)], None),
+        ((320, 640), [None, ((1.0, 1.0), (0, 0))]),
+    ],
+)
+def test_top_left_eval_conversion_keeps_the_nms_batch(img0_shapes, ratio_pad) -> None:
+    """A shared image shape must cover every NMS output, as it does for centered models."""
+
+    post = build_postprocess(TOP_LEFT_640, YOLOX_POST)
+    raw = torch.zeros((2, 8400, 85))
+    raw[..., 2:4] = -10.0
+    raw[:, 5 * 80 + 10, :4] = torch.tensor([0.5, 0.5, np.log(4.0), np.log(4.0)])
+    raw[:, 5 * 80 + 10, 4] = 0.9
+    raw[:, 5 * 80 + 10, 5] = 0.8
+
+    detections = post(raw)
+    _, boxes, _ = post.nmsout2eval(detections, (640, 640), img0_shapes, ratio_pad)
+
+    # The top-left letterbox of a 320x640 image into 640x640 is a 1x resize with
+    # no padding, so the xywh box keeps its input-space coordinates.
+    assert boxes == [[[68.0, 28.0, 32.0, 32.0]], [[68.0, 28.0, 32.0, 32.0]]]
+
+
+def test_top_left_eval_conversion_scales_each_image_by_its_own_shape() -> None:
+    post = build_postprocess(TOP_LEFT_640, YOLOX_POST)
+    detection = torch.tensor([[0.0, 0.0, 64.0, 32.0, 0.9, 0.0]])
+
+    _, boxes, _ = post.nmsout2eval(
+        [detection, detection.clone()], (640, 640), [(320, 640), (640, 1280)]
+    )
+
+    assert boxes == [[[0.0, 0.0, 64.0, 32.0]], [[0.0, 0.0, 128.0, 64.0]]]

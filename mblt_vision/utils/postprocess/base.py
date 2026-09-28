@@ -12,6 +12,7 @@ from ..letterbox import RatioPad, letterbox_center, resolve_ratio_pad
 from ..preprocess._validation import normalize_image_size
 from ..types import ListTensorLike, TensorLike
 from .common import (
+    _is_ratio_pad,
     nmsout2eval,
     normalize_image_shapes,
     normalize_ratio_pads,
@@ -316,6 +317,11 @@ class YOLODetectionPostBase(PostBase):
         untouched; a top-left model (``pre_cfg.LetterBox.center: false``) gets its
         own zero padding instead of a shift by half the border.
 
+        The result keeps the caller's cardinality. One shared image shape with
+        shared (or no) metadata yields one shared pad, which the helpers broadcast
+        across however many NMS outputs there are, as they broadcast ``None``;
+        per-image shapes or metadata yield one pad per image.
+
         Args:
             img1_shape: Letterboxed input shape.
             img0_shape: Original image shape(s).
@@ -327,8 +333,22 @@ class YOLODetectionPostBase(PostBase):
 
         if self.letterbox_center:
             return ratio_pad
-        shapes = normalize_image_shapes(img0_shape)
-        pads = normalize_ratio_pads(ratio_pad, len(shapes))
+        per_image_pads = ratio_pad is not None and not _is_ratio_pad(ratio_pad)
+        shared_shape = len(img0_shape) == 2 and isinstance(img0_shape[0], int)
+        if shared_shape and not per_image_pads:
+            shape = cast(tuple[int, int], img0_shape)
+            return resolve_ratio_pad(
+                img1_shape,
+                (int(shape[0]), int(shape[1])),
+                cast(RatioPad | None, ratio_pad),
+                center=False,
+            )
+        if per_image_pads:
+            pads = list(cast(Sequence[RatioPad | None], ratio_pad))
+            shapes = normalize_image_shapes(img0_shape, len(pads))
+        else:
+            shapes = normalize_image_shapes(img0_shape)
+            pads = normalize_ratio_pads(ratio_pad, len(shapes))
         return [
             resolve_ratio_pad(img1_shape, shape, pad, center=False)
             for pad, shape in zip(pads, shapes)
