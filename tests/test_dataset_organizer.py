@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import shutil
+import struct
 import tarfile
 from collections.abc import Callable
 from pathlib import Path
@@ -995,6 +996,172 @@ def test_staged_nyu_depth_validation_rejects_malformed_payloads(
         ValueError,
         match="real numeric dtype|finite values|negative values|valid metric depth",
     ):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_rejects_oversized_image_before_decode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject an oversized compressed image before OpenCV allocates its pixels."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (2, 2)).save(image_dir / "sample.png")
+    np.save(depth_dir / "sample.npy", np.ones((2, 2), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_SAMPLE_PIXELS", 3)
+
+    def _unexpected_decode(_: str) -> None:
+        pytest.fail("oversized image reached cv2.imread")
+
+    monkeypatch.setattr(organizer.cv2, "imread", _unexpected_decode)
+
+    with pytest.raises(ValueError, match="per-sample pixel limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_rejects_oversized_encoded_image_before_pillow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bound hostile PNG chunks before Pillow parses or verifies the image."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    (image_dir / "sample.png").write_bytes(b"oversized encoded image")
+    np.save(depth_dir / "sample.npy", np.ones((1, 1), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES", 8)
+    monkeypatch.setattr(
+        organizer.Image,
+        "open",
+        lambda *_: pytest.fail("oversized encoded image reached Pillow"),
+    )
+
+    with pytest.raises(ValueError, match="Staged NYU Depth image is unreadable"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_rejects_oversized_depth_before_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject an oversized NPY shape from its header before loading the array."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    np.save(depth_dir / "sample.npy", np.ones((2, 2), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_SAMPLE_PIXELS", 3)
+
+    def _unexpected_load(*args: object, **kwargs: object) -> None:
+        pytest.fail("oversized depth array reached np.load")
+
+    monkeypatch.setattr(organizer.np, "load", _unexpected_load)
+
+    with pytest.raises(ValueError, match="element limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_rejects_oversized_npy_v2_header_before_read(
+    tmp_path: Path,
+) -> None:
+    """Reject a forged v2 header length before NumPy attempts the declared read."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    (depth_dir / "sample.npy").write_bytes(
+        np.lib.format.magic(2, 0)
+        + struct.pack("<I", organizer.NYU_DEPTH_MAX_NPY_HEADER_BYTES + 1)
+    )
+    with pytest.raises(ValueError, match="NPY header length.*byte limit"):
+        organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_accepts_npy_v3(tmp_path: Path) -> None:
+    """Preserve support for valid UTF-8 NPY 3.0 depth targets."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    depth = np.ones((1, 1), dtype=np.float32)
+    header = repr(
+        {
+            "descr": depth.dtype.str,
+            "fortran_order": False,
+            "shape": depth.shape,
+        }
+    ).encode("utf-8")
+    header_length = len(header) + 1
+    padding = 64 - ((8 + 4 + header_length) % 64)
+    (depth_dir / "sample.npy").write_bytes(
+        b"\x93NUMPY\x03\x00"
+        + struct.pack("<I", header_length + padding)
+        + header
+        + b" " * padding
+        + b"\n"
+        + depth.tobytes()
+    )
+
+    organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("version", "length_format"),
+    [((1, 0), "<H"), ((2, 0), "<I")],
+)
+def test_staged_nyu_depth_validation_accepts_legacy_long_shape(
+    tmp_path: Path, version: tuple[int, int], length_format: str
+) -> None:
+    """Preserve Python 2 long-integer shape syntax in NPY 1.0 and 2.0 headers."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    Image.new("RGB", (1, 1)).save(image_dir / "sample.png")
+    depth = np.ones((1, 1), dtype=np.float32)
+    header = ("{'descr': '<f4', 'fortran_order': False, 'shape': (1L, 1L), }").encode(
+        "latin1"
+    )
+    header_length = len(header) + 1
+    length_size = struct.calcsize(length_format)
+    padding = 64 - ((8 + length_size + header_length) % 64)
+    (depth_dir / "sample.npy").write_bytes(
+        np.lib.format.magic(*version)
+        + struct.pack(length_format, header_length + padding)
+        + header
+        + b" " * padding
+        + b"\n"
+        + depth.tobytes()
+    )
+
+    organizer._validate_staged_nyu_depth(str(tmp_path))
+
+
+def test_staged_nyu_depth_validation_enforces_aggregate_pixel_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Bound total work across individually valid NYU samples."""
+
+    image_dir = tmp_path / "images"
+    depth_dir = tmp_path / "depth"
+    image_dir.mkdir()
+    depth_dir.mkdir()
+    for sample_id in ("first", "second"):
+        Image.new("RGB", (2, 2)).save(image_dir / f"{sample_id}.png")
+        np.save(depth_dir / f"{sample_id}.npy", np.ones((2, 2), dtype=np.float32))
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_SAMPLE_PIXELS", 4)
+    monkeypatch.setattr(organizer, "NYU_DEPTH_MAX_VALIDATION_PIXELS", 7)
+
+    with pytest.raises(ValueError, match="validation pixel limit"):
         organizer._validate_staged_nyu_depth(str(tmp_path))
 
 

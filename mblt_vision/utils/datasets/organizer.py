@@ -4,16 +4,20 @@ Utilities for organizing datasets.
 
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import cv2
 import hashlib
+import io
 import json
 import math
 import os
 import re
 import shutil
 import stat
+import struct
 import tarfile
+import tokenize
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
@@ -66,6 +70,10 @@ SAV_ARCHIVE = SAV_DOWNLOAD_CONFIG["archive"]
 NYU_DEPTH_URL = (
     "https://github.com/ultralytics/assets/releases/download/v0.0.0/nyu-depth.zip"
 )
+NYU_DEPTH_MAX_SAMPLE_PIXELS = 1_000_000
+NYU_DEPTH_MAX_VALIDATION_PIXELS = 250_000_000
+NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES = 64 * 1024 * 1024
+NYU_DEPTH_MAX_NPY_HEADER_BYTES = 10_000
 ADE20K_URL = ADE20K_DOWNLOAD_CONFIG["url"]
 CITYSCAPES_IMAGE_SUFFIX = "_leftImg8bit.png"
 CITYSCAPES_ANNOTATION_SUFFIX = "_gtFine_labelIds.png"
@@ -1292,15 +1300,159 @@ def construct_nyu_depth(dataset_dir: str, output_dir: str) -> None:
     )
 
 
+def _filter_legacy_npy_header(header: str) -> str:
+    """Remove Python 2 long-integer suffixes accepted by NPY 1.0 and 2.0."""
+
+    tokens = []
+    last_token_was_number = False
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(header).readline):
+            token_type, token_string = token[:2]
+            if (
+                last_token_was_number
+                and token_type == tokenize.NAME
+                and token_string == "L"
+            ):
+                last_token_was_number = False
+                continue
+            tokens.append(token)
+            last_token_was_number = token_type == tokenize.NUMBER
+    except (IndentationError, tokenize.TokenError) as exc:
+        raise ValueError("unable to tokenize legacy NPY array header") from exc
+    return tokenize.untokenize(tokens)
+
+
+def _read_bounded_npy_header(
+    depth_path: Path,
+) -> tuple[tuple[int, ...], bool, np.dtype]:
+    """Read an NPY header only after bounding its declared byte length."""
+
+    with depth_path.open("rb") as depth_file:
+        version = np.lib.format.read_magic(depth_file)
+        length_format = {
+            (1, 0): "<H",
+            (2, 0): "<I",
+            (3, 0): "<I",
+        }.get(version)
+        if length_format is None:
+            raise ValueError(f"unsupported NPY format version {version}")
+        length_size = struct.calcsize(length_format)
+        length_bytes = depth_file.read(length_size)
+        if len(length_bytes) != length_size:
+            raise EOFError("EOF while reading NPY array header length")
+        header_length = struct.unpack(length_format, length_bytes)[0]
+        if header_length > NYU_DEPTH_MAX_NPY_HEADER_BYTES:
+            raise ValueError(
+                f"NPY header length {header_length} exceeds the "
+                f"{NYU_DEPTH_MAX_NPY_HEADER_BYTES}-byte limit"
+            )
+        remaining_bytes = depth_path.stat().st_size - depth_file.tell()
+        if header_length > remaining_bytes:
+            raise ValueError(
+                f"NPY header length {header_length} exceeds the remaining file size"
+            )
+        header_bytes = depth_file.read(header_length)
+        if len(header_bytes) != header_length:
+            raise EOFError("EOF while reading NPY array header")
+        encoding = "utf-8" if version == (3, 0) else "latin1"
+        try:
+            header_text = header_bytes.decode(encoding)
+            if version <= (2, 0):
+                header_text = _filter_legacy_npy_header(header_text)
+            header = ast.literal_eval(header_text)
+        except (
+            MemoryError,
+            RecursionError,
+            SyntaxError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as exc:
+            raise ValueError("unable to parse NPY array header") from exc
+        if not isinstance(header, dict) or set(header) != {
+            "descr",
+            "fortran_order",
+            "shape",
+        }:
+            raise ValueError("NPY header must contain descr, fortran_order, and shape")
+        shape = header["shape"]
+        fortran_order = header["fortran_order"]
+        if (
+            not isinstance(shape, tuple)
+            or any(
+                not isinstance(axis, int) or isinstance(axis, bool) or axis < 0
+                for axis in shape
+            )
+            or not isinstance(fortran_order, bool)
+        ):
+            raise ValueError("NPY header contains an invalid shape or fortran_order")
+        try:
+            dtype = np.dtype(header["descr"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("NPY header contains an invalid dtype descriptor") from exc
+        return shape, fortran_order, dtype
+
+
 def _validate_staged_nyu_depth(staging_dir: str) -> None:
     """Decode staged NYU pairs before they can replace an existing cache."""
 
     image_dir = Path(staging_dir) / "images"
     depth_dir = Path(staging_dir) / "depth"
+    validation_pixels = 0
     for image_path in sorted(image_dir.iterdir()):
         if image_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
             continue
         depth_path = depth_dir / f"{image_path.stem}.npy"
+        try:
+            encoded_image_bytes = image_path.stat().st_size
+            if encoded_image_bytes > NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES:
+                raise ValueError(
+                    f"encoded image size {encoded_image_bytes} exceeds the "
+                    f"{NYU_DEPTH_MAX_ENCODED_IMAGE_BYTES}-byte limit"
+                )
+            with Image.open(image_path) as encoded_image:
+                image_shape = (encoded_image.height, encoded_image.width)
+        except (OSError, SyntaxError, ValueError) as exc:
+            raise ValueError(
+                f"Staged NYU Depth image is unreadable: {image_path}."
+            ) from exc
+        image_pixels = math.prod(image_shape)
+        if image_pixels > NYU_DEPTH_MAX_SAMPLE_PIXELS:
+            raise ValueError(
+                "Staged NYU Depth image exceeds the per-sample pixel limit of "
+                f"{NYU_DEPTH_MAX_SAMPLE_PIXELS}: {image_path} has shape {image_shape}."
+            )
+        validation_pixels += image_pixels
+        if validation_pixels > NYU_DEPTH_MAX_VALIDATION_PIXELS:
+            raise ValueError(
+                "Staged NYU Depth images exceed the validation pixel limit of "
+                f"{NYU_DEPTH_MAX_VALIDATION_PIXELS}."
+            )
+        try:
+            depth_shape, _, depth_dtype = _read_bounded_npy_header(depth_path)
+        except (EOFError, OSError, ValueError) as exc:
+            raise ValueError(
+                f"Unable to read staged NYU Depth target header {depth_path}: {exc}."
+            ) from exc
+        depth_pixels = math.prod(depth_shape)
+        if len(depth_shape) != 2 or depth_pixels > NYU_DEPTH_MAX_SAMPLE_PIXELS:
+            raise ValueError(
+                "Staged NYU Depth target must be a two-dimensional array within "
+                f"the {NYU_DEPTH_MAX_SAMPLE_PIXELS}-element limit, got "
+                f"{depth_shape}: {depth_path}."
+            )
+        if depth_shape != image_shape:
+            raise ValueError(
+                "Staged NYU Depth image and target shapes must match: "
+                f"image {image_shape}, depth {depth_shape}: {image_path}."
+            )
+        if not np.issubdtype(depth_dtype, np.number) or np.issubdtype(
+            depth_dtype, np.complexfloating
+        ):
+            raise ValueError(
+                "Staged NYU Depth target must use a real numeric dtype, "
+                f"got {depth_dtype}: {depth_path}."
+            )
         image = cv2.imread(str(image_path))
         if image is None:
             raise ValueError(f"Staged NYU Depth image is unreadable: {image_path}.")
@@ -1310,13 +1462,6 @@ def _validate_staged_nyu_depth(staging_dir: str) -> None:
             raise ValueError(
                 f"Unable to load staged NYU Depth target {depth_path}: {exc}."
             ) from exc
-        if not np.issubdtype(raw_depth.dtype, np.number) or np.issubdtype(
-            raw_depth.dtype, np.complexfloating
-        ):
-            raise ValueError(
-                "Staged NYU Depth target must use a real numeric dtype, "
-                f"got {raw_depth.dtype}: {depth_path}."
-            )
         depth = np.asarray(raw_depth, dtype=np.float32)
         if depth.ndim != 2 or depth.shape != image.shape[:2]:
             raise ValueError(
