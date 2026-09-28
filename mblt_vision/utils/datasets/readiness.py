@@ -25,6 +25,10 @@ IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
 IMAGENET_IMAGES_PER_CLASS = 50
 COCO_VALIDATION_SAMPLE_COUNT = 5000
+# Bound annotation-controlled geometry before passing it to native COCO mask
+# routines.  This comfortably exceeds the largest official COCO image while
+# preventing hostile metadata from requesting multi-gigabyte raster buffers.
+COCO_MAX_IMAGE_PIXELS = 100_000_000
 DOTAV1_VALIDATION_SAMPLE_COUNT = 458
 WIDERFACE_EVENT_COUNT = 61
 WIDERFACE_VALIDATION_SAMPLE_COUNT = 3226
@@ -146,12 +150,14 @@ def _polygon_union_has_rasterized_foreground(
     if image_shape is None:
         return False
     height, width = image_shape
+    if height * width > COCO_MAX_IMAGE_PIXELS:
+        return False
     try:
         encoded = coco_mask.frPyObjects(polygons, height, width)
-        decoded = np.asarray(coco_mask.decode(encoded))
-    except (RuntimeError, TypeError, ValueError):
+        area = np.asarray(coco_mask.area(encoded))
+    except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
         return False
-    return bool(np.any(decoded))
+    return bool(np.any(area > 0))
 
 
 def _canonicalize_quadrilateral(
@@ -409,6 +415,8 @@ def _coco_task_annotations_valid(
         if image_shape is None:
             return False
         image_height, image_width = image_shape
+        if image_height * image_width > COCO_MAX_IMAGE_PIXELS:
+            return False
         bbox = record.get("bbox")
         if (
             not isinstance(bbox, list)

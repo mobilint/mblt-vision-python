@@ -421,6 +421,22 @@ def test_coco_readiness_rejects_polygon_union_without_rasterized_foreground(
     assert not readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
 
 
+def test_coco_polygon_validation_does_not_decode_dense_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Determine polygon foreground from encoded area without dense allocation."""
+
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "decode",
+        lambda *_: pytest.fail("polygon validation must not decode a dense mask"),
+    )
+
+    assert readiness._polygon_union_has_rasterized_foreground(
+        [[0, 0, 2, 0, 2, 2, 0, 2]], (10, 10)
+    )
+
+
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
