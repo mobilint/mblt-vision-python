@@ -786,7 +786,9 @@ def resolve_quantization_values(
         _validate_ratio("topk_ratio", topk_ratio) if topk_ratio is not None else None
     )
     hosted_config: dict[str, Any] | None = None
-    if resolved_percentile is None or resolved_topk is None:
+    if (resolved_percentile is None or resolved_topk is None) and not file_cfg.get(
+        "local_artifact_only"
+    ):
         repo_id = file_cfg.get("repo_id")
         revision = file_cfg.get("revision", "main")
         if isinstance(repo_id, str) and repo_id:

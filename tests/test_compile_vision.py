@@ -661,6 +661,8 @@ def _run_fake_compile(
     save_path: Path | None = None,
     fail: bool = False,
     calls: dict[str, Any] | None = None,
+    file_cfg_overrides: dict[str, Any] | None = None,
+    use_real_quantization_resolver: bool = False,
 ) -> tuple[dict[str, Any], Path]:
     """Run compilation with fake engine and qbcompiler dependencies.
 
@@ -673,6 +675,8 @@ def _run_fake_compile(
         dataset: Optional fake model dataset taxonomy.
         fail: Whether the fake compiler should fail.
         calls: Optional mapping populated even when compilation fails.
+        file_cfg_overrides: Optional changes to the fake model file configuration.
+        use_real_quantization_resolver: Whether to exercise hosted/fallback resolution.
 
     Returns:
         Captured calls and resolved hosted ONNX path.
@@ -734,23 +738,29 @@ def _run_fake_compile(
     monkeypatch.setattr(
         compile_module, "_load_qbcompiler", lambda: (_compile, _CalibrationConfig)
     )
+    file_cfg = {
+        "repo_id": "owner/model",
+        "revision": "main",
+        "filename": "hosted-model.mxq",
+        "onnx_path": str(hosted_onnx),
+    }
+    if file_cfg_overrides is not None:
+        file_cfg.update(file_cfg_overrides)
     monkeypatch.setattr(
         compile_module,
         "resolve_model_config",
         lambda model_cls, model_type: {
-            "file_cfg": {
-                "repo_id": "owner/model",
-                "revision": "main",
-                "filename": "hosted-model.mxq",
-                "onnx_path": str(hosted_onnx),
-            },
+            "file_cfg": file_cfg.copy(),
             "pre_cfg": {"LetterBox": {"img_size": [2, 2]}},
             "post_cfg": {"task": task, "dataset": dataset},
         },
     )
-    monkeypatch.setattr(
-        compile_module, "resolve_quantization_values", lambda *args: (0.99, 0.02)
-    )
+    if not use_real_quantization_resolver:
+        monkeypatch.setattr(
+            compile_module,
+            "resolve_quantization_values",
+            lambda *args: (0.99, 0.02),
+        )
     subset_path: Path | None = None
     calib_data_path: Path | None = None
     original_data_path: Path | None = dataset_path
@@ -979,6 +989,37 @@ def test_compile_resolver_rejects_unverified_remote_artifact(
             },
             tmp_path / "missing.onnx",
         )
+
+
+def test_compile_local_only_model_never_downloads_quantization_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep every compile-stage Hub request disabled for local-only models."""
+
+    local_onnx = tmp_path / "trusted.onnx"
+    local_onnx.write_bytes(b"onnx")
+    monkeypatch.setattr(
+        compile_module,
+        "hf_hub_download",
+        lambda **_: pytest.fail("local-only compilation must not access the Hub"),
+    )
+
+    with pytest.warns(UserWarning, match="Quantization"):
+        calls, _ = _run_fake_compile(
+            monkeypatch,
+            tmp_path,
+            task="object_detection",
+            model_path=local_onnx,
+            entry_level="calibration",
+            file_cfg_overrides={"local_artifact_only": True},
+            use_real_quantization_resolver=True,
+        )
+
+    assert calls["compile_kwargs"]["model"] == str(local_onnx)
+    assert calls["calibration_kwargs"]["max_percentile"] == {
+        "percentile": compile_module.DEFAULT_PERCENTILE,
+        "topk_ratio": compile_module.DEFAULT_TOPK_RATIO,
+    }
 
 
 def test_compile_routes_semantic_calibration_by_model_dataset(
