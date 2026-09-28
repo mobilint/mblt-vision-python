@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 from time import time
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 import torch
@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from ..datasets import CustomImageFolder, get_imagenet_loader
 from ..datasets.readiness import IMAGENET_SYNSET_ORDER, IMAGENET_SYNSETS
+from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -77,18 +78,23 @@ def eval_imagenet_metrics(
         )
     dataloader = get_imagenet_loader(dataset, batch_size, model.preprocess)
     total_iter = math.ceil(num_data / batch_size)
-    pbar = tqdm(dataloader, total=total_iter, desc="Evaluating ImageNet")
     inference_time = 0.0
     cum_num_data = 0
     cum_top1_correct = 0
     cum_top5_correct = 0
     top1_acc = 0.0
     top5_acc = 0.0
-    for input_npu, label in pbar:
-        cum_num_data += len(label)
+
+    def infer(batch: Any) -> Any:
+        nonlocal inference_time, cum_num_data
+        cum_num_data += len(batch[1])
         tic = time()
-        out_npu = model(input_npu)
+        out_npu = model(batch[0])
         inference_time += time() - tic
+        return out_npu
+
+    def decode(batch: Any, out_npu: Any) -> tuple[int, int, int]:
+        label = batch[1]
         result = model.postprocess(out_npu)
         output = result.output
         label_array = np.asarray(label)
@@ -116,12 +122,24 @@ def eval_imagenet_metrics(
             top5_prediction = output.topk(top_k, dim=-1).indices.cpu().numpy()
         else:
             top5_prediction = np.argpartition(output, -top_k, axis=-1)[:, -top_k:]
-        cum_top1_correct += (prediction == label_array).sum().item()
-        cum_top5_correct += (
+        top1_correct = (prediction == label_array).sum().item()
+        top5_correct = (
             np.any(top5_prediction == label_array[:, np.newaxis], axis=-1).sum().item()
         )
-        top1_acc = cum_top1_correct / cum_num_data
-        top5_acc = cum_top5_correct / cum_num_data
+        return len(label_array), top1_correct, top5_correct
+
+    scored_num_data = 0
+    pbar = tqdm(
+        map_batched_inference(dataloader, infer, decode),
+        total=total_iter,
+        desc="Evaluating ImageNet",
+    )
+    for batch_len, top1_correct, top5_correct in pbar:
+        scored_num_data += batch_len
+        cum_top1_correct += top1_correct
+        cum_top5_correct += top5_correct
+        top1_acc = cum_top1_correct / scored_num_data
+        top5_acc = cum_top5_correct / scored_num_data
         pbar.set_postfix_str(
             f"Top 1 Acc.: {100 * top1_acc:.3f}%, Top 5 Acc.: {100 * top5_acc:.3f}%, "
             f"NPU FPS: {cum_num_data / inference_time:.3f}"

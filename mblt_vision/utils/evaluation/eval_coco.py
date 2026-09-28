@@ -15,6 +15,7 @@ from ..._tasks import normalize_vision_task
 from ...datasets import get_dataset_category_ids
 from ..datasets import CustomCOCODataset, get_coco_loader
 from ..datasets.readiness import _coco_task_annotations_valid
+from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -378,31 +379,38 @@ def eval_coco_metrics(
     results = []
     num_data = len(dataset)
     total_iter = math.ceil(num_data / batch_size)
-    pbar = tqdm(dataloader, total=total_iter, desc="Evaluating COCO")
-
     inference_time = 0.0
     cum_num_data = 0
 
-    for input_npu, org_shape, ratio_pad, idx in pbar:
-        cum_num_data += len(idx)
+    def infer(batch: Any) -> Any:
+        nonlocal inference_time, cum_num_data
+        cum_num_data += len(batch[3])
         tic = time()
-        out_npu = model(input_npu)
+        out_npu = model(batch[0])
         inference_time += time() - tic
+        return out_npu
 
+    def decode(batch: Any, out_npu: Any) -> list[dict[str, Any]]:
+        input_npu, org_shape, ratio_pad, idx = batch
         nms_outs = model.postprocess(out_npu, multi_label=True)
-        results.extend(
-            format_coco_results(
-                task,
-                nms_outs,
-                input_npu.shape[1:-1],
-                org_shape,
-                ratio_pad,
-                idx,
-                dataset.ids,
-                model.postprocessor,
-            )
+        return format_coco_results(
+            task,
+            nms_outs,
+            input_npu.shape[1:-1],
+            org_shape,
+            ratio_pad,
+            idx,
+            dataset.ids,
+            model.postprocessor,
         )
 
+    pbar = tqdm(
+        map_batched_inference(dataloader, infer, decode),
+        total=total_iter,
+        desc="Evaluating COCO",
+    )
+    for batch_results in pbar:
+        results.extend(batch_results)
         pbar.set_postfix_str(f"NPU FPS: {cum_num_data / inference_time:.3f}")
 
     pbar.close()

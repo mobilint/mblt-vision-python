@@ -380,6 +380,22 @@ def test_coco_readiness_decodes_and_validates_rle_segmentations(
     )
 
 
+def test_coco_rle_validation_does_not_materialize_declared_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate large RLE metadata without allocating its dense mask."""
+
+    def fail_decode(*args: object, **kwargs: object) -> None:
+        raise AssertionError("RLE validation must not decode a dense mask")
+
+    monkeypatch.setattr(readiness.coco_mask, "decode", fail_decode)
+
+    assert readiness._valid_coco_rle(
+        {"size": [32768, 32768], "counts": [1, 32768 * 32768 - 1]},
+        (32768, 32768),
+    )
+
+
 def test_coco_readiness_rejects_polygon_union_without_rasterized_foreground(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -419,6 +435,22 @@ def test_coco_readiness_rejects_polygon_union_without_rasterized_foreground(
     )
 
     assert not readiness.dataset_ready(tmp_path, "instance_segmentation", "coco")
+
+
+def test_coco_polygon_validation_does_not_decode_dense_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Determine polygon foreground from encoded area without dense allocation."""
+
+    monkeypatch.setattr(
+        readiness.coco_mask,
+        "decode",
+        lambda *_: pytest.fail("polygon validation must not decode a dense mask"),
+    )
+
+    assert readiness._polygon_union_has_rasterized_foreground(
+        [[0, 0, 2, 0, 2, 2, 0, 2]], (10, 10)
+    )
 
 
 def test_coco_readiness_rejects_corrupt_or_mismatched_images(

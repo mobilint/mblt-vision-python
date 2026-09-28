@@ -31,6 +31,7 @@ from ..datasets.readiness import (
     _polygon_has_positive_image_overlap,
 )
 from ..letterbox import RatioPad, resolve_ratio_pad
+from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -848,15 +849,19 @@ def eval_dota(
     results = []
     num_data = len(dataset)
     total_iter = math.ceil(num_data / batch_size)
-    pbar = tqdm(dataloader, total=total_iter, desc="Evaluating DOTAv1")
     inference_time = 0.0
     cum_num_data = 0
 
-    for input_npu, org_shape, ratio_pad, image_ids in pbar:
-        cum_num_data += len(image_ids)
+    def infer(batch: Any) -> Any:
+        nonlocal inference_time, cum_num_data
+        cum_num_data += len(batch[3])
         tic = time()
-        out_npu = model(input_npu)
+        out_npu = model(batch[0])
         inference_time += time() - tic
+        return out_npu
+
+    def decode(batch: Any, out_npu: Any) -> tuple[list[Any], list[Any]]:
+        input_npu, org_shape, ratio_pad, image_ids = batch
         nms_outs = model.postprocess(out_npu)
         input_shape = tuple(int(value) for value in input_npu.shape[1:-1])
         nms_outputs = _nms_output_list(nms_outs.output)
@@ -867,6 +872,7 @@ def eval_dota(
             ratio_pad,
             image_ids,
         )
+        image_stats = []
         for nms_out, image_id, image_shape, image_ratio_pad in zip(
             nms_outputs,
             image_ids,
@@ -880,21 +886,32 @@ def eval_dota(
                 (int(image_shape[0]), int(image_shape[1])),
                 image_ratio_pad,
             )
-            _append_stats(
-                stats,
-                _process_image_stats(_nms_output_to_predictions(nms_out), target, iouv),
+            image_stats.append(
+                _process_image_stats(_nms_output_to_predictions(nms_out), target, iouv)
             )
-        if save_dir is not None:
-            results.extend(
-                format_dota_results(
-                    nms_outs,
-                    input_shape,
-                    org_shape,
-                    ratio_pad,
-                    image_ids,
-                    model.postprocessor,
-                )
+        batch_results = (
+            format_dota_results(
+                nms_outs,
+                input_shape,
+                org_shape,
+                ratio_pad,
+                image_ids,
+                model.postprocessor,
             )
+            if save_dir is not None
+            else []
+        )
+        return image_stats, batch_results
+
+    pbar = tqdm(
+        map_batched_inference(dataloader, infer, decode),
+        total=total_iter,
+        desc="Evaluating DOTAv1",
+    )
+    for image_stats, batch_results in pbar:
+        for stat in image_stats:
+            _append_stats(stats, stat)
+        results.extend(batch_results)
         pbar.set_postfix_str(f"NPU FPS: {cum_num_data / inference_time:.3f}")
 
     pbar.close()

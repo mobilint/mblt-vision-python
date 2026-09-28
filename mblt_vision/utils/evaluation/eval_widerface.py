@@ -19,6 +19,7 @@ from ..datasets.readiness import (
     _widerface_image_shapes,
     _widerface_difficulty_metadata_ready,
 )
+from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -157,19 +158,23 @@ def eval_widerface(
     predictions = _initialize_predictions(dataset)
     num_data = len(dataset)
     total_iter = math.ceil(num_data / batch_size)
-    pbar = tqdm(dataloader, total=total_iter, desc="Evaluating WiderFace")
     inference_time = 0.0
     cum_num_data = 0
+    postprocessor = cast(YOLODetectionPostBase, model.postprocessor)
 
-    for input_npu, org_shape, ratio_pad, target_classes, fnames in pbar:
-        cum_num_data += len(fnames)
+    def infer(batch: Any) -> Any:
+        nonlocal inference_time, cum_num_data
+        cum_num_data += len(batch[4])
         tic = time()
-        out_npu = model(input_npu)
+        out_npu = model(batch[0])
         inference_time += time() - tic
+        return out_npu
+
+    def decode(batch: Any, out_npu: Any) -> list[tuple[str, str, np.ndarray]]:
+        input_npu, org_shape, ratio_pad, target_classes, fnames = batch
         nms_outs = model.postprocess(out_npu)
         input_shape = (int(input_npu.shape[1]), int(input_npu.shape[2]))
         img0_shapes = [(int(shape[0]), int(shape[1])) for shape in org_shape.tolist()]
-        postprocessor = cast(YOLODetectionPostBase, model.postprocessor)
         _, boxes_list, scores_list = postprocessor.nmsout2eval(
             nms_outs.output,
             input_shape,
@@ -191,13 +196,25 @@ def eval_widerface(
             )
             raise ValueError(f"WiderFace evaluation batch length mismatch: {details}.")
 
-        for event_name, file_name, boxes, scores in zip(
-            target_classes, fnames, boxes_list, scores_list, strict=True
-        ):
-            predictions[event_name][os.path.splitext(file_name)[0]] = (
-                _boxes_scores_to_prediction(boxes, scores)
+        return [
+            (
+                event_name,
+                os.path.splitext(file_name)[0],
+                _boxes_scores_to_prediction(boxes, scores),
             )
+            for event_name, file_name, boxes, scores in zip(
+                target_classes, fnames, boxes_list, scores_list, strict=True
+            )
+        ]
 
+    pbar = tqdm(
+        map_batched_inference(dataloader, infer, decode),
+        total=total_iter,
+        desc="Evaluating WiderFace",
+    )
+    for batch_predictions in pbar:
+        for event_name, image_name, prediction in batch_predictions:
+            predictions[event_name][image_name] = prediction
         pbar.set_postfix_str(f"NPU FPS: {cum_num_data / inference_time:.3f}")
 
     pbar.close()
