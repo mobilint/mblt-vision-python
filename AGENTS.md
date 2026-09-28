@@ -93,6 +93,25 @@ The current ownership boundary is deliberate:
   non-finite, fractional, or out-of-range baked semantic IDs before casting.
 - Keep hardware-specific runtime access behind mblt-npu-python. Optional ONNX Runtime imports
   must remain lazy and report the appropriate package extra when unavailable.
+- YOLOX and DAMO-YOLO are object-detection families with non-Ultralytics heads, selected by
+  `post_cfg.head: yolox` / `damoyolo` (`build_postprocess` rejects any other value, and any
+  `head` on another task). Both reuse the anchorless candidate filter, NMS and inverse
+  letterbox; only the decode differs. YOLOX takes one `(batch, anchors, 5 + nc)` tensor
+  (upstream `decode_in_inference = False`): `xy = (raw + grid) * stride`,
+  `wh = exp(raw) * stride`, score = objectness x class. DAMO-YOLO takes six per-level maps --
+  sigmoid class maps and `4 * (reg_max + 1)`-channel distributions, so `reg_max: 16` is 17
+  bins -- decoded as the softmax expectation times stride. Neither adds Ultralytics' half-cell
+  offset. A 640 input's stride-8 DAMO class map is 80x80x80, so the head set's layout (NCHW
+  or NHWC) is resolved jointly from the unambiguous distribution maps and a mixed set fails.
+- Their `pre_cfg` follows mblt-model-ops' `models/<Model>/pipeline.yaml` on branch
+  `jm/temp` (commit `0368367e8`): YOLOX is BGR (`Reader.color_mode: BGR`), top-left
+  letterboxed with 114; DAMO-YOLO is RGB, top-left with zeros (the December 2022 checkpoints'
+  geometry, not upstream HEAD's stretch). Neither declares `Normalize`: both take the
+  unscaled 0-255 image, and the ONNX path casts the byte tensor to the graph's float dtype.
+  `LetterBox.center: false` anchors top-left; every place that derives geometry from shapes
+  alone (`PostBase.ratio_pads_for`, `Results` plotting) must use the model's own
+  `letterbox_center(pre_cfg)` rather than the centered default. No Hub repository exists
+  yet, so their YAMLs keep `file_cfg.local_artifact_only: true`.
 - For WiderFace evaluation, rank results by Hard-set AP and retain Medium-set
   then Easy-set AP as secondary metrics. Do not compute a mean across splits.
 - The YOLOv5/YOLOv7 face repositories do not yet publish project-pinned immutable revisions

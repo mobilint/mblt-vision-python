@@ -154,6 +154,51 @@ def xyxy2xywh(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     raise ValueError("x should be np.ndarray or torch.Tensor")
 
 
+def make_grid_points(
+    imh: int,
+    imw: int,
+    strides: Sequence[int],
+    device: torch.device | str = "cpu",
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-cell grid origins and strides for a multi-level dense head.
+
+    Cells are ordered level by level, then row-major, the order a flattened
+    ``(B, C, H, W)`` head and YOLOX's concatenated output both use. The points
+    are the cell's top-left ``(x, y)`` in grid units, without the half-cell
+    offset Ultralytics anchors add: YOLOX and DAMO-YOLO both decode from them.
+
+    Args:
+        imh: Network input height.
+        imw: Network input width.
+        strides: Level strides, finest first.
+        device: Device of the returned tensors.
+
+    Returns:
+        ``(points, stride)`` shaped ``(anchors, 2)`` and ``(anchors, 1)``.
+
+    Raises:
+        ValueError: If a stride does not divide the input size.
+    """
+
+    points, stride_rows = [], []
+    for stride in strides:
+        if imh % stride or imw % stride:
+            raise ValueError(
+                f"Input size {imh}x{imw} is not divisible by head stride {stride}."
+            )
+        ny, nx = imh // stride, imw // stride
+        yv, xv = torch.meshgrid(
+            torch.arange(ny, dtype=torch.float32, device=device),
+            torch.arange(nx, dtype=torch.float32, device=device),
+            indexing="ij",
+        )
+        points.append(torch.stack((xv, yv), -1).reshape(-1, 2))
+        stride_rows.append(
+            torch.full((ny * nx, 1), float(stride), dtype=torch.float32, device=device)
+        )
+    return torch.cat(points), torch.cat(stride_rows)
+
+
 def dist2bbox(
     distance: torch.Tensor,
     anchor_points: torch.Tensor,
@@ -1645,7 +1690,12 @@ class YOLOFaceDetectionMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list).
         """
-        return nmsout2eval_face(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval_face(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+        )
 
 
 class YOLOSegPostMixin:
@@ -1668,7 +1718,12 @@ class YOLOSegPostMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
-        return nmsout2eval_seg(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval_seg(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+        )
 
 
 class YOLOPosePostMixin:
@@ -1691,7 +1746,12 @@ class YOLOPosePostMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
-        return nmsout2eval_pose(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval_pose(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+        )
 
 
 class YOLOOBBPostMixin:
@@ -1721,6 +1781,6 @@ class YOLOOBBPostMixin:
             nms_out,
             img1_shape,
             img0_shape,
-            ratio_pads=ratio_pad,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
             include_xywhr=include_xywhr,
         )

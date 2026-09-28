@@ -110,6 +110,12 @@ description: >-
   Keep each `decode` callback pure, accumulate only in the consuming loop, and keep
   preprocessing thread-safe (read `ratio_pad` from `LetterBox.with_ratio_pad`, never from
   the shared instance attribute).
+- YOLOX and DAMO-YOLO dispatch on `post_cfg.head` (`yolox` / `damoyolo`) and reuse the
+  anchorless filter and NMS; only their decode is new (no half-cell offset; DAMO `reg_max: 16`
+  is 17 bins; DAMO head layout resolved jointly). Both letterbox top-left
+  (`LetterBox.center: false`, padding 114 / 0), take unscaled input (no Normalize), and YOLOX
+  reads BGR (`Reader.color_mode`). Shape-only geometry must follow `letterbox_center(pre_cfg)`.
+  Configs follow mblt-model-ops `jm/temp` `pipeline.yaml`; YAMLs are `local_artifact_only`.
 - Rank WiderFace evaluation by Hard-set AP. Expose Medium-set then Easy-set AP
   as secondary metrics, and do not compute mean AP across difficulty splits.
 - Treat face_detection as a single-class WiderFace task. Each YOLO head family gets a thin

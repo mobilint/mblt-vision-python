@@ -63,7 +63,7 @@ def test_instance_segmentation_plot_supports_nonzero_coco_labels(
     cv2.imwrite(str(source_path), image)
 
     monkeypatch.setattr(results_module, "scale_boxes", lambda *args, **kwargs: args[1])
-    monkeypatch.setattr(results_module, "scale_masks", lambda mask, img0_shape: mask)
+    monkeypatch.setattr(results_module, "scale_masks", lambda mask, img0_shape, **kwargs: mask)
     monkeypatch.setattr(results_module, "crop_mask", lambda mask, boxes: mask)
 
     box_cls = torch.tensor([[4.0, 6.0, 20.0, 24.0, 0.9, 45.0]], dtype=torch.float32)

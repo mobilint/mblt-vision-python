@@ -8,10 +8,15 @@ import numpy as np
 import torch
 
 from ..._tasks import normalize_vision_task
-from ..letterbox import RatioPad
+from ..letterbox import RatioPad, letterbox_center, resolve_ratio_pad
 from ..preprocess._validation import normalize_image_size
 from ..types import ListTensorLike, TensorLike
-from .common import nmsout2eval, process_mask_upsample
+from .common import (
+    nmsout2eval,
+    normalize_image_shapes,
+    normalize_ratio_pads,
+    process_mask_upsample,
+)
 
 
 class PostBase(ABC):
@@ -95,6 +100,7 @@ class YOLODetectionPostBase(PostBase):
         self.imh, self.imw = normalize_image_size(
             img_size, name="pre_cfg.LetterBox.img_size"
         )
+        self.letterbox_center = letterbox_center(pre_cfg)
         task = post_cfg.get("task")
         if task is None:
             raise ValueError("task should be provided in post_cfg")
@@ -290,7 +296,43 @@ class YOLODetectionPostBase(PostBase):
                 - Segmentation/Pose: (labels_list, boxes_list, scores_list, extra_list)
         """
 
-        return nmsout2eval(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+        )
+
+    def ratio_pads_for(
+        self,
+        img1_shape: tuple[int, int],
+        img0_shape: tuple[int, int] | list[tuple[int, int]],
+        ratio_pad: RatioPad | list[RatioPad | None] | None,
+    ) -> RatioPad | list[RatioPad | None] | None:
+        """Fill letterbox metadata the caller did not record with this model's anchoring.
+
+        The shared inverse helpers derive missing metadata as a centered letterbox.
+        That is right for Ultralytics models, so their metadata passes through
+        untouched; a top-left model (``pre_cfg.LetterBox.center: false``) gets its
+        own zero padding instead of a shift by half the border.
+
+        Args:
+            img1_shape: Letterboxed input shape.
+            img0_shape: Original image shape(s).
+            ratio_pad: Shared or per-image metadata, possibly ``None``.
+
+        Returns:
+            Metadata the shared helpers can use as-is.
+        """
+
+        if self.letterbox_center:
+            return ratio_pad
+        shapes = normalize_image_shapes(img0_shape)
+        pads = normalize_ratio_pads(ratio_pad, len(shapes))
+        return [
+            resolve_ratio_pad(img1_shape, shape, pad, center=False)
+            for pad, shape in zip(pads, shapes)
+        ]
 
     def extract_final_outputs(
         self,

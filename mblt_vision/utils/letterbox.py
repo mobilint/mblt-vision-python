@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 RatioPad: TypeAlias = tuple[tuple[float, float], tuple[float, float]]
 
@@ -23,12 +24,16 @@ class LetterBoxGeometry:
         cls,
         input_shape: tuple[int, int],
         original_shape: tuple[int, int],
+        center: bool = True,
     ) -> LetterBoxGeometry:
-        """Calculate YOLO-style centered letterbox geometry.
+        """Calculate letterbox geometry, centered by default as Ultralytics does.
 
         Args:
             input_shape: Target shape as ``(height, width)``.
             original_shape: Source shape as ``(height, width)``.
+            center: Split the padding evenly around the resized image. ``False``
+                anchors the image at the top-left corner and pads only the
+                bottom and right, as YOLOX and DAMO-YOLO do.
 
         Returns:
             Calculated resize ratio, resized shape, and top-left padding.
@@ -39,8 +44,11 @@ class LetterBoxGeometry:
         ratio = min(input_height / original_height, input_width / original_width)
         resized_height = int(round(original_height * ratio))
         resized_width = int(round(original_width * ratio))
-        left = int(round((input_width - resized_width) / 2 - 0.1))
-        top = int(round((input_height - resized_height) / 2 - 0.1))
+        if center:
+            left = int(round((input_width - resized_width) / 2 - 0.1))
+            top = int(round((input_height - resized_height) / 2 - 0.1))
+        else:
+            left = top = 0
         return cls(
             input_shape=input_shape,
             original_shape=original_shape,
@@ -101,6 +109,7 @@ def resolve_ratio_pad(
     input_shape: tuple[int, int],
     original_shape: tuple[int, int],
     ratio_pad: RatioPad | None = None,
+    center: bool = True,
 ) -> RatioPad:
     """Return supplied letterbox metadata or derive it from image shapes.
 
@@ -108,6 +117,8 @@ def resolve_ratio_pad(
         input_shape: Letterboxed shape as ``(height, width)``.
         original_shape: Source shape as ``(height, width)``.
         ratio_pad: Optional metadata recorded during preprocessing.
+        center: Anchoring used to derive missing metadata; see
+            ``LetterBoxGeometry.from_shapes``.
 
     Returns:
         Resize ratios and top-left padding as ``((ratio_x, ratio_y), (pad_x, pad_y))``.
@@ -115,4 +126,32 @@ def resolve_ratio_pad(
 
     if ratio_pad is not None:
         return ratio_pad
-    return LetterBoxGeometry.from_shapes(input_shape, original_shape).ratio_pad
+    return LetterBoxGeometry.from_shapes(input_shape, original_shape, center).ratio_pad
+
+
+def letterbox_center(pre_cfg: Mapping[str, Any]) -> bool:
+    """Return whether a model's configured letterbox centers the image.
+
+    Geometry derived from image shapes alone must use the model's own anchoring:
+    assuming the Ultralytics default would shift every box of a top-left model by
+    the whole padding.
+
+    Args:
+        pre_cfg: Model preprocessing configuration.
+
+    Returns:
+        ``pre_cfg.LetterBox.center``, ``True`` when absent.
+
+    Raises:
+        TypeError: If ``center`` is not a boolean.
+    """
+
+    letterbox_cfg = pre_cfg.get("LetterBox")
+    if not isinstance(letterbox_cfg, Mapping):
+        return True
+    center = letterbox_cfg.get("center", True)
+    if not isinstance(center, bool):
+        raise TypeError(
+            f"pre_cfg.LetterBox.center must be a boolean, got {type(center).__name__}."
+        )
+    return center

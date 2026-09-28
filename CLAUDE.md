@@ -11,8 +11,9 @@ the WiderFace Hard-primary and Medium/Easy-secondary metric contract,
 the local-only artifact policy for YOLOv5/YOLOv7 face models, plus
 the single-class `face_detection` postprocessing contract and its
 `mblt-model-ops`-sourced input geometry (640x640, except `YOLOv8m-face` and
-`YOLOv8l-face` at 960x960), plus NYU Depth delta1-primary with abs_rel/RMSE
-secondary metrics.
+`YOLOv8l-face` at 960x960), the YOLOX/DAMO-YOLO `post_cfg.head` decoders with their
+top-left, unnormalized preprocessing (YOLOX in BGR), plus NYU Depth delta1-primary with
+abs_rel/RMSE secondary metrics.
 
 For focused model, preprocessing, postprocessing, and model-registry work, also read
 .claude/skills/mblt-vision/SKILL.md.

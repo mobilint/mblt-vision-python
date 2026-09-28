@@ -48,6 +48,12 @@ ONNXRUNTIME_INSTALL_GUIDE = (
 CoreMode = str
 CORE_MODES: tuple[CoreMode, ...] = ("single", "multi", "global4", "global8")
 REGULUS_TARGET_DEVICES = frozenset({"regulus-ra", "regulus-rb"})
+# ONNX Runtime input element types that an integer (unnormalized) image is cast to.
+_ONNX_FLOAT_DTYPES = {
+    "tensor(float)": np.dtype(np.float32),
+    "tensor(float16)": np.dtype(np.float16),
+    "tensor(double)": np.dtype(np.float64),
+}
 
 
 def core_modes_for_target_device(target_device: str) -> tuple[CoreMode, ...]:
@@ -805,10 +811,19 @@ class MBLT_Engine:
         else:
             raise TypeError(f"Got unexpected type for ONNX input x={type(x)}.")
 
-        if x_np.dtype == np.float64:
+        graph_input = self._require_onnx_session().get_inputs()[0]
+        # A pipeline without a Normalize step (YOLOX, DAMO-YOLO: both take the
+        # unscaled 0-255 image) leaves LetterBox's byte tensor as the input, while
+        # the graph declares float. Cast to the declared element type; every other
+        # dtype reaches the graph unchanged, as before.
+        graph_dtype = _ONNX_FLOAT_DTYPES.get(getattr(graph_input, "type", None))
+        if graph_dtype is not None and x_np.dtype != graph_dtype:
+            if np.issubdtype(x_np.dtype, np.integer) or x_np.dtype == np.float64:
+                x_np = x_np.astype(graph_dtype)
+        elif x_np.dtype == np.float64:
             x_np = x_np.astype(np.float32)
 
-        expected_shape = self._require_onnx_session().get_inputs()[0].shape
+        expected_shape = graph_input.shape
         if len(expected_shape) == 4:
             expected_second_dim = expected_shape[1]
             expected_last_dim = expected_shape[-1]

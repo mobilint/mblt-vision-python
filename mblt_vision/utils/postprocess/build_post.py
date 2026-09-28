@@ -7,6 +7,7 @@ from __future__ import annotations
 from ..._tasks import normalize_vision_task
 from .base import PostBase
 from .cls_post import ClsPost
+from .damoyolo_post import DAMOYOLODetectionPost
 from .depth_post import DepthPost
 from .semantic_seg_post import SemanticSegPost
 from .yolo_anchor_post import (
@@ -29,6 +30,13 @@ from .yolo_dflfree_post import (
     YOLODFLFreeSegPost,
 )
 from .yolo_nmsfree_post import YOLONMSFreeDetectionPost, YOLONMSFreeFaceDetectionPost
+from .yolox_post import YOLOXDetectionPost
+
+# ``post_cfg.head`` names a detector family whose head is not an Ultralytics one.
+DETECTION_HEADS: dict[str, type[PostBase]] = {
+    "yolox": YOLOXDetectionPost,
+    "damoyolo": DAMOYOLODetectionPost,
+}
 
 
 def build_postprocess(
@@ -51,6 +59,17 @@ def build_postprocess(
         NotImplementedError: If the specified task is not supported.
     """
     task = normalize_vision_task(post_cfg["task"])
+    head = post_cfg.get("head")
+    if head is not None:
+        if task != "object_detection":
+            raise ValueError(
+                f"post_cfg.head is supported for object_detection only, got task {task!r}."
+            )
+        if head not in DETECTION_HEADS:
+            raise ValueError(
+                f"Unsupported post_cfg.head {head!r}; expected one of {sorted(DETECTION_HEADS)}."
+            )
+        return DETECTION_HEADS[head](pre_cfg, post_cfg, **kwargs)
     if task == "image_classification":
         return ClsPost(pre_cfg, post_cfg)
     if task == "depth_estimation":
