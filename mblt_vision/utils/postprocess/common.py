@@ -1204,6 +1204,7 @@ def scale_masks(
     shape: tuple[int, int],
     ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None,
     padding: bool = True,
+    center: bool = True,
 ) -> torch.Tensor:
     """Rescales segment masks to the target shape.
 
@@ -1214,6 +1215,11 @@ def scale_masks(
             If None, it will be calculated from the shapes. Defaults to None.
         padding (bool, optional): If True, assumes the masks were generated from
             an image with YOLO-style padding. Defaults to True.
+        center: Whether the letterbox split its padding around the image. The
+            default crop removes ``pad`` from both sides, which only holds for a
+            centered letterbox; a top-left one (``LetterBox.center: false``) pads
+            only the bottom and right, so its crop spans the resized extent
+            instead of stopping ``pad`` short of the far edge.
 
     Returns:
         torch.Tensor: Rescaled masks of shape (C, target_h, target_w).
@@ -1236,7 +1242,16 @@ def scale_masks(
     else:
         pad_w, pad_h = ratio_pad[1]
     top, left = (round(pad_h - 0.1), round(pad_w - 0.1)) if padding else (0, 0)
-    bottom, right = im1_h - round(pad_h + 0.1), im1_w - round(pad_w + 0.1)
+    if center:
+        bottom, right = im1_h - round(pad_h + 0.1), im1_w - round(pad_w + 0.1)
+    else:
+        gain = (
+            min(im1_h / im0_h, im1_w / im0_w)
+            if ratio_pad is None
+            else float(ratio_pad[0][0])
+        )
+        bottom = top + int(round(im0_h * gain))
+        right = left + int(round(im0_w * gain))
     masks = masks[..., top:bottom, left:right]
     if isinstance(masks, np.ndarray):
         masks = torch.from_numpy(masks)
@@ -1476,6 +1491,7 @@ def nmsout2eval_seg(
     img1_shape: tuple[int, int],
     img0_shapes: tuple[int, int] | list[tuple[int, int]],
     ratio_pads: RatioPad | list[RatioPad | None] | None = None,
+    center: bool = True,
 ) -> tuple[
     list[list[int]],
     list[list[list[float]]],
@@ -1490,6 +1506,8 @@ def nmsout2eval_seg(
         img1_shape (tuple): Processed image shape (H, W).
         img0_shapes (tuple | list[tuple]): Original image shape for a single image or
             a list of original shapes for a batch.
+        ratio_pads: Shared or per-image letterbox metadata.
+        center: Whether the model's letterbox is centered; see ``scale_masks``.
 
     Returns:
         tuple: A tuple containing:
@@ -1498,13 +1516,13 @@ def nmsout2eval_seg(
             - scores (list[list]): The confidence scores for each image.
             - extra (list[list]): The encoded segmentation masks for each image.
     """
-    actual_img0_shapes = normalize_image_shapes(img0_shapes)
-    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
-
     if not isinstance(nms_outs[0], (list, tuple)):
         actual_nms_outs = [nms_outs]
     else:
         actual_nms_outs = nms_outs
+    # One shared image shape covers the whole batch, as it does for detection.
+    actual_img0_shapes = normalize_image_shapes(img0_shapes, len(actual_nms_outs))
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
 
     det_results = []
     seg_results = []
@@ -1524,6 +1542,7 @@ def nmsout2eval_seg(
             seg_result.to(torch.float32),
             (img0_shape[0], img0_shape[1]),
             ratio_pad=ratio_pad,
+            center=center,
         )
         for seg_result, img0_shape, ratio_pad in zip(
             seg_results, actual_img0_shapes, actual_ratio_pads
@@ -1723,6 +1742,7 @@ class YOLOSegPostMixin:
             img1_shape,
             img0_shape,
             ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+            center=self.letterbox_center,
         )
 
 

@@ -410,3 +410,94 @@ def test_top_left_eval_conversion_scales_each_image_by_its_own_shape() -> None:
     )
 
     assert boxes == [[[0.0, 0.0, 64.0, 32.0]], [[0.0, 0.0, 128.0, 64.0]]]
+
+
+# --- Top-left masks ----------------------------------------------------------------
+
+
+def test_top_left_mask_crop_drops_only_the_bottom_padding() -> None:
+    """A 480x640 source in a top-left 640x640 letterbox pads only 160 bottom rows."""
+
+    from mblt_vision.utils.postprocess.common import scale_masks
+
+    mask = torch.zeros((1, 640, 640))
+    mask[0, :480] = 1.0  # exactly the image region
+
+    restored = scale_masks(
+        mask, (480, 640), ratio_pad=((1.0, 1.0), (0, 0)), center=False
+    )
+
+    assert restored.shape == (1, 480, 640)
+    assert bool((restored > 0.5).all())
+    # The centered crop keeps the padding and squeezes it into the image.
+    centered = scale_masks(mask, (480, 640), ratio_pad=((1.0, 1.0), (0, 0)))
+    assert float((centered > 0.5).float().mean()) == pytest.approx(0.75)
+
+
+def test_centered_mask_crop_is_unchanged_by_the_anchoring_option() -> None:
+    from mblt_vision.utils.postprocess.common import scale_masks
+
+    masks = torch.rand((3, 640, 640), generator=torch.Generator().manual_seed(0))
+    for ratio_pad in (None, ((1.0, 1.0), (0, 80)), ((0.5, 0.5), (0, 107))):
+        torch.testing.assert_close(
+            scale_masks(masks, (480, 640), ratio_pad=ratio_pad, center=True),
+            scale_masks(masks, (480, 640), ratio_pad=ratio_pad),
+            rtol=0,
+            atol=0,
+        )
+
+
+def test_top_left_segmentation_eval_restores_a_non_square_mask() -> None:
+    post = build_postprocess(
+        TOP_LEFT_640,
+        {"task": "instance_segmentation", "dataset": "coco", "nl": 3, "reg_max": 16},
+    )
+    detection = torch.tensor([[0.0, 0.0, 640.0, 480.0, 0.9, 0.0]])
+    mask = torch.zeros((1, 640, 640))
+    mask[0, :480] = 1.0
+
+    _, _, _, (encoded,) = post.nmsout2eval(
+        [(detection, mask)], (640, 640), [(480, 640)]
+    )
+
+    from faster_coco_eval.core import mask as mask_utils
+
+    assert mask_utils.area(encoded[0]) == 480 * 640
+
+
+def test_segmentation_eval_accepts_one_shared_shape_for_the_batch() -> None:
+    from mblt_vision.utils.postprocess.common import nmsout2eval_seg
+
+    detection = torch.tensor([[0.0, 0.0, 64.0, 32.0, 0.9, 0.0]])
+    mask = torch.ones((1, 640, 640))
+
+    labels, _, _, masks = nmsout2eval_seg(
+        [(detection, mask), (detection.clone(), mask.clone())], (640, 640), (480, 640)
+    )
+
+    assert len(labels) == len(masks) == 2
+
+
+def test_top_left_segmentation_plot_tints_the_whole_non_square_image(tmp_path) -> None:
+    """Plotting must restore the mask over the image rows, not squeeze in the padding."""
+
+    from mblt_vision.utils.results import Results
+
+    source = tmp_path / "source.png"
+    cv2.imwrite(str(source), np.full((24, 32, 3), 255, dtype=np.uint8))
+    box_cls = torch.tensor([[0.0, 0.0, 32.0, 24.0, 0.9, 0.0]])
+    mask = torch.zeros((1, 32, 32))
+    mask[0, :24] = 1.0
+    result = Results(
+        {"LetterBox": {"img_size": [32, 32], "center": False}},
+        {"task": "instance_segmentation"},
+        [[box_cls, mask]],
+    )
+
+    plotted = result.plot(str(source))
+
+    # Sample the mask interior, away from the box outline drawn on the image
+    # border. The old centered crop squeezed the 8 padding rows into the image,
+    # so its bottom quarter stayed white.
+    assert (plotted[20, 16] != 255).any()
+    assert (plotted[10, 16] != 255).any()

@@ -641,6 +641,7 @@ class Results:
                     ratio_pad=self._shape_ratio_pad(
                         (int(mask.shape[-2]), int(mask.shape[-1])), img0_shape
                     ),
+                    center=letterbox_center(self.pre_cfg),
                 ),
                 self.boxes,
             )
