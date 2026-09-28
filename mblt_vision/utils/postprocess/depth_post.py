@@ -8,7 +8,7 @@ from typing import Any
 import torch
 import torch.nn.functional as functional
 
-from ..letterbox import RatioPad
+from ..letterbox import RatioPad, letterbox_center
 from ..types import ListTensorLike, TensorLike
 from ._letterbox import crop_letterbox, get_letterbox_input_shape, resolve_ratio_pads
 from .base import PostBase
@@ -26,6 +26,7 @@ class DepthPost(PostBase):
         self.input_shape = get_letterbox_input_shape(
             pre_cfg, "Depth estimation", "Depth"
         )
+        self.letterbox_center = letterbox_center(pre_cfg)
 
     def __call__(
         self,
@@ -45,7 +46,13 @@ class DepthPost(PostBase):
             return depth
 
         shapes = normalize_image_shapes(img0_shape, depth.shape[0])
-        pads = resolve_ratio_pads(ratio_pad, depth.shape[0], shapes, self.input_shape)
+        pads = resolve_ratio_pads(
+            ratio_pad,
+            depth.shape[0],
+            shapes,
+            self.input_shape,
+            self.letterbox_center,
+        )
         restored = [
             self._restore(depth[index], shapes[index], pads[index])
             for index in range(depth.shape[0])

@@ -501,3 +501,18 @@ def test_top_left_segmentation_plot_tints_the_whole_non_square_image(tmp_path) -
     # so its bottom quarter stayed white.
     assert (plotted[20, 16] != 255).any()
     assert (plotted[10, 16] != 255).any()
+
+
+def test_dense_fallback_follows_the_models_top_left_anchoring() -> None:
+    """Without recorded metadata, a top-left depth map is restored from its own rows."""
+
+    from mblt_vision.utils.postprocess.depth_post import DepthPost
+
+    post = DepthPost(TOP_LEFT_640, {"task": "depth_estimation", "dataset": "nyu-depth"})
+    depth = torch.zeros((1, 640, 640))
+    depth[0, :480] = 1.0  # the image region; the 160 bottom rows are padding
+
+    restored = post(depth, img0_shape=[(480, 640)])  # one image: a bare map
+
+    assert restored.shape == (480, 640)
+    assert float(restored.min()) == pytest.approx(1.0)

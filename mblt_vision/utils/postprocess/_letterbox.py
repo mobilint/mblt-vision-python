@@ -48,6 +48,7 @@ def resolve_ratio_pads(
     batch_size: int,
     shapes: Sequence[tuple[int, int]],
     input_shape: tuple[int, int],
+    center: bool = True,
 ) -> list[RatioPad]:
     """Normalize letterbox metadata and derive values missing from a dense task batch.
 
@@ -56,6 +57,8 @@ def resolve_ratio_pads(
         batch_size: Number of images in the output batch.
         shapes: Original image shapes.
         input_shape: Configured model input shape.
+        center: The model's letterbox anchoring (``letterbox_center(pre_cfg)``),
+            used for metadata the caller did not record.
 
     Returns:
         One resolved ratio/padding pair per batch item.
@@ -66,7 +69,8 @@ def resolve_ratio_pads(
 
     pads = normalize_ratio_pads(ratio_pad, batch_size)
     return [
-        resolve_ratio_pad(input_shape, shape, pad) for pad, shape in zip(pads, shapes)
+        resolve_ratio_pad(input_shape, shape, pad, center)
+        for pad, shape in zip(pads, shapes)
     ]
 
 
