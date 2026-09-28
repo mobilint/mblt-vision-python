@@ -125,12 +125,19 @@ class PreBase:
         if img0_shape is not None:
             metadata["img0_shape"] = img0_shape
         for op in self.Ops:
-            x = op(x)
+            with_ratio_pad = getattr(op, "with_ratio_pad", None)
+            if with_ratio_pad is not None:
+                # Take this call's geometry from the return value: reading it back
+                # from the op would race with another thread preprocessing a
+                # different image through the same instance.
+                x, ratio_pad = with_ratio_pad(x)
+            else:
+                x = op(x)
+                ratio_pad = getattr(op, "ratio_pad", None)
             if "img0_shape" not in metadata:
                 img0_shape = _spatial_shape(x)
                 if img0_shape is not None:
                     metadata["img0_shape"] = img0_shape
-            ratio_pad = getattr(op, "ratio_pad", None)
             if ratio_pad is not None:
                 metadata["ratio_pad"] = ratio_pad
         return x, metadata

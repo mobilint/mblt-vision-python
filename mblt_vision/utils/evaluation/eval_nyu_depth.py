@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from mblt_vision.utils.preprocess import build_preprocess
 from tqdm import tqdm
 
 from ..datasets import CustomNYUDepth, get_nyu_depth_loader
+from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
@@ -59,6 +60,27 @@ class NYUDepthMetricAccumulator:
     def update(self, prediction: np.ndarray, target: np.ndarray) -> None:
         """Median-align one prediction and add its per-image metric values."""
 
+        self.add(self.image_metrics(prediction, target))
+
+    def add(self, metrics: tuple[float, float, float]) -> None:
+        """Add one image's ``(delta1, abs_rel, rmse)`` from ``image_metrics``."""
+
+        delta1, abs_rel, rmse = metrics
+        self.delta1_sum += delta1
+        self.abs_rel_sum += abs_rel
+        self.rmse_sum += rmse
+        self.valid_sample_count += 1
+
+    @classmethod
+    def image_metrics(
+        cls, prediction: np.ndarray, target: np.ndarray
+    ) -> tuple[float, float, float]:
+        """Median-align one prediction and return its ``(delta1, abs_rel, rmse)``.
+
+        This reads no accumulator state, so it may run on any thread; ``add``
+        the results in sample order to reproduce ``update`` exactly.
+        """
+
         prediction = _as_real_float32(prediction, "prediction")
         target = _as_real_float32(target, "target")
         if prediction.shape != target.shape:
@@ -70,7 +92,7 @@ class NYUDepthMetricAccumulator:
         if (target < 0).any():
             raise ValueError("NYU Depth target contains negative values.")
         valid = (
-            np.isfinite(target) & (target > self.MIN_DEPTH) & (target < self.MAX_DEPTH)
+            np.isfinite(target) & (target > cls.MIN_DEPTH) & (target < cls.MAX_DEPTH)
         )
         if not valid.any():
             raise ValueError(
@@ -83,17 +105,18 @@ class NYUDepthMetricAccumulator:
             raise ValueError(
                 f"NYU Depth prediction contains {invalid_prediction_count} non-finite value(s) at valid target pixels."
             )
-        median_prediction = np.median(np.maximum(predicted, self.MIN_DEPTH))
+        median_prediction = np.median(np.maximum(predicted, cls.MIN_DEPTH))
         median_target = np.median(actual)
         aligned = predicted * (median_target / median_prediction)
-        aligned = np.clip(aligned, self.MIN_DEPTH, self.MAX_DEPTH)
+        aligned = np.clip(aligned, cls.MIN_DEPTH, cls.MAX_DEPTH)
         ratio = np.maximum(actual / aligned, aligned / actual)
         # Match Ultralytics' depth validator: median-align and calculate all
         # metrics per image, then average validation images equally.
-        self.delta1_sum += float(np.mean(ratio < 1.25))
-        self.abs_rel_sum += float(np.mean(np.abs(actual - aligned) / actual))
-        self.rmse_sum += float(np.sqrt(np.mean((actual - aligned) ** 2)))
-        self.valid_sample_count += 1
+        return (
+            float(np.mean(ratio < 1.25)),
+            float(np.mean(np.abs(actual - aligned) / actual)),
+            float(np.sqrt(np.mean((actual - aligned) ** 2))),
+        )
 
     def result(self) -> NYUDepthResult:
         """Return mean per-image metrics."""
@@ -163,9 +186,9 @@ def eval_nyu_depth(
         validation_preprocessor,
         image_size=(int(image_size[0]), int(image_size[1])),
     )
-    accumulator = NYUDepthMetricAccumulator()
-    for inputs, targets, _, _, _ in tqdm(loader, desc="Evaluating NYU Depth"):
-        output = model(inputs)
+
+    def decode(batch: Any, output: Any) -> list[tuple[float, float, float]]:
+        targets = batch[1]
         result = model.postprocess(output)
         depth = result.depth
         if depth is None:
@@ -186,11 +209,19 @@ def eval_nyu_depth(
             raise ValueError(
                 f"Depth postprocessor returned {len(maps)} maps for {len(targets)} targets."
             )
+        metrics = []
         for prediction, target in zip(maps, targets):
             array = (
                 prediction.detach().cpu().numpy()
                 if hasattr(prediction, "detach")
                 else np.asarray(prediction)
             )
-            accumulator.update(array, target)
+            metrics.append(NYUDepthMetricAccumulator.image_metrics(array, target))
+        return metrics
+
+    accumulator = NYUDepthMetricAccumulator()
+    batches = map_batched_inference(loader, lambda batch: model(batch[0]), decode)
+    for image_metrics in tqdm(batches, total=len(loader), desc="Evaluating NYU Depth"):
+        for metrics in image_metrics:
+            accumulator.add(metrics)
     return accumulator.result()
