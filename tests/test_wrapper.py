@@ -270,6 +270,7 @@ def test_file_config_cleansing_prefers_existing_mxq_path(
         "repo_id": "mobilint/example",
         "filename": "model.mxq",
         "revision": "main",
+        "local_artifact_only": True,
         "core_mode": "global8",
     }
 
@@ -279,6 +280,7 @@ def test_file_config_cleansing_prefers_existing_mxq_path(
     assert "repo_id" not in engine.file_cfg
     assert "filename" not in engine.file_cfg
     assert "revision" not in engine.file_cfg
+    assert "local_artifact_only" not in engine.file_cfg
 
 
 def test_model_path_defaults_to_local_mxq_for_mxq_framework(tmp_path: Path) -> None:
@@ -1455,6 +1457,28 @@ def test_engine_init_defaults_to_mxq_without_model_path(
         assert "mxq_path" in backend_kwargs
     finally:
         engine.dispose()
+
+
+def test_file_config_cleansing_rejects_unverified_remote_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not pass a mutable, unverified Hub artifact to a native runtime."""
+
+    def _unexpected_download(**kwargs: Any) -> str:
+        raise AssertionError("hf_hub_download should not be called")
+
+    monkeypatch.setattr(wrapper, "hf_hub_download", _unexpected_download)
+    engine = object.__new__(MBLT_Engine)
+    engine.framework = "mxq"
+    engine.file_cfg = {
+        "repo_id": "mobilint/example",
+        "filename": "model.mxq",
+        "revision": "main",
+        "local_artifact_only": True,
+    }
+
+    with pytest.raises(RuntimeError, match="repository-pinned immutable revision"):
+        engine.file_config_cleansing()
 
 
 @pytest.mark.parametrize("mask_count", [1, 50])

@@ -81,6 +81,10 @@ The current ownership boundary is deliberate:
   must remain lazy and report the appropriate package extra when unavailable.
 - For WiderFace evaluation, rank results by Hard-set AP and retain Medium-set
   then Easy-set AP as secondary metrics. Do not compute a mean across splits.
+- The YOLOv5/YOLOv7 face repositories do not yet publish project-pinned immutable revisions
+  and artifact SHA-256 digests. Their YAMLs must keep `file_cfg.local_artifact_only: true`, and
+  callers must supply a trusted local MXQ or ONNX path; never restore automatic Hub downloads
+  using `main` or `TURBO`.
 - `face_detection` is a single-class WiderFace task, not an 80-class COCO one. Each YOLO head
   family reuses its own object-detection decode and NMS through a thin
   `YOLOFaceDetectionMixin` subclass (`YOLOAnchorFaceDetectionPost`,
