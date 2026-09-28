@@ -71,6 +71,20 @@ The current ownership boundary is deliberate:
   suffix conflicts with an explicitly selected framework.
 - Preserve anchorless decoded-output layout provenance through NMS. When a tensor is ambiguous
   and provenance is unavailable, normalize it as raw channels-first before candidates-first.
+- Keep NMS candidate ordering on Ultralytics' unstable `argsort(descending=True)`, not
+  mblt-model-ops' `kind="stable"` sorts. Quantized MXQ scores tie often, and the call Ultralytics
+  makes reproduces its tie order; switching to a stable sort measured YOLOv8m -0.00047,
+  YOLOv8m-pose -0.0038 and YOLOv8m-seg +0.00029 mAP50-95 on 500 COCO val images (aries-rb),
+  entirely from ties. `non_max_suppression` suppresses only an IoU *above* `iou_thres`, as
+  `torchvision.ops.nms` does: two zero-area boxes give a NaN IoU, which must keep the
+  candidate, not drop it (no change on those three models' real outputs).
+- Rank ImageNet predictions once with a stable sort and take top-1 as the head of top-5, so
+  tied scores favour the higher class index as in mblt-model-ops' evaluator, and top-1 is
+  always inside top-5.
+- Decode-true pose MXQ parts carry keypoint visibility as logits, so the anchorless and
+  DFL-free pose paths apply the sigmoid; ONNX rows already carry it in-graph and are left as
+  is. Evaluation conversions such as `nmsout2eval_pose` must copy before rescaling in place,
+  so the caller's NMS rows stay usable for rendering.
 - Use the shared letterbox helpers for forward geometry and inverse output restoration. Detection
   postprocessors require pre_cfg.LetterBox; metadata-aware semantic preprocessing returns the
   original image shape and ratio_pad so logits can be restored before argmax.

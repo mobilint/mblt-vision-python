@@ -478,8 +478,12 @@ def non_max_suppression(
         # Compute the IoU ratio
         union = areas[index] + areas[order] - intersection
         ratio = intersection / union
-        # Keep boxes with IoU less than or equal to the threshold
-        keep = (ratio <= iou_threshold).to(order.device)
+        # Suppress only an IoU above the threshold, as torchvision.ops.nms does.
+        # Two zero-area boxes give 0 / 0 = NaN here -- the per-class offset alone
+        # collapses sub-0.0625 px boxes at high class indices in float32 -- and
+        # ``ratio <= iou_threshold`` would read that NaN as an overlap and drop a
+        # box lying anywhere else in the image.
+        keep = (~(ratio > iou_threshold)).to(order.device)
         order = order[keep]
     return picked_indices
 
@@ -1528,10 +1532,13 @@ def nmsout2eval_pose(
         actual_img0_shapes,
         ratio_pads=actual_ratio_pads,
     )
+    # ``scale_coords`` rescales in place, and slicing then reshaping a contiguous
+    # row block is a view, so without the clone this rewrote the caller's
+    # keypoints the way ``nmsout2eval`` already avoids for boxes.
     extra = [
         scale_coords(
             img1_shape,
-            nms_out[:, 6:].reshape(-1, 17, 3),
+            nms_out[:, 6:].reshape(-1, 17, 3).clone(),
             img0_shape,
             ratio_pad=ratio_pad,
         ).reshape(-1, 51)

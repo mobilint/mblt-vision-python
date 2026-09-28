@@ -2172,6 +2172,19 @@ def test_non_e2e_dflfree_segmentation_accepts_decode_true_mxq_parts_with_reducem
     assert torch.equal(result[0][0, 0, 6:], coeffs[0, 0])
 
 
+def _decode_true_pose_keypoints(keypoints: torch.Tensor) -> torch.Tensor:
+    """Return decode-true pose keypoints as rendered: x, y kept, visibility logits sigmoided.
+
+    QBCompiler leaves visibility as logits in decode-true MXQ parts, so the
+    postprocessor applies the sigmoid the float graph would have (see
+    ``test_dflfree_pose_postprocessor_accepts_decode_enabled_output_parts``).
+    """
+
+    expected = keypoints.clone().reshape(-1, 17, 3)
+    expected[..., 2] = expected[..., 2].sigmoid()
+    return expected.reshape(keypoints.shape)
+
+
 def test_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:
     """Accept split decode-true DFL-free pose outputs with a duplicate score max tensor."""
 
@@ -2202,7 +2215,9 @@ def test_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:
     assert len(result) == 1
     assert result[0].shape == (1, 57)
     assert torch.equal(result[0][0, :4], boxes[0, 0])
-    assert torch.equal(result[0][0, 6:], keypoints[0, 0])
+    assert torch.allclose(
+        result[0][0, 6:], _decode_true_pose_keypoints(keypoints[0, 0])
+    )
 
 
 def test_dflfree_pose_prefers_score_tensor_over_reducemax_duplicate() -> None:
@@ -2239,7 +2254,9 @@ def test_dflfree_pose_prefers_score_tensor_over_reducemax_duplicate() -> None:
         assert len(result) == 1
         assert result[0].shape == (1, 57)
         assert torch.allclose(result[0][0, 4], torch.tensor(0.9))
-        assert torch.equal(result[0][0, 6:], keypoints[0, 0])
+        assert torch.allclose(
+            result[0][0, 6:], _decode_true_pose_keypoints(keypoints[0, 0])
+        )
 
 
 def test_non_e2e_dflfree_pose_accepts_decode_true_mxq_parts_with_reducemax() -> None:

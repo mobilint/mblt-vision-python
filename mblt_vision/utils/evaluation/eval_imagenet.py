@@ -113,15 +113,19 @@ def eval_imagenet_metrics(
                 "ImageNet classification output batch size does not match labels: "
                 f"got {output_batch_size} outputs for {len(label_array)} labels."
             )
-        if isinstance(output, np.ndarray):
-            prediction = output.argmax(-1)
-        else:
-            prediction = output.argmax(-1).cpu().numpy()
+        # Rank once with a stable sort, as mblt-model-ops' ImageNet evaluator
+        # does: tied scores then resolve the same way on both sides (the higher
+        # class index first), and top-1 is always the head of top-5. A separate
+        # ``argmax`` (lowest index on ties) and ``topk`` (unspecified tie order)
+        # could disagree on quantized outputs.
         top_k = min(5, output.shape[-1])
         if isinstance(output, torch.Tensor):
-            top5_prediction = output.topk(top_k, dim=-1).indices.cpu().numpy()
+            ranking = torch.argsort(output, dim=-1, stable=True)[:, -top_k:]
+            top5_prediction = ranking.flip(-1).cpu().numpy()
         else:
-            top5_prediction = np.argpartition(output, -top_k, axis=-1)[:, -top_k:]
+            ranking = np.argsort(output, axis=-1, kind="stable")[:, -top_k:]
+            top5_prediction = ranking[:, ::-1]
+        prediction = top5_prediction[:, 0]
         top1_correct = (prediction == label_array).sum().item()
         top5_correct = (
             np.any(top5_prediction == label_array[:, np.newaxis], axis=-1).sum().item()
