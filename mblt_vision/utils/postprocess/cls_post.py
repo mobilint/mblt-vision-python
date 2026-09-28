@@ -79,6 +79,8 @@ class ClsPost(PostBase):
                 )
             if x.shape[1] == self.num_classes and x.shape[-1] == 1:
                 x = x.unsqueeze(-1)
+            elif x.shape[1] == 1 and x.shape[-1] == self.num_classes:
+                x = x.reshape(x.shape[0], -1, 1, 1)
             elif x.shape[0] == self.num_classes:
                 x = x.unsqueeze(0)
             else:

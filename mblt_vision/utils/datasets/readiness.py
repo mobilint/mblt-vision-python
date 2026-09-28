@@ -26,9 +26,12 @@ IMAGENET_CLASS_COUNT = 1000
 IMAGENET_IMAGES_PER_CLASS = 50
 COCO_VALIDATION_SAMPLE_COUNT = 5000
 COCO_MAX_IMAGE_DIMENSION = 32_768
-COCO_MAX_MASK_PIXELS = 100_000_000
 COCO_MAX_POLYGONS_PER_ANNOTATION = 1_000
 COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION = 100_000
+# Bound annotation-controlled geometry before passing it to native COCO mask
+# routines.  This comfortably exceeds the largest official COCO image while
+# preventing hostile metadata from requesting multi-gigabyte raster buffers.
+COCO_MAX_IMAGE_PIXELS = 100_000_000
 DOTAV1_VALIDATION_SAMPLE_COUNT = 458
 WIDERFACE_EVENT_COUNT = 61
 WIDERFACE_VALIDATION_SAMPLE_COUNT = 3226
@@ -155,7 +158,7 @@ def _polygon_union_has_rasterized_foreground(
         or width <= 0
         or height > COCO_MAX_IMAGE_DIMENSION
         or width > COCO_MAX_IMAGE_DIMENSION
-        or height * width > COCO_MAX_MASK_PIXELS
+        or height * width > COCO_MAX_IMAGE_PIXELS
         or len(polygons) > COCO_MAX_POLYGONS_PER_ANNOTATION
         or sum(len(polygon) // 2 for polygon in polygons)
         > COCO_MAX_POLYGON_VERTICES_PER_ANNOTATION
@@ -163,11 +166,10 @@ def _polygon_union_has_rasterized_foreground(
         return False
     try:
         encoded = coco_mask.frPyObjects(polygons, height, width)
-        merged = coco_mask.merge(encoded)
-        decoded = np.asarray(coco_mask.decode(merged))
-    except (MemoryError, RuntimeError, TypeError, ValueError):
+        area = np.asarray(coco_mask.area(encoded))
+    except (MemoryError, OverflowError, RuntimeError, TypeError, ValueError):
         return False
-    return bool(np.any(decoded))
+    return bool(np.any(area > 0))
 
 
 def _canonicalize_quadrilateral(
@@ -425,6 +427,8 @@ def _coco_task_annotations_valid(
         if image_shape is None:
             return False
         image_height, image_width = image_shape
+        if image_height * image_width > COCO_MAX_IMAGE_PIXELS:
+            return False
         bbox = record.get("bbox")
         if (
             not isinstance(bbox, list)
@@ -565,7 +569,7 @@ def _decode_coco_rle_counts(counts: str) -> list[int] | None:
 def _valid_coco_rle(
     segmentation: dict[str, Any], image_shape: tuple[int, int] | None
 ) -> bool:
-    """Validate and decode an RLE mask against its referenced COCO image shape."""
+    """Validate an RLE mask against its referenced COCO image shape."""
 
     counts = segmentation.get("counts")
     size = segmentation.get("size")
@@ -594,16 +598,14 @@ def _valid_coco_rle(
             return False
     if sum(run_counts) != math.prod(size):
         return False
-    try:
-        encoded = (
-            coco_mask.frPyObjects(segmentation, size[0], size[1])
-            if isinstance(counts, list)
-            else segmentation
-        )
-        decoded = np.asarray(coco_mask.decode(encoded))
-    except (RuntimeError, TypeError, ValueError):
-        return False
-    return decoded.shape == tuple(size) and bool(np.any(decoded))
+    # COCO RLE alternates background and foreground runs, beginning with
+    # background.  Inspecting the foreground runs proves that the mask is
+    # nonempty without materializing an attacker-sized dense mask.
+    return any(
+        run_count > 0
+        for index, run_count in enumerate(run_counts)
+        if index % 2 == 1
+    )
 
 
 def _coco_ready(root: Path, task: str) -> bool:

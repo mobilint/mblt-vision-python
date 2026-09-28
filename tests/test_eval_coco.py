@@ -277,6 +277,39 @@ def test_coco_evaluation_accepts_official_thin_polygons() -> None:
     eval_coco_module._validate_coco_dataset_taxonomy(dataset, "instance_segmentation")
 
 
+def test_coco_evaluation_rejects_oversized_polygon_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject hostile dimensions before invoking native polygon conversion."""
+
+    dataset = SimpleNamespace(
+        coco=SimpleNamespace(
+            cats={1: {}},
+            imgs={1: {"height": 100_000, "width": 100_000}},
+            anns={
+                7: {
+                    "id": 7,
+                    "image_id": 1,
+                    "category_id": 1,
+                    "bbox": [0, 0, 10, 10],
+                    "area": 100,
+                    "iscrowd": 0,
+                    "segmentation": [[0, 0, 10, 0, 10, 10, 0, 10]],
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "mblt_vision.utils.datasets.readiness.coco_mask.frPyObjects",
+        lambda *_: pytest.fail("native mask conversion must not run"),
+    )
+
+    with pytest.raises(ValueError, match="invalid task-specific annotations"):
+        eval_coco_module._validate_coco_dataset_taxonomy(
+            dataset, "instance_segmentation"
+        )
+
+
 @pytest.mark.parametrize("visibility", [1, 2])
 def test_coco_evaluation_rejects_labeled_keypoints_outside_images(
     monkeypatch: pytest.MonkeyPatch, visibility: int
