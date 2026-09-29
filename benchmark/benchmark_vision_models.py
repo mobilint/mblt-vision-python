@@ -35,16 +35,7 @@ CoreMode = Literal["single", "multi", "global4", "global8"]
 CORE_MODES: tuple[CoreMode, ...] = cast(
     tuple[CoreMode, ...], core_modes_for_target_device("aries-rb")
 )
-# `mask_generation` is a canonical Vision task but the unified runner cannot
-# execute it: it needs SAM2HieraLarge's two-artifact engine and point prompts
-# rather than the generic MBLT_Engine `_run_target` builds, and `eval_sav`
-# rather than the generic evaluators `_evaluate` dispatches. Offering it as a
-# choice would only produce an error row for every model. Benchmark it with
-# `mblt-vision val --model sam2-hiera-large` until the runner grows that path.
-UNSUPPORTED_BENCHMARK_TASKS: tuple[str, ...] = ("mask_generation",)
-TASK_CHOICES = tuple(
-    task for task in VISION_TASKS if task not in UNSUPPORTED_BENCHMARK_TASKS
-)
+TASK_CHOICES = VISION_TASKS
 SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 
 
