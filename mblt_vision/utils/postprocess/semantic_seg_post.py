@@ -8,7 +8,7 @@ from typing import Any
 import torch
 import torch.nn.functional as functional
 
-from ..letterbox import RatioPad
+from ..letterbox import RatioPad, letterbox_center
 from ..types import ListTensorLike, TensorLike
 from ._letterbox import crop_letterbox, get_letterbox_input_shape, resolve_ratio_pads
 from .base import PostBase
@@ -30,6 +30,7 @@ class SemanticSegPost(PostBase):
         self.input_shape = get_letterbox_input_shape(
             pre_cfg, "Semantic segmentation", "Semantic"
         )
+        self.letterbox_center = letterbox_center(pre_cfg)
         dataset = post_cfg.get("dataset")
         if not isinstance(dataset, str):
             raise ValueError(
@@ -69,7 +70,13 @@ class SemanticSegPost(PostBase):
             return self._to_input_space(output, is_logits)
 
         shapes = normalize_image_shapes(img0_shape, output.shape[0])
-        pads = resolve_ratio_pads(ratio_pad, output.shape[0], shapes, self.input_shape)
+        pads = resolve_ratio_pads(
+            ratio_pad,
+            output.shape[0],
+            shapes,
+            self.input_shape,
+            self.letterbox_center,
+        )
         restored = [
             self._restore(output[index], is_logits, shapes[index], pads[index])
             for index in range(output.shape[0])

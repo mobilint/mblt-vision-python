@@ -14,6 +14,7 @@ from ..datasets import (
     get_ade20k_loader,
     get_cityscapes_loader,
 )
+from ..letterbox import letterbox_center
 from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
@@ -280,6 +281,7 @@ def eval_semantic_segmentation(
             batch_size,
             model.preprocess_with_metadata,
             image_size=image_size_tuple,
+            center=letterbox_center(model.pre_cfg),
         )
         default_nc = 150
         description = "Evaluating ADE20K"
@@ -290,6 +292,7 @@ def eval_semantic_segmentation(
             batch_size,
             model.preprocess_with_metadata,
             image_size=image_size_tuple,
+            center=letterbox_center(model.pre_cfg),
         )
         default_nc = 19
         description = "Evaluating Cityscapes"

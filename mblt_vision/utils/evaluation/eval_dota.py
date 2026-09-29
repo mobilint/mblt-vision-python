@@ -30,7 +30,7 @@ from ..datasets.readiness import (
     _canonicalize_quadrilateral,
     _polygon_has_positive_image_overlap,
 )
-from ..letterbox import RatioPad, resolve_ratio_pad
+from ..letterbox import RatioPad, letterbox_center, resolve_ratio_pad
 from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
@@ -521,13 +521,18 @@ def _ratio_pad_for_shape(
     input_shape: tuple[int, ...],
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
+    center: bool = True,
 ) -> tuple[float, tuple[float, float]]:
-    """Return letterbox gain and padding for an image."""
+    """Return letterbox gain and padding for an image.
+
+    ``center`` is the model's ``LetterBox.center``, used only when no metadata
+    was recorded.
+    """
     if len(input_shape) < 2:
         raise ValueError(f"Expected at least 2 input dimensions, got {input_shape}.")
 
     ratio, pad = resolve_ratio_pad(
-        (input_shape[0], input_shape[1]), org_shape, ratio_pad
+        (input_shape[0], input_shape[1]), org_shape, ratio_pad, center
     )
     return float(ratio[0]), (float(pad[0]), float(pad[1]))
 
@@ -537,9 +542,10 @@ def _ground_truth_to_input_space(
     input_shape: tuple[int, ...],
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
+    center: bool = True,
 ) -> dict[str, torch.Tensor]:
     """Transform original-image DOTAv1 polygons to letterboxed ``xywhr`` boxes."""
-    gain, pad = _ratio_pad_for_shape(input_shape, org_shape, ratio_pad)
+    gain, pad = _ratio_pad_for_shape(input_shape, org_shape, ratio_pad, center)
 
     def transform(polygons: torch.Tensor | None, boxes: torch.Tensor) -> torch.Tensor:
         if polygons is None:
@@ -843,6 +849,7 @@ def eval_dota(
     dataloader = get_dota_loader(dataset, batch_size, model.preprocess_with_metadata)
     model.set_postprocess_thresholds(conf_thres=conf_thres, iou_thres=iou_thres)
     ground_truths = _load_ground_truths(data_path, dataset)
+    center = letterbox_center(model.pre_cfg)
     iouv = torch.linspace(0.5, 0.95, 10)
     stats = _empty_stats()
 
@@ -885,6 +892,7 @@ def eval_dota(
                 input_shape,
                 (int(image_shape[0]), int(image_shape[1])),
                 image_ratio_pad,
+                center,
             )
             image_stats.append(
                 _process_image_stats(_nms_output_to_predictions(nms_out), target, iouv)

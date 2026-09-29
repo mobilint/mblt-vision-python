@@ -15,6 +15,7 @@ def _apply_letterbox(
     img_size: list[int],
     interpolation: int,
     padding_value: int | tuple[int, int, int],
+    center: bool = True,
 ) -> tuple[np.ndarray, RatioPad]:
     """Resize and pad an array while preserving its aspect ratio.
 
@@ -23,6 +24,7 @@ def _apply_letterbox(
         img_size: Target size as ``[height, width]``.
         interpolation: OpenCV interpolation mode.
         padding_value: Constant border value.
+        center: Center the resized array, or anchor it top-left.
 
     Returns:
         The letterboxed array and its resize/padding metadata.
@@ -30,7 +32,7 @@ def _apply_letterbox(
 
     input_shape = (int(img_size[0]), int(img_size[1]))
     original_shape = (int(image.shape[0]), int(image.shape[1]))
-    geometry = LetterBoxGeometry.from_shapes(input_shape, original_shape)
+    geometry = LetterBoxGeometry.from_shapes(input_shape, original_shape, center)
     resized_height, resized_width = geometry.resized_shape
     if image.shape[:2] != geometry.resized_shape:
         image = cv2.resize(
@@ -64,6 +66,7 @@ def letterbox_semantic_mask(
     mask: np.ndarray,
     img_size: list[int],
     ignore_label: int = 255,
+    center: bool = True,
 ) -> tuple[np.ndarray, RatioPad]:
     """Letterbox a semantic mask without interpolating class IDs.
 
@@ -71,6 +74,8 @@ def letterbox_semantic_mask(
         mask: Two-dimensional semantic class map.
         img_size: Target size as ``[height, width]``.
         ignore_label: Class value used for padded pixels.
+        center: Center the mask, or anchor it top-left. Pass the model's
+            ``LetterBox.center`` so the target matches its image's geometry.
 
     Returns:
         The letterboxed mask and its resize/padding metadata.
@@ -83,7 +88,7 @@ def letterbox_semantic_mask(
         raise ValueError(
             f"Semantic masks must be two-dimensional, got shape {mask.shape}."
         )
-    return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label)
+    return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label, center)
 
 
 class LetterBox(PreOps):
@@ -92,19 +97,44 @@ class LetterBox(PreOps):
     Resizes the image while maintaining aspect ratio, adding padding to meet
     target dimensions. Floating-point RGB inputs in ``[0, 1]`` are scaled to
     byte RGB; other floating-point values must be finite and in ``[0, 255]``.
-    Based on Ultralytics implementation.
+    The defaults are Ultralytics' letterbox: centered, padded with 114. YOLOX
+    anchors the same resize top-left with 114, and DAMO-YOLO's December 2022
+    checkpoints anchor it top-left with zeros.
 
     Ref: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
     """
 
-    def __init__(self, img_size: list[int]) -> None:
+    def __init__(
+        self, img_size: list[int], center: bool = True, padding_value: int = 114
+    ) -> None:
         """Initializes LetterBox with target image size.
 
         Args:
             img_size (list[int]): Target image size [h, w].
+            center: Split the padding around the image, or anchor it top-left.
+            padding_value: Byte value filling every channel of the padding.
+
+        Raises:
+            TypeError: If ``center`` is not a boolean or ``padding_value`` not an integer.
+            ValueError: If ``padding_value`` is outside ``[0, 255]``.
         """
         super().__init__()
         self.img_size = normalize_image_size(img_size, name="img_size")
+        if not isinstance(center, bool):
+            raise TypeError(
+                f"LetterBox center must be a boolean, got {type(center).__name__}."
+            )
+        if isinstance(padding_value, bool) or not isinstance(padding_value, int):
+            raise TypeError(
+                "LetterBox padding_value must be an integer, "
+                f"got {type(padding_value).__name__}."
+            )
+        if not 0 <= padding_value <= 255:
+            raise ValueError(
+                f"LetterBox padding_value must be in [0, 255], got {padding_value}."
+            )
+        self.center = center
+        self.padding_value = padding_value
         self.ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None
 
     def __call__(self, x: TensorLike) -> torch.Tensor:
@@ -145,6 +175,7 @@ class LetterBox(PreOps):
             x,
             self.img_size,
             cv2.INTER_LINEAR,
-            (114, 114, 114),
+            (self.padding_value,) * 3,
+            self.center,
         )
         return torch.from_numpy(img).to(self.device).byte(), ratio_pad

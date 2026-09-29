@@ -346,11 +346,29 @@ validation split, following Ultralytics' depth-validation convention.
 | YOLO12m | (640,640,3) | 51.899 | 52.297 | 77.22 | 20.17 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 | YOLO12l | (640,640,3) | 53.200 | 53.508 | 105.07 | 26.40 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
 | YOLO12x | (640,640,3) | 54.758 | 55.061 | 223.27 | 59.14 | [Link](https://docs.ultralytics.com/models/yolo12/) | |
+| YOLOX_Nano | (416,416,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| YOLOX_Tiny | (416,416,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| YOLOX_s | (640,640,3) | - | 40.679 | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| YOLOX_m | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| YOLOX_l | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| YOLOX_x | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| YOLOX_Darknet53 | (640,640,3) | - | - | - | - | [Link](https://github.com/Megvii-BaseDetection/YOLOX) | Local artifact; see the note below. |
+| DAMO_YOLO_T | (640,640,3) | - | 41.789 | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | Local artifact; see the note below. |
+| DAMO_YOLO_TDistill | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | Local artifact; see the note below. |
+| DAMO_YOLO_S | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | Local artifact; see the note below. |
+| DAMO_YOLO_SDistill | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | Local artifact; see the note below. |
+| DAMO_YOLO_M | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | Local artifact; see the note below. |
+| DAMO_YOLO_MDistill | (640,640,3) | - | - | - | - | [Link](https://github.com/tinyvision/DAMO-YOLO) | Local artifact; see the note below. |
 
 <details>
 <summary>Object Detection (COCO)</summary>
 
 - $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{box}}}$ values are for single-model single-scale on the [COCO val2017](https://cocodataset.org/) dataset.
+- YOLOX and DAMO-YOLO have no Hub artifact yet, so pass a local `model_path`. Their GPU
+  scores are the ONNX exports of the upstream checkpoints, measured through this package
+  (upstream publishes 40.5 for YOLOX-s and 41.8 for DAMO-YOLO-T). Neither preprocesses like
+  Ultralytics: both letterbox top-left and feed the unscaled 0-255 image, and YOLOX reads
+  BGR. DAMO-YOLO follows its December 2022 checkpoints, the only ones still downloadable.
 
 </details>
 

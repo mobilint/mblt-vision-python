@@ -6,6 +6,10 @@ paths:
 
 # mblt-vision-python Agent Guide
 
+This is the one guide for every coding agent: `CLAUDE.md` is a symlink to this file. For
+focused model, preprocessing, postprocessing, and model-registry work, also read
+`.claude/skills/mblt-vision/SKILL.md`.
+
 ## Mission
 
 `mblt-vision-python` is the Python distribution and public compatibility layer for Mobilint
@@ -71,6 +75,20 @@ The current ownership boundary is deliberate:
   suffix conflicts with an explicitly selected framework.
 - Preserve anchorless decoded-output layout provenance through NMS. When a tensor is ambiguous
   and provenance is unavailable, normalize it as raw channels-first before candidates-first.
+- Keep NMS candidate ordering on Ultralytics' unstable `argsort(descending=True)`, not
+  mblt-model-ops' `kind="stable"` sorts. Quantized MXQ scores tie often, and the call Ultralytics
+  makes reproduces its tie order; switching to a stable sort measured YOLOv8m -0.00047,
+  YOLOv8m-pose -0.0038 and YOLOv8m-seg +0.00029 mAP50-95 on 500 COCO val images (aries-rb),
+  entirely from ties. `non_max_suppression` suppresses only an IoU *above* `iou_thres`, as
+  `torchvision.ops.nms` does: two zero-area boxes give a NaN IoU, which must keep the
+  candidate, not drop it (no change on those three models' real outputs).
+- Rank ImageNet predictions once with a stable sort and take top-1 as the head of top-5, so
+  tied scores favour the higher class index as in mblt-model-ops' evaluator, and top-1 is
+  always inside top-5.
+- Decode-true pose MXQ parts carry keypoint visibility as logits, so the anchorless and
+  DFL-free pose paths apply the sigmoid; ONNX rows already carry it in-graph and are left as
+  is. Evaluation conversions such as `nmsout2eval_pose` must copy before rescaling in place,
+  so the caller's NMS rows stay usable for rendering.
 - Use the shared letterbox helpers for forward geometry and inverse output restoration. Detection
   postprocessors require pre_cfg.LetterBox; metadata-aware semantic preprocessing returns the
   original image shape and ratio_pad so logits can be restored before argmax.
@@ -79,6 +97,25 @@ The current ownership boundary is deliberate:
   non-finite, fractional, or out-of-range baked semantic IDs before casting.
 - Keep hardware-specific runtime access behind mblt-npu-python. Optional ONNX Runtime imports
   must remain lazy and report the appropriate package extra when unavailable.
+- YOLOX and DAMO-YOLO are object-detection families with non-Ultralytics heads, selected by
+  `post_cfg.head: yolox` / `damoyolo` (`build_postprocess` rejects any other value, and any
+  `head` on another task). Both reuse the anchorless candidate filter, NMS and inverse
+  letterbox; only the decode differs. YOLOX takes one `(batch, anchors, 5 + nc)` tensor
+  (upstream `decode_in_inference = False`): `xy = (raw + grid) * stride`,
+  `wh = exp(raw) * stride`, score = objectness x class. DAMO-YOLO takes six per-level maps --
+  sigmoid class maps and `4 * (reg_max + 1)`-channel distributions, so `reg_max: 16` is 17
+  bins -- decoded as the softmax expectation times stride. Neither adds Ultralytics' half-cell
+  offset. A 640 input's stride-8 DAMO class map is 80x80x80, so the head set's layout (NCHW
+  or NHWC) is resolved jointly from the unambiguous distribution maps and a mixed set fails.
+- Their `pre_cfg` follows mblt-model-ops' `models/<Model>/pipeline.yaml` on branch
+  `jm/temp` (commit `0368367e8`): YOLOX is BGR (`Reader.color_mode: BGR`), top-left
+  letterboxed with 114; DAMO-YOLO is RGB, top-left with zeros (the December 2022 checkpoints'
+  geometry, not upstream HEAD's stretch). Neither declares `Normalize`: both take the
+  unscaled 0-255 image, and the ONNX path casts the byte tensor to the graph's float dtype.
+  `LetterBox.center: false` anchors top-left; every place that derives geometry from shapes
+  alone (`PostBase.ratio_pads_for`, `Results` plotting) must use the model's own
+  `letterbox_center(pre_cfg)` rather than the centered default. No Hub repository exists
+  yet, so their YAMLs keep `file_cfg.local_artifact_only: true`.
 - For WiderFace evaluation, rank results by Hard-set AP and retain Medium-set
   then Easy-set AP as secondary metrics. Do not compute a mean across splits.
 - The YOLOv5/YOLOv7 face repositories do not yet publish project-pinned immutable revisions
@@ -349,11 +386,12 @@ The current ownership boundary is deliberate:
 - Write documentation with ATX headings, one blank line between blocks, hyphen lists,
   language-tagged code fences, and concise paragraphs. Keep examples executable against the
   public mblt_vision namespace and do not document Model Zoo CLI commands as standalone features.
-- When a durable public fact changes, update this guide, the matching agent skill, CLAUDE.md, and
-  the relevant README in the same change. `.agents/skills/<name>/` and
-  `.claude/skills/<name>/` are real directories here, not the symlink pair mblt-model-ops
-  uses, so a skill edit has to be written to both copies: editing one leaves the other
-  stating the old contract to whichever tool reads it. `diff` the pair before committing. Treat a significant package change—public API,
+- When a durable public fact changes, update this guide, the matching agent skill, and the
+  relevant README in the same change. Each guide and skill has one real copy, the way
+  mblt-model-ops lays them out: `CLAUDE.md` is a symlink to this `AGENTS.md`, and every
+  `.agents/skills/<name>` is a symlink to `../../.claude/skills/<name>`, the real directory.
+  Edit the real file, never replace a symlink with a copy, and link a new skill the same way
+  (`ln -s ../../.claude/skills/<name> .agents/skills/<name>`). Treat a significant package change—public API,
   dependency/runtime, artifact layout, CLI, or tooling structure—as a required guide-and-skill
   synchronization point.
 - For documentation-only changes, run `git diff --check` and verify headings and links. Report

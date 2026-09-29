@@ -165,3 +165,68 @@ def test_imagenet_evaluation_rejects_wrong_model_taxonomy() -> None:
         eval_imagenet_module.eval_imagenet_metrics(
             SimpleNamespace(post_cfg={"dataset": "coco"}), "/dataset", batch_size=1
         )
+
+
+@pytest.mark.parametrize("as_tensor", [True, False])
+def test_imagenet_evaluation_ranks_tied_scores_once_and_stably(
+    monkeypatch: pytest.MonkeyPatch, as_tensor: bool
+) -> None:
+    """Top-1 and top-5 come from one stable ranking: ties favour the higher index.
+
+    That is mblt-model-ops' ImageNet rule. ``argmax`` would pick class 1 for the
+    first row, and with six tied maxima it could fall outside ``topk``'s five.
+    """
+
+    import numpy as np
+
+    rows = [
+        [3.0, 5.0, 5.0, 1.0, 5.0, 0.0, 0.0],
+        [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0],
+    ]
+    output = torch.tensor(rows) if as_tensor else np.asarray(rows, dtype=np.float32)
+
+    class _FakeDataset:
+        classes = ["n00000000", "n00000001"]
+        class_to_idx = {"n00000000": 0, "n00000001": 1}
+
+        def make_dataset(self) -> None:
+            return None
+
+        def __len__(self) -> int:
+            return 2
+
+    class _FakeModel:
+        post_cfg = {"dataset": "imagenet"}
+
+        def preprocess(self, value: object) -> object:
+            return value
+
+        def __call__(self, inputs: torch.Tensor) -> torch.Tensor:
+            return inputs
+
+        def postprocess(self, outputs: torch.Tensor) -> SimpleNamespace:
+            del outputs
+            return SimpleNamespace(output=output)
+
+    # Row 0 ranks [4, 2, 1, ...] and row 1 [5, 4, 3, 2, 1]. The old argmax picked
+    # 1 and 0 here, scoring top-1 as 0.0.
+    batch = (torch.zeros((2, 3, 8, 8)), torch.tensor([4, 5]))
+    monkeypatch.setattr(
+        eval_imagenet_module, "CustomImageFolder", lambda _: _FakeDataset()
+    )
+    monkeypatch.setattr(
+        eval_imagenet_module, "get_imagenet_loader", lambda *args: [batch]
+    )
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSET_ORDER", ("n00000000", "n00000001")
+    )
+    monkeypatch.setattr(
+        eval_imagenet_module, "IMAGENET_SYNSETS", frozenset({"n00000000", "n00000001"})
+    )
+
+    result = eval_imagenet_module.eval_imagenet_metrics(
+        _FakeModel(), "/dataset", batch_size=2
+    )
+
+    assert result.top1 == 1.0
+    assert result.top5 == 1.0

@@ -154,6 +154,51 @@ def xyxy2xywh(x: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     raise ValueError("x should be np.ndarray or torch.Tensor")
 
 
+def make_grid_points(
+    imh: int,
+    imw: int,
+    strides: Sequence[int],
+    device: torch.device | str = "cpu",
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-cell grid origins and strides for a multi-level dense head.
+
+    Cells are ordered level by level, then row-major, the order a flattened
+    ``(B, C, H, W)`` head and YOLOX's concatenated output both use. The points
+    are the cell's top-left ``(x, y)`` in grid units, without the half-cell
+    offset Ultralytics anchors add: YOLOX and DAMO-YOLO both decode from them.
+
+    Args:
+        imh: Network input height.
+        imw: Network input width.
+        strides: Level strides, finest first.
+        device: Device of the returned tensors.
+
+    Returns:
+        ``(points, stride)`` shaped ``(anchors, 2)`` and ``(anchors, 1)``.
+
+    Raises:
+        ValueError: If a stride does not divide the input size.
+    """
+
+    points, stride_rows = [], []
+    for stride in strides:
+        if imh % stride or imw % stride:
+            raise ValueError(
+                f"Input size {imh}x{imw} is not divisible by head stride {stride}."
+            )
+        ny, nx = imh // stride, imw // stride
+        yv, xv = torch.meshgrid(
+            torch.arange(ny, dtype=torch.float32, device=device),
+            torch.arange(nx, dtype=torch.float32, device=device),
+            indexing="ij",
+        )
+        points.append(torch.stack((xv, yv), -1).reshape(-1, 2))
+        stride_rows.append(
+            torch.full((ny * nx, 1), float(stride), dtype=torch.float32, device=device)
+        )
+    return torch.cat(points), torch.cat(stride_rows)
+
+
 def dist2bbox(
     distance: torch.Tensor,
     anchor_points: torch.Tensor,
@@ -478,8 +523,12 @@ def non_max_suppression(
         # Compute the IoU ratio
         union = areas[index] + areas[order] - intersection
         ratio = intersection / union
-        # Keep boxes with IoU less than or equal to the threshold
-        keep = (ratio <= iou_threshold).to(order.device)
+        # Suppress only an IoU above the threshold, as torchvision.ops.nms does.
+        # Two zero-area boxes give 0 / 0 = NaN here -- the per-class offset alone
+        # collapses sub-0.0625 px boxes at high class indices in float32 -- and
+        # ``ratio <= iou_threshold`` would read that NaN as an overlap and drop a
+        # box lying anywhere else in the image.
+        keep = (~(ratio > iou_threshold)).to(order.device)
         order = order[keep]
     return picked_indices
 
@@ -1155,6 +1204,7 @@ def scale_masks(
     shape: tuple[int, int],
     ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None,
     padding: bool = True,
+    center: bool = True,
 ) -> torch.Tensor:
     """Rescales segment masks to the target shape.
 
@@ -1165,6 +1215,11 @@ def scale_masks(
             If None, it will be calculated from the shapes. Defaults to None.
         padding (bool, optional): If True, assumes the masks were generated from
             an image with YOLO-style padding. Defaults to True.
+        center: Whether the letterbox split its padding around the image. The
+            default crop removes ``pad`` from both sides, which only holds for a
+            centered letterbox; a top-left one (``LetterBox.center: false``) pads
+            only the bottom and right, so its crop spans the resized extent
+            instead of stopping ``pad`` short of the far edge.
 
     Returns:
         torch.Tensor: Rescaled masks of shape (C, target_h, target_w).
@@ -1181,13 +1236,26 @@ def scale_masks(
             (im1_w - round(im0_w * gain)),
             (im1_h - round(im0_h * gain)),
         )  # wh padding
-        if padding:
+        if not center:
+            # A top-left letterbox puts all of its padding at the bottom and
+            # right, so none of it precedes the image.
+            pad_w = pad_h = 0
+        elif padding:
             pad_w /= 2
             pad_h /= 2
     else:
         pad_w, pad_h = ratio_pad[1]
     top, left = (round(pad_h - 0.1), round(pad_w - 0.1)) if padding else (0, 0)
-    bottom, right = im1_h - round(pad_h + 0.1), im1_w - round(pad_w + 0.1)
+    if center:
+        bottom, right = im1_h - round(pad_h + 0.1), im1_w - round(pad_w + 0.1)
+    else:
+        gain = (
+            min(im1_h / im0_h, im1_w / im0_w)
+            if ratio_pad is None
+            else float(ratio_pad[0][0])
+        )
+        bottom = top + int(round(im0_h * gain))
+        right = left + int(round(im0_w * gain))
     masks = masks[..., top:bottom, left:right]
     if isinstance(masks, np.ndarray):
         masks = torch.from_numpy(masks)
@@ -1427,6 +1495,7 @@ def nmsout2eval_seg(
     img1_shape: tuple[int, int],
     img0_shapes: tuple[int, int] | list[tuple[int, int]],
     ratio_pads: RatioPad | list[RatioPad | None] | None = None,
+    center: bool = True,
 ) -> tuple[
     list[list[int]],
     list[list[list[float]]],
@@ -1441,6 +1510,8 @@ def nmsout2eval_seg(
         img1_shape (tuple): Processed image shape (H, W).
         img0_shapes (tuple | list[tuple]): Original image shape for a single image or
             a list of original shapes for a batch.
+        ratio_pads: Shared or per-image letterbox metadata.
+        center: Whether the model's letterbox is centered; see ``scale_masks``.
 
     Returns:
         tuple: A tuple containing:
@@ -1449,13 +1520,13 @@ def nmsout2eval_seg(
             - scores (list[list]): The confidence scores for each image.
             - extra (list[list]): The encoded segmentation masks for each image.
     """
-    actual_img0_shapes = normalize_image_shapes(img0_shapes)
-    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
-
     if not isinstance(nms_outs[0], (list, tuple)):
         actual_nms_outs = [nms_outs]
     else:
         actual_nms_outs = nms_outs
+    # One shared image shape covers the whole batch, as it does for detection.
+    actual_img0_shapes = normalize_image_shapes(img0_shapes, len(actual_nms_outs))
+    actual_ratio_pads = normalize_ratio_pads(ratio_pads, len(actual_img0_shapes))
 
     det_results = []
     seg_results = []
@@ -1475,6 +1546,7 @@ def nmsout2eval_seg(
             seg_result.to(torch.float32),
             (img0_shape[0], img0_shape[1]),
             ratio_pad=ratio_pad,
+            center=center,
         )
         for seg_result, img0_shape, ratio_pad in zip(
             seg_results, actual_img0_shapes, actual_ratio_pads
@@ -1528,10 +1600,13 @@ def nmsout2eval_pose(
         actual_img0_shapes,
         ratio_pads=actual_ratio_pads,
     )
+    # ``scale_coords`` rescales in place, and slicing then reshaping a contiguous
+    # row block is a view, so without the clone this rewrote the caller's
+    # keypoints the way ``nmsout2eval`` already avoids for boxes.
     extra = [
         scale_coords(
             img1_shape,
-            nms_out[:, 6:].reshape(-1, 17, 3),
+            nms_out[:, 6:].reshape(-1, 17, 3).clone(),
             img0_shape,
             ratio_pad=ratio_pad,
         ).reshape(-1, 51)
@@ -1638,7 +1713,12 @@ class YOLOFaceDetectionMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list).
         """
-        return nmsout2eval_face(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval_face(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+        )
 
 
 class YOLOSegPostMixin:
@@ -1661,7 +1741,13 @@ class YOLOSegPostMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
-        return nmsout2eval_seg(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval_seg(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+            center=self.letterbox_center,
+        )
 
 
 class YOLOPosePostMixin:
@@ -1684,7 +1770,12 @@ class YOLOPosePostMixin:
         Returns:
             Tuple: (labels_list, boxes_list, scores_list, extra_list).
         """
-        return nmsout2eval_pose(nms_out, img1_shape, img0_shape, ratio_pads=ratio_pad)
+        return nmsout2eval_pose(
+            nms_out,
+            img1_shape,
+            img0_shape,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
+        )
 
 
 class YOLOOBBPostMixin:
@@ -1714,6 +1805,6 @@ class YOLOOBBPostMixin:
             nms_out,
             img1_shape,
             img0_shape,
-            ratio_pads=ratio_pad,
+            ratio_pads=self.ratio_pads_for(img1_shape, img0_shape, ratio_pad),
             include_xywhr=include_xywhr,
         )

@@ -13,8 +13,9 @@ import cv2
 import numpy as np
 import torch
 from faster_coco_eval import COCO
-from mblt_vision.utils.preprocess.letterbox import letterbox_semantic_mask
 from PIL import Image
+
+from mblt_vision.utils.preprocess.letterbox import letterbox_semantic_mask
 
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
 from .readiness import IMAGE_SUFFIXES
@@ -506,6 +507,7 @@ def get_ade20k_loader(
     batch_size: int,
     preprocess_fn: Callable,
     image_size: tuple[int, int],
+    center: bool = True,
 ) -> torch.utils.data.DataLoader:
     """Create an ADE20K loader that applies matching letterbox geometry to masks.
 
@@ -514,6 +516,7 @@ def get_ade20k_loader(
         batch_size: Number of samples per batch.
         preprocess_fn: Image preprocessing function that returns letterbox metadata.
         image_size: Configured model input size as ``(height, width)``.
+        center: The model's ``LetterBox.center``, so targets are anchored like images.
 
     Returns:
         Configured ADE20K validation loader.
@@ -547,6 +550,7 @@ def get_ade20k_loader(
             processed_target, target_ratio_pad = letterbox_semantic_mask(
                 target,
                 [input_height, input_width],
+                center=center,
             )
             if target_ratio_pad != ratio_pad:
                 raise ValueError(
@@ -672,8 +676,12 @@ def get_cityscapes_loader(
     batch_size: int,
     preprocess_fn: Callable,
     image_size: tuple[int, int],
+    center: bool = True,
 ) -> torch.utils.data.DataLoader:
-    """Create a Cityscapes loader with image-matching letterbox geometry."""
+    """Create a Cityscapes loader with image-matching letterbox geometry.
+
+    ``center`` is the model's ``LetterBox.center``, so targets are anchored like images.
+    """
 
     def loader(
         batch: list[Any],
@@ -703,6 +711,7 @@ def get_cityscapes_loader(
             processed_target, target_ratio_pad = letterbox_semantic_mask(
                 target,
                 [input_height, input_width],
+                center=center,
             )
             if target_ratio_pad != ratio_pad:
                 raise ValueError(

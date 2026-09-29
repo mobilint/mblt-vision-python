@@ -26,7 +26,12 @@ from .datasets import (
     get_dotav1_palette,
     get_imagenet_label,
 )
-from .letterbox import LetterBoxGeometry
+from .letterbox import (
+    LetterBoxGeometry,
+    RatioPad,
+    letterbox_center,
+    resolve_ratio_pad,
+)
 from mblt_vision.utils.postprocess.common import (
     crop_mask,
     scale_boxes,
@@ -442,6 +447,22 @@ class Results:
 
         return self._restore_dense_map(depth, image_shape, cv2.INTER_LINEAR, "Depth")
 
+    def _shape_ratio_pad(
+        self, img1_shape: tuple[int, int], img0_shape: tuple[int, int]
+    ) -> RatioPad | None:
+        """Return letterbox metadata for a plot, which only has the image shapes.
+
+        ``None`` lets the shared helpers derive their centered geometry, which is
+        right for Ultralytics models; a top-left model (``LetterBox.center: false``)
+        needs its own zero padding spelled out.
+        """
+
+        if letterbox_center(self.pre_cfg):
+            return None
+        return resolve_ratio_pad(
+            (int(img1_shape[0]), int(img1_shape[1])), img0_shape, center=False
+        )
+
     def _restore_dense_map(
         self,
         output: np.ndarray,
@@ -458,7 +479,9 @@ class Results:
                 output, (image_shape[1], image_shape[0]), interpolation=interpolation
             )
         geometry = LetterBoxGeometry.from_shapes(
-            (int(input_shape[0]), int(input_shape[1])), image_shape
+            (int(input_shape[0]), int(input_shape[1])),
+            image_shape,
+            letterbox_center(self.pre_cfg),
         )
         output_shape = (int(output.shape[0]), int(output.shape[1]))
         top, bottom, left, right = geometry.crop_bounds(output_shape)
@@ -553,6 +576,7 @@ class Results:
             img1_shape,
             box_cls[:, :4].clone(),
             img0_shape,
+            ratio_pad=self._shape_ratio_pad(img1_shape, img0_shape),
         )
         boxes = self.boxes
         scores = self.scores
@@ -610,7 +634,17 @@ class Results:
         mask = self._mask_tensor()
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         masks = (
-            crop_mask(scale_masks(mask, img0_shape), self.boxes)
+            crop_mask(
+                scale_masks(
+                    mask,
+                    img0_shape,
+                    ratio_pad=self._shape_ratio_pad(
+                        (int(mask.shape[-2]), int(mask.shape[-1])), img0_shape
+                    ),
+                    center=letterbox_center(self.pre_cfg),
+                ),
+                self.boxes,
+            )
             .gt_(0.0)
             .permute(1, 2, 0)
             .to(torch.float32)
@@ -641,10 +675,12 @@ class Results:
         img = self._plot_object_detection(source_path, None, **kwargs)
         box_cls = self._box_cls_tensor()
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
+        img1_shape = cast(tuple[int, int], self.pre_cfg["LetterBox"]["img_size"])
         self.kpts = scale_coords(
-            self.pre_cfg["LetterBox"]["img_size"],
+            img1_shape,
             box_cls[:, 6:].reshape(-1, 17, 3).clone(),
             img0_shape,
+            ratio_pad=self._shape_ratio_pad(img1_shape, img0_shape),
         )
         kpts = self.kpts
         if kpts is None:
@@ -707,10 +743,12 @@ class Results:
         img0_shape: tuple[int, int] = (img.shape[0], img.shape[1])
         self.labels = box_cls[:, 5].to(torch.int64)
         self.scores = box_cls[:, 4]
+        img1_shape = cast(tuple[int, int], self.pre_cfg["LetterBox"]["img_size"])
         self.rboxes = scale_rboxes(
-            self.pre_cfg["LetterBox"]["img_size"],
+            img1_shape,
             torch.cat([box_cls[:, :4], box_cls[:, 6:7]], dim=-1),
             img0_shape,
+            ratio_pad=self._shape_ratio_pad(img1_shape, img0_shape),
         )
         polygons = xywhr2xyxyxyxy(self.rboxes).to(torch.int32).cpu().numpy()
         for polygon, score, label in zip(polygons, self.scores, self.labels):

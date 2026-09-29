@@ -836,3 +836,30 @@ def test_segmentation_postprocessor_rejects_mismatched_prototype_batch() -> None
         match="Detection and prototype batch sizes must match.*2 detections and 1 prototypes",
     ):
         postprocessor.masking(detections, prototypes)
+
+
+def test_pose_evaluation_conversion_does_not_rewrite_nms_output() -> None:
+    """Scaling keypoints to the original image must leave the caller's rows intact."""
+
+    nms_out = torch.zeros((1, 57), dtype=torch.float32)
+    nms_out[0, :6] = torch.tensor([100.0, 100.0, 200.0, 200.0, 0.9, 0.0])
+    nms_out[0, 6:] = torch.tensor([300.0, 300.0, 1.0] * 17)
+    original = nms_out.clone()
+
+    _, _, _, keypoints = common_module.nmsout2eval_pose(
+        [nms_out], (640, 640), [(320, 320)]
+    )
+
+    assert torch.equal(nms_out, original)
+    assert keypoints[0][0][:2] == [150.0, 150.0]
+
+
+def test_nms_keeps_disjoint_zero_area_boxes() -> None:
+    """0 / 0 IoU between degenerate boxes is not an overlap, as in torchvision."""
+
+    boxes = torch.tensor(
+        [[10.0, 10.0, 10.0, 20.0], [500.0, 500.0, 500.0, 510.0], [0.0, 0.0, 5.0, 5.0]]
+    )
+    scores = torch.tensor([0.9, 0.8, 0.7])
+
+    assert common_module.non_max_suppression(boxes, scores, 0.7, 300) == [0, 1, 2]

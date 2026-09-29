@@ -1,0 +1,33 @@
+DEFAULT:
+  # pre_cfg/post_cfg follow mblt-model-ops' YOLOX-l/pipeline.yaml (branch jm/temp, 0368367e8):
+  # upstream's ValTransform(legacy=False) feeds a cv2 BGR image, resized onto a
+  # 114-filled canvas anchored top-left, and left unscaled -- hence no Normalize.
+  # No Hub artifact is published yet: pass a local model_path.
+  file_cfg:
+    repo_id: mobilint/YOLOX-l
+    filename: yolox_l.mxq
+    revision: main
+    local_artifact_only: true
+  pre_cfg:
+    Reader:
+      style: numpy
+      color_mode: BGR
+    LetterBox:
+      img_size:
+      - 640
+      - 640
+      center: false
+      padding_value: 114
+    SetOrder:
+      shape: HWC
+  post_cfg:
+    task: object_detection
+    dataset: coco
+    head: yolox
+    nl: 3
+    strides:
+    - 8
+    - 16
+    - 32
+    conf_thres: 0.001
+    iou_thres: 0.65
