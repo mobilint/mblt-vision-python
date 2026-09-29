@@ -6,6 +6,11 @@ boxes (OBB), instance and semantic segmentation, and pose estimation. Each model
 configuration includes the artifact, preprocessing, output taxonomy, and
 postprocessing contract needed to produce task-specific results.
 
+Breaking change in 0.0.5: SAM2 promptable mask generation, shipped in 0.0.3 and 0.0.4, has
+been removed. The `mask_generation` task, `mblt_vision.mask_generation.SAM2HieraLarge`, the
+`sam2-hiera-large` model, the `mblt-vision predict --point` and encoder/decoder path options,
+and SA-V validation are no longer available. Pin `mblt-vision-python<0.0.5` to keep using them.
+
 ## Loading models
 
 Use a task subpackage for a known model, or `MBLT_Engine` to choose a model and

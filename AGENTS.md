@@ -142,6 +142,9 @@ The current ownership boundary is deliberate:
   where every other face model uses `0.7`. Do not normalize the exception away; a size change here is a
   durable model-behavior change requiring the guide, both skill copies, and
   `mblt_vision/README.md` to be updated in the same commit.
+- For NYU Depth evaluation, rank results by delta1 and retain abs_rel then
+  RMSE (m) as secondary metrics. Median-align each image and average every
+  metric per image, following Ultralytics' depth-validation convention.
 - Reuse `wrapper.download_hub_artifact` (extracted from `MBLT_Engine._download_hub_artifact`) for
   any future model needing more than one Hub artifact, rather than duplicating Hub-resolution
   logic.
