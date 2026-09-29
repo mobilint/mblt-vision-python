@@ -23,7 +23,6 @@ from .dataloader import (
     CustomDOTAv1,
     CustomImageFolder,
     CustomNYUDepth,
-    CustomSAV,
     CustomWiderface,
     CustomWiderFaceDataset,
     get_ade20k_loader,
@@ -43,7 +42,6 @@ from .organizer import (
     organize_dotav1,
     organize_imagenet,
     organize_nyu_depth,
-    organize_sav,
     organize_widerface,
 )
 
@@ -67,7 +65,6 @@ __all__: list[str] = [
     "CustomDOTAv1",
     "CustomImageFolder",
     "CustomNYUDepth",
-    "CustomSAV",
     "CustomWiderFaceDataset",
     "CustomWiderface",
     "get_ade20k_loader",
@@ -84,6 +81,5 @@ __all__: list[str] = [
     "organize_dotav1",
     "organize_imagenet",
     "organize_nyu_depth",
-    "organize_sav",
     "organize_widerface",
 ]
