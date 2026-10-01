@@ -10,7 +10,7 @@ from typing import Any, cast
 import numpy as np
 import torch
 
-from .common import YOLOFaceDetectionMixin, dist2bbox, dual_topk
+from .common import YOLOFaceDetectionMixin, descending_order, dist2bbox, dual_topk
 from .yolo_anchorless_post import YOLOAnchorlessDetectionPost, _AnchorlessNMSInput
 
 
@@ -162,7 +162,7 @@ class YOLONMSFreeDetectionPost(YOLOAnchorlessDetectionPost):
             labels = torch.zeros_like(confidence)
             detections = torch.cat((boxes, confidence, labels), dim=-1)
             return [
-                batch[torch.argsort(batch[:, 4], descending=True)[: self.max_det]]
+                batch[descending_order(batch[:, 4])[: self.max_det]]
                 for batch in self._final_detection_batches(detections)
             ]
 

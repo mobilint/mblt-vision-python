@@ -49,9 +49,11 @@ description: >-
   argmax.
 - Preserve decoded-output layout provenance through NMS. For ambiguous tensors without
   provenance, prioritize channels-first raw-output normalization.
-- Keep NMS candidate sorts on Ultralytics' unstable `argsort(descending=True)` (a stable sort
-  shifts MXQ mAP through tied scores; see AGENTS.md), and suppress only IoU above the threshold
-  so NaN from zero-area boxes keeps the box, as torchvision does. Rank ImageNet top-1/top-5 from
+- Rank NMS and end-to-end candidates with `common.descending_order` (stable), which is
+  Ultralytics' CUDA validation order on every device; never a plain `argsort` or `torch.topk`
+  (see AGENTS.md). `dual_topk`'s second stage returns up to `max_det` (anchor, class) pairs.
+  Suppress only IoU above the threshold so NaN from zero-area boxes keeps the box, as
+  torchvision does. Rank ImageNet top-1/top-5 from
   one stable sort. Decode-true pose MXQ visibility is sigmoided; copy NMS rows before any
   in-place rescale for evaluation.
 - Normalize dense depth and semantic outputs before inverse letterboxing. Validate baked semantic

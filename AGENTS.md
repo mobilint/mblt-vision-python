@@ -75,13 +75,22 @@ The current ownership boundary is deliberate:
   suffix conflicts with an explicitly selected framework.
 - Preserve anchorless decoded-output layout provenance through NMS. When a tensor is ambiguous
   and provenance is unavailable, normalize it as raw channels-first before candidates-first.
-- Keep NMS candidate ordering on Ultralytics' unstable `argsort(descending=True)`, not
-  mblt-model-ops' `kind="stable"` sorts. Quantized MXQ scores tie often, and the call Ultralytics
-  makes reproduces its tie order; switching to a stable sort measured YOLOv8m -0.00047,
-  YOLOv8m-pose -0.0038 and YOLOv8m-seg +0.00029 mAP50-95 on 500 COCO val images (aries-rb),
-  entirely from ties. `non_max_suppression` suppresses only an IoU *above* `iou_thres`, as
-  `torchvision.ops.nms` does: two zero-area boxes give a NaN IoU, which must keep the
-  candidate, not drop it (no change on those three models' real outputs).
+- Rank every NMS and end-to-end candidate with `common.descending_order`, a stable descending
+  sort, never a plain `argsort(descending=True)` or `torch.topk`. That is Ultralytics' validation
+  order: `non_max_suppression` passes up to 30000 candidates straight to `torchvision.ops.nms`,
+  which sorts stably on CPU and CUDA, and the `argsort` above that cap and an end-to-end head's
+  `torch.topk` (at `k = 300`) are stable on CUDA, where it validates. On CPU those calls order
+  tied scores differently, and quantized MXQ scores tie often, so the unstable sort this rule
+  used to require made mblt-vision's CPU results diverge from Ultralytics; the earlier
+  measurement (YOLOv8m -0.00047, YOLOv8m-pose -0.0038, YOLOv8m-seg +0.00029 mAP50-95 for the
+  stable sort) compared two tie orders, not either against Ultralytics.
+  `tests/test_ultralytics_selection_order.py` pins the order. `non_max_suppression` suppresses
+  only an IoU *above* `iou_thres`, as `torchvision.ops.nms` does: two zero-area boxes give a NaN
+  IoU, which must keep the candidate, not drop it.
+- `dual_topk` reproduces `Detect.get_topk_index`: it may rank only the anchors that clear the
+  confidence threshold, but its second stage still returns up to `max_det` (anchor, class) pairs.
+  Capping that stage at the surviving anchor count dropped every further class of those anchors
+  whenever fewer than `max_det` of them cleared the threshold.
 - Rank ImageNet predictions once with a stable sort and take top-1 as the head of top-5, so
   tied scores favour the higher class index as in mblt-model-ops' evaluator, and top-1 is
   always inside top-5.
