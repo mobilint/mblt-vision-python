@@ -1,7 +1,10 @@
 DEFAULT:
-  # pre_cfg/post_cfg follow mblt-model-ops' YOLOX-Darknet53/pipeline.yaml (branch jm/temp, 0368367e8):
-  # upstream's ValTransform(legacy=False) feeds a cv2 BGR image, resized onto a
-  # 114-filled canvas anchored top-left, and left unscaled -- hence no Normalize.
+  # pre_cfg is upstream YOLOX's own test transform (yolox/data/data_augment.py
+  # preproc via ValTransform(legacy=False)): a cv2 BGR image resized to
+  # int(w * r) x int(h * r) -- truncated, hence size_rounding: floor -- onto a
+  # 114-filled canvas anchored top-left, and left unscaled, hence no Normalize.
+  # Boxes are restored by dividing by r. post_cfg follows mblt-model-ops'
+  # YOLOX-Darknet53/pipeline.yaml (branch jm/temp, 0368367e8).
   # No Hub artifact is published yet: pass a local model_path.
   file_cfg:
     repo_id: mobilint/YOLOX-Darknet53
@@ -18,6 +21,7 @@ DEFAULT:
       - 640
       center: false
       padding_value: 114
+      size_rounding: floor
     SetOrder:
       shape: HWC
   post_cfg:

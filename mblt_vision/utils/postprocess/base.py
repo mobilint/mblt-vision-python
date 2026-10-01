@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from ..._tasks import normalize_vision_task
-from ..letterbox import RatioPad, letterbox_center, resolve_ratio_pad
+from ..letterbox import RatioPad, letterbox_layout, resolve_ratio_pad
 from ..preprocess._validation import normalize_image_size
 from ..types import ListTensorLike, TensorLike
 from .common import (
@@ -101,11 +101,25 @@ class YOLODetectionPostBase(PostBase):
         self.imh, self.imw = normalize_image_size(
             img_size, name="pre_cfg.LetterBox.img_size"
         )
-        self.letterbox_center = letterbox_center(pre_cfg)
+        self.letterbox_layout = letterbox_layout(pre_cfg)
+        self.letterbox_center = self.letterbox_layout.center
         task = post_cfg.get("task")
         if task is None:
             raise ValueError("task should be provided in post_cfg")
         self.task = normalize_vision_task(task)
+        if self.task == "instance_segmentation" and (
+            self.letterbox_layout.size_rounding != "round"
+            or self.letterbox_layout.per_axis_ratio
+        ):
+            # ``scale_masks`` crops prototypes with Ultralytics' rounded extent and
+            # one ratio, so it cannot restore either option faithfully.
+            raise ValueError(
+                "instance_segmentation supports only pre_cfg.LetterBox.size_rounding "
+                "'round' without per_axis_ratio."
+            )
+        if self.task == "obb" and self.letterbox_layout.per_axis_ratio:
+            # A rotated box's width and height do not lie along x and y.
+            raise ValueError("obb does not support pre_cfg.LetterBox.per_axis_ratio.")
         task_key = self.task
         dataset = post_cfg.get("dataset")
         self.dataset = dataset.lower() if isinstance(dataset, str) else None
@@ -310,12 +324,13 @@ class YOLODetectionPostBase(PostBase):
         img0_shape: tuple[int, int] | list[tuple[int, int]],
         ratio_pad: RatioPad | list[RatioPad | None] | None,
     ) -> RatioPad | list[RatioPad | None] | None:
-        """Fill letterbox metadata the caller did not record with this model's anchoring.
+        """Fill letterbox metadata the caller did not record with this model's layout.
 
-        The shared inverse helpers derive missing metadata as a centered letterbox.
-        That is right for Ultralytics models, so their metadata passes through
-        untouched; a top-left model (``pre_cfg.LetterBox.center: false``) gets its
-        own zero padding instead of a shift by half the border.
+        The shared inverse helpers derive missing metadata as Ultralytics' centered,
+        rounded letterbox. That is right for Ultralytics models, so their metadata
+        passes through untouched; any other ``LetterBoxLayout`` (a top-left
+        ``center: false``, a ``size_rounding: floor``, or ``per_axis_ratio``) gets
+        its own geometry instead.
 
         The result keeps the caller's cardinality. One shared image shape with
         shared (or no) metadata yields one shared pad, which the helpers broadcast
@@ -331,7 +346,7 @@ class YOLODetectionPostBase(PostBase):
             Metadata the shared helpers can use as-is.
         """
 
-        if self.letterbox_center:
+        if self.letterbox_layout.is_default:
             return ratio_pad
         per_image_pads = ratio_pad is not None and not _is_ratio_pad(ratio_pad)
         shared_shape = len(img0_shape) == 2 and isinstance(img0_shape[0], int)
@@ -341,7 +356,7 @@ class YOLODetectionPostBase(PostBase):
                 img1_shape,
                 (int(shape[0]), int(shape[1])),
                 cast(RatioPad | None, ratio_pad),
-                center=False,
+                self.letterbox_layout,
             )
         if per_image_pads:
             pads = list(cast(Sequence[RatioPad | None], ratio_pad))
@@ -350,7 +365,7 @@ class YOLODetectionPostBase(PostBase):
             shapes = normalize_image_shapes(img0_shape)
             pads = normalize_ratio_pads(ratio_pad, len(shapes))
         return [
-            resolve_ratio_pad(img1_shape, shape, pad, center=False)
+            resolve_ratio_pad(img1_shape, shape, pad, self.letterbox_layout)
             for pad, shape in zip(pads, shapes)
         ]
 

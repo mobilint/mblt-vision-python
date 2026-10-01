@@ -318,6 +318,18 @@ def format_coco_results(
     return results
 
 
+def _coco_image_decoder(pre_cfg: dict[str, Any]) -> str:
+    """Return the decoder matching the model's ``Reader``: PIL for ``style: pil``.
+
+    The COCO loader decodes images itself, so a model whose reader decodes files
+    with PIL (DAMO-YOLO) would otherwise be fed OpenCV's pixels.
+    """
+
+    reader_cfg = pre_cfg.get("Reader")
+    style = reader_cfg.get("style") if isinstance(reader_cfg, dict) else None
+    return "pil" if isinstance(style, str) and style.lower() == "pil" else "cv2"
+
+
 def eval_coco(
     model: MBLT_Engine,
     data_path: str,
@@ -361,15 +373,18 @@ def eval_coco_metrics(
             "COCO evaluation requires model post_cfg.dataset to be 'coco', "
             f"got {dataset_name!r}."
         )
+    decoder = _coco_image_decoder(model.pre_cfg)
     if task in {"object_detection", "instance_segmentation"}:
         dataset = CustomCOCODataset(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "instances_val2017.json"),
+            decoder=decoder,
         )
     else:
         dataset = CustomCOCODataset(
             os.path.join(data_path, "val2017"),
             os.path.join(data_path, "person_keypoints_val2017.json"),
+            decoder=decoder,
         )
     _validate_coco_dataset_taxonomy(dataset, task)
 

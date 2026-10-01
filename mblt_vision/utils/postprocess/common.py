@@ -824,17 +824,13 @@ def scale_boxes(
         np.ndarray | torch.Tensor: The scaled bounding boxes, in the format of (x1, y1, x2, y2)
     """
     ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
-    gain = ratio[0]
-    if isinstance(boxes, np.ndarray):
-        if padding:
-            boxes[..., [0, 2]] -= pad[0]  # x padding
-            boxes[..., [1, 3]] -= pad[1]  # y padding
-        boxes[..., :4] /= gain
-        return clip_boxes(boxes, img0_shape)
+    # Ratios are (x, y). Every uniform letterbox records the same value twice;
+    # DAMO-YOLO's per-axis restoration records each axis' own.
     if padding:
         boxes[..., [0, 2]] -= pad[0]  # x padding
         boxes[..., [1, 3]] -= pad[1]  # y padding
-    boxes[..., :4] /= gain
+    boxes[..., [0, 2]] /= ratio[0]
+    boxes[..., [1, 3]] /= ratio[1]
     return clip_boxes(boxes, img0_shape)
 
 
@@ -880,17 +876,11 @@ def scale_coords(
         np.ndarray | torch.Tensor: The scaled coordinates, in the format of (x, y)
     """
     ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
-    gain = ratio[0]
-    if isinstance(coords, np.ndarray):
-        if padding:
-            coords[..., 0] -= pad[0]  # x padding
-            coords[..., 1] -= pad[1]  # y padding
-        coords[..., :2] /= gain
-        return clip_coords(coords, img0_shape)
     if padding:
         coords[..., 0] -= pad[0]  # x padding
         coords[..., 1] -= pad[1]  # y padding
-    coords[..., :2] /= gain
+    coords[..., 0] /= ratio[0]
+    coords[..., 1] /= ratio[1]
     return clip_coords(coords, img0_shape)
 
 
@@ -914,6 +904,12 @@ def scale_rboxes(
         Rescaled rotated boxes in ``xywhr`` format.
     """
     ratio, pad = resolve_ratio_pad(img1_shape, img0_shape, ratio_pad)
+    if ratio[0] != ratio[1]:
+        # A rotated box's width and height do not lie along x and y, so a
+        # per-axis ratio has no faithful inverse here.
+        raise ValueError(
+            f"Rotated boxes need one uniform letterbox ratio, got {tuple(ratio)}."
+        )
     gain = ratio[0]
     scaled = rboxes.clone()
     if padding:

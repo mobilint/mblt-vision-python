@@ -7,7 +7,13 @@ from typing import Any
 
 import torch
 
-from ..letterbox import LetterBoxGeometry, RatioPad, resolve_ratio_pad
+from ..letterbox import (
+    LetterBoxGeometry,
+    LetterBoxLayout,
+    RatioPad,
+    deprecated_center_argument,
+    resolve_ratio_pad,
+)
 from .common import normalize_ratio_pads
 
 
@@ -48,7 +54,9 @@ def resolve_ratio_pads(
     batch_size: int,
     shapes: Sequence[tuple[int, int]],
     input_shape: tuple[int, int],
-    center: bool = True,
+    layout: LetterBoxLayout | bool | None = None,
+    *,
+    center: bool | None = None,
 ) -> list[RatioPad]:
     """Normalize letterbox metadata and derive values missing from a dense task batch.
 
@@ -57,8 +65,9 @@ def resolve_ratio_pads(
         batch_size: Number of images in the output batch.
         shapes: Original image shapes.
         input_shape: Configured model input shape.
-        center: The model's letterbox anchoring (``letterbox_center(pre_cfg)``),
-            used for metadata the caller did not record.
+        layout: The model's ``letterbox_layout(pre_cfg)`` (or the older
+            ``center`` boolean), used for metadata the caller did not record.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         One resolved ratio/padding pair per batch item.
@@ -67,9 +76,10 @@ def resolve_ratio_pads(
         ValueError: If ratio/padding metadata is invalid for the batch.
     """
 
+    layout = deprecated_center_argument(layout, center, "resolve_ratio_pads")
     pads = normalize_ratio_pads(ratio_pad, batch_size)
     return [
-        resolve_ratio_pad(input_shape, shape, pad, center)
+        resolve_ratio_pad(input_shape, shape, pad, layout)
         for pad, shape in zip(pads, shapes)
     ]
 
@@ -80,6 +90,7 @@ def crop_letterbox(
     ratio_pad: RatioPad,
     input_shape: tuple[int, int],
     task_name: str,
+    layout: LetterBoxLayout | bool = True,
 ) -> torch.Tensor:
     """Crop letterbox padding from a dense two-dimensional output.
 
@@ -89,6 +100,7 @@ def crop_letterbox(
         ratio_pad: Resize ratio and padding applied during preprocessing.
         input_shape: Configured model input height and width.
         task_name: Task label used in validation errors.
+        layout: The model's letterbox layout, which sizes the resized extent.
 
     Returns:
         Output with letterbox padding removed.
@@ -97,7 +109,7 @@ def crop_letterbox(
         ValueError: If inverse letterboxing produces an empty crop.
     """
 
-    geometry = LetterBoxGeometry.from_shapes(input_shape, shape)
+    geometry = LetterBoxGeometry.from_shapes(input_shape, shape, layout)
     output_shape = (int(output.shape[0]), int(output.shape[1]))
     top, bottom, left, right = geometry.crop_bounds(output_shape, pad=ratio_pad[1])
     cropped = output[top:bottom, left:right]

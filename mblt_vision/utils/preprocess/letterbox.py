@@ -3,8 +3,15 @@ from __future__ import annotations
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 
-from ..letterbox import LetterBoxGeometry, RatioPad
+from ..letterbox import (
+    LetterBoxGeometry,
+    LetterBoxLayout,
+    RatioPad,
+    SizeRounding,
+    deprecated_center_argument,
+)
 from ..types import TensorLike
 from ._validation import normalize_image_size, normalize_uint8_rgb_array
 from .base import PreOps
@@ -15,7 +22,9 @@ def _apply_letterbox(
     img_size: list[int],
     interpolation: int,
     padding_value: int | tuple[int, int, int],
-    center: bool = True,
+    layout: LetterBoxLayout | bool | None = None,
+    *,
+    center: bool | None = None,
 ) -> tuple[np.ndarray, RatioPad]:
     """Resize and pad an array while preserving its aspect ratio.
 
@@ -24,15 +33,17 @@ def _apply_letterbox(
         img_size: Target size as ``[height, width]``.
         interpolation: OpenCV interpolation mode.
         padding_value: Constant border value.
-        center: Center the resized array, or anchor it top-left.
+        layout: The model's ``LetterBoxLayout``, or the older ``center`` boolean.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         The letterboxed array and its resize/padding metadata.
     """
 
+    layout = deprecated_center_argument(layout, center, "_apply_letterbox")
     input_shape = (int(img_size[0]), int(img_size[1]))
     original_shape = (int(image.shape[0]), int(image.shape[1]))
-    geometry = LetterBoxGeometry.from_shapes(input_shape, original_shape, center)
+    geometry = LetterBoxGeometry.from_shapes(input_shape, original_shape, layout)
     resized_height, resized_width = geometry.resized_shape
     if image.shape[:2] != geometry.resized_shape:
         image = cv2.resize(
@@ -66,7 +77,9 @@ def letterbox_semantic_mask(
     mask: np.ndarray,
     img_size: list[int],
     ignore_label: int = 255,
-    center: bool = True,
+    layout: LetterBoxLayout | bool | None = None,
+    *,
+    center: bool | None = None,
 ) -> tuple[np.ndarray, RatioPad]:
     """Letterbox a semantic mask without interpolating class IDs.
 
@@ -74,8 +87,9 @@ def letterbox_semantic_mask(
         mask: Two-dimensional semantic class map.
         img_size: Target size as ``[height, width]``.
         ignore_label: Class value used for padded pixels.
-        center: Center the mask, or anchor it top-left. Pass the model's
-            ``LetterBox.center`` so the target matches its image's geometry.
+        layout: The model's ``letterbox_layout(pre_cfg)`` (or the older
+            ``center`` boolean), so the target matches its image's geometry.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         The letterboxed mask and its resize/padding metadata.
@@ -88,7 +102,8 @@ def letterbox_semantic_mask(
         raise ValueError(
             f"Semantic masks must be two-dimensional, got shape {mask.shape}."
         )
-    return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label, center)
+    layout = deprecated_center_argument(layout, center, "letterbox_semantic_mask")
+    return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label, layout)
 
 
 class LetterBox(PreOps):
@@ -97,15 +112,23 @@ class LetterBox(PreOps):
     Resizes the image while maintaining aspect ratio, adding padding to meet
     target dimensions. Floating-point RGB inputs in ``[0, 1]`` are scaled to
     byte RGB; other floating-point values must be finite and in ``[0, 255]``.
-    The defaults are Ultralytics' letterbox: centered, padded with 114. YOLOX
-    anchors the same resize top-left with 114, and DAMO-YOLO's December 2022
-    checkpoints anchor it top-left with zeros.
+    The defaults are Ultralytics' letterbox: centered, padded with 114, the
+    resized size rounded. Upstream YOLOX truncates the size with ``int()`` and
+    anchors it top-left with 114; DAMO-YOLO's December 2022 checkpoints do the
+    same with zeros and restore each axis by its own ratio. PIL images, as
+    ``Reader(style="pil")`` returns them, are converted with ``np.asarray`` the
+    way DAMO-YOLO's dataset does.
 
     Ref: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/data/augment.py#L1535
     """
 
     def __init__(
-        self, img_size: list[int], center: bool = True, padding_value: int = 114
+        self,
+        img_size: list[int],
+        center: bool = True,
+        padding_value: int = 114,
+        size_rounding: SizeRounding = "round",
+        per_axis_ratio: bool = False,
     ) -> None:
         """Initializes LetterBox with target image size.
 
@@ -113,17 +136,20 @@ class LetterBox(PreOps):
             img_size (list[int]): Target image size [h, w].
             center: Split the padding around the image, or anchor it top-left.
             padding_value: Byte value filling every channel of the padding.
+            size_rounding: ``"round"`` the resized size, or ``"floor"`` it as
+                upstream YOLOX and DAMO-YOLO do with ``int(w * r)``.
+            per_axis_ratio: Record each axis' resized-over-original ratio for
+                restoration instead of the aspect-preserving one.
 
         Raises:
-            TypeError: If ``center`` is not a boolean or ``padding_value`` not an integer.
-            ValueError: If ``padding_value`` is outside ``[0, 255]``.
+            TypeError: If ``center`` or ``per_axis_ratio`` is not a boolean, or
+                ``padding_value`` not an integer.
+            ValueError: If ``padding_value`` is outside ``[0, 255]`` or
+                ``size_rounding`` is unsupported.
         """
         super().__init__()
         self.img_size = normalize_image_size(img_size, name="img_size")
-        if not isinstance(center, bool):
-            raise TypeError(
-                f"LetterBox center must be a boolean, got {type(center).__name__}."
-            )
+        self.layout = LetterBoxLayout(center, size_rounding, per_axis_ratio)
         if isinstance(padding_value, bool) or not isinstance(padding_value, int):
             raise TypeError(
                 "LetterBox padding_value must be an integer, "
@@ -134,10 +160,12 @@ class LetterBox(PreOps):
                 f"LetterBox padding_value must be in [0, 255], got {padding_value}."
             )
         self.center = center
+        self.size_rounding = size_rounding
+        self.per_axis_ratio = per_axis_ratio
         self.padding_value = padding_value
         self.ratio_pad: tuple[tuple[float, float], tuple[float, float]] | None = None
 
-    def __call__(self, x: TensorLike) -> torch.Tensor:
+    def __call__(self, x: TensorLike | Image.Image) -> torch.Tensor:
         """Executes YOLO preprocessing (letterbox resizing).
 
         The call's geometry is also left in ``self.ratio_pad`` for compatibility.
@@ -145,7 +173,7 @@ class LetterBox(PreOps):
         callers must use ``with_ratio_pad`` instead.
 
         Args:
-            x (TensorLike): Input image.
+            x (TensorLike | Image.Image): Input image.
 
         Returns:
             torch.Tensor: Preprocessed image in HWC format on the selected device.
@@ -153,20 +181,25 @@ class LetterBox(PreOps):
         img, self.ratio_pad = self.with_ratio_pad(x)
         return img
 
-    def with_ratio_pad(self, x: TensorLike) -> tuple[torch.Tensor, RatioPad]:
+    def with_ratio_pad(
+        self, x: TensorLike | Image.Image
+    ) -> tuple[torch.Tensor, RatioPad]:
         """Letterbox an image and return its geometry without touching instance state.
 
         Args:
-            x (TensorLike): Input image.
+            x (TensorLike | Image.Image): Input image.
 
         Returns:
             The preprocessed HWC image on the selected device and its ``ratio_pad``.
         """
         if isinstance(x, torch.Tensor):
             x = x.detach().cpu().numpy()
+        elif isinstance(x, Image.Image):
+            x = np.asarray(x)
         elif not isinstance(x, np.ndarray):
             raise TypeError(
-                f"LetterBox expects a NumPy array or tensor, got {type(x).__name__}."
+                "LetterBox expects a NumPy array, tensor or PIL image, "
+                f"got {type(x).__name__}."
             )
         if x.ndim != 3:
             raise ValueError(f"LetterBox expects an HWC image, got shape {x.shape}.")
@@ -176,6 +209,6 @@ class LetterBox(PreOps):
             self.img_size,
             cv2.INTER_LINEAR,
             (self.padding_value,) * 3,
-            self.center,
+            self.layout,
         )
         return torch.from_numpy(img).to(self.device).byte(), ratio_pad

@@ -15,6 +15,7 @@ import torch
 from faster_coco_eval import COCO
 from PIL import Image
 
+from mblt_vision.utils.letterbox import LetterBoxLayout, deprecated_center_argument
 from mblt_vision.utils.preprocess.letterbox import letterbox_semantic_mask
 
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
@@ -49,7 +50,11 @@ class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int
     """
 
     def __init__(
-        self, root: str, annFile: str, min_keypoints: int | None = None
+        self,
+        root: str,
+        annFile: str,
+        min_keypoints: int | None = None,
+        decoder: str = "cv2",
     ) -> None:
         """Initialize the custom COCO dataset.
 
@@ -58,7 +63,19 @@ class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int
             annFile (str): Path to the COCO annotation JSON file.
             min_keypoints: If set, keep only images with at least one
                 annotation whose ``num_keypoints`` is greater than this value.
+            decoder: ``"cv2"`` (the default) or ``"pil"``, the library that decodes
+                each image to RGB. Pass the model's ``Reader.style`` decoder: PIL
+                and OpenCV can decode the same JPEG to different pixels, and
+                DAMO-YOLO's upstream evaluation decodes with PIL.
+
+        Raises:
+            ValueError: If ``decoder`` is unsupported or the annotation is unreadable.
         """
+        if decoder not in {"cv2", "pil"}:
+            raise ValueError(
+                f"Unsupported COCO image decoder {decoder!r}; expected 'cv2' or 'pil'."
+            )
+        self.decoder = decoder
         self.root = root
         try:
             raw_annotation = json.loads(Path(annFile).read_text(encoding="utf-8"))
@@ -103,6 +120,11 @@ class CustomCOCODataset(torch.utils.data.Dataset[tuple[np.ndarray, int, int, int
             raise ValueError(
                 f"COCO image ID {image_id} resolves outside the image root: {file_name!r}."
             ) from exc
+        if self.decoder == "pil":
+            # Upstream DAMO-YOLO's np.asarray(Image.open(path).convert("RGB")),
+            # copied so the array is writable like cv2's.
+            with Image.open(image_path) as pil_image:
+                return np.array(pil_image.convert("RGB"))
         image = cv2.imread(str(image_path))  # Load image (BGR format)
 
         if image is None:
@@ -420,7 +442,9 @@ def get_ade20k_loader(
     batch_size: int,
     preprocess_fn: Callable,
     image_size: tuple[int, int],
-    center: bool = True,
+    layout: LetterBoxLayout | bool | None = None,
+    *,
+    center: bool | None = None,
 ) -> torch.utils.data.DataLoader:
     """Create an ADE20K loader that applies matching letterbox geometry to masks.
 
@@ -429,11 +453,15 @@ def get_ade20k_loader(
         batch_size: Number of samples per batch.
         preprocess_fn: Image preprocessing function that returns letterbox metadata.
         image_size: Configured model input size as ``(height, width)``.
-        center: The model's ``LetterBox.center``, so targets are anchored like images.
+        layout: The model's ``letterbox_layout(pre_cfg)``, so targets share the
+            images' geometry.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         Configured ADE20K validation loader.
     """
+
+    layout = deprecated_center_argument(layout, center, "get_ade20k_loader")
 
     def loader(
         batch: list[Any],
@@ -463,7 +491,7 @@ def get_ade20k_loader(
             processed_target, target_ratio_pad = letterbox_semantic_mask(
                 target,
                 [input_height, input_width],
-                center=center,
+                layout=layout,
             )
             if target_ratio_pad != ratio_pad:
                 raise ValueError(
@@ -589,12 +617,17 @@ def get_cityscapes_loader(
     batch_size: int,
     preprocess_fn: Callable,
     image_size: tuple[int, int],
-    center: bool = True,
+    layout: LetterBoxLayout | bool | None = None,
+    *,
+    center: bool | None = None,
 ) -> torch.utils.data.DataLoader:
     """Create a Cityscapes loader with image-matching letterbox geometry.
 
-    ``center`` is the model's ``LetterBox.center``, so targets are anchored like images.
+    ``layout`` is the model's ``letterbox_layout(pre_cfg)``, so targets share the
+    images' geometry; ``center`` is its deprecated boolean spelling.
     """
+
+    layout = deprecated_center_argument(layout, center, "get_cityscapes_loader")
 
     def loader(
         batch: list[Any],
@@ -624,7 +657,7 @@ def get_cityscapes_loader(
             processed_target, target_ratio_pad = letterbox_semantic_mask(
                 target,
                 [input_height, input_width],
-                center=center,
+                layout=layout,
             )
             if target_ratio_pad != ratio_pad:
                 raise ValueError(

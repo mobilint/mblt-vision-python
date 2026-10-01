@@ -369,8 +369,12 @@ validation split, following Ultralytics' depth-validation convention.
 - YOLOX and DAMO-YOLO have no Hub artifact yet, so pass a local `model_path`. Their GPU
   scores are the ONNX exports of the upstream checkpoints, measured through this package
   (upstream publishes 40.5 for YOLOX-s and 41.8 for DAMO-YOLO-T). Neither preprocesses like
-  Ultralytics: both letterbox top-left and feed the unscaled 0-255 image, and YOLOX reads
-  BGR. DAMO-YOLO follows its December 2022 checkpoints, the only ones still downloadable.
+  Ultralytics: both reproduce upstream's own test transform, which letterboxes top-left with
+  a truncated `int(w * r)` size (`LetterBox.size_rounding: floor`) and feeds the unscaled
+  0-255 image. YOLOX reads cv2 BGR and restores boxes by the one resize ratio. DAMO-YOLO
+  follows its December 2022 checkpoints, the only ones still downloadable: it decodes with
+  PIL (`Reader.style: pil`) and restores each axis by its own ratio
+  (`LetterBox.per_axis_ratio: true`).
 
 </details>
 
