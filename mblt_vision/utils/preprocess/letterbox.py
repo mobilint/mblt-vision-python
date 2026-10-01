@@ -23,6 +23,8 @@ def _apply_letterbox(
     interpolation: int,
     padding_value: int | tuple[int, int, int],
     layout: LetterBoxLayout | bool = True,
+    *,
+    center: bool | None = None,
 ) -> tuple[np.ndarray, RatioPad]:
     """Resize and pad an array while preserving its aspect ratio.
 
@@ -32,11 +34,13 @@ def _apply_letterbox(
         interpolation: OpenCV interpolation mode.
         padding_value: Constant border value.
         layout: The model's ``LetterBoxLayout``, or the older ``center`` boolean.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         The letterboxed array and its resize/padding metadata.
     """
 
+    layout = deprecated_center_argument(layout, center, "_apply_letterbox")
     input_shape = (int(img_size[0]), int(img_size[1]))
     original_shape = (int(image.shape[0]), int(image.shape[1]))
     geometry = LetterBoxGeometry.from_shapes(input_shape, original_shape, layout)

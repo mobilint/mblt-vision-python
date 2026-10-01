@@ -30,7 +30,13 @@ from ..datasets.readiness import (
     _canonicalize_quadrilateral,
     _polygon_has_positive_image_overlap,
 )
-from ..letterbox import LetterBoxLayout, RatioPad, letterbox_layout, resolve_ratio_pad
+from ..letterbox import (
+    LetterBoxLayout,
+    RatioPad,
+    deprecated_center_argument,
+    letterbox_layout,
+    resolve_ratio_pad,
+)
 from ._pipeline import map_batched_inference
 
 if TYPE_CHECKING:
@@ -522,12 +528,15 @@ def _ratio_pad_for_shape(
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
     layout: LetterBoxLayout | bool = True,
+    *,
+    center: bool | None = None,
 ) -> tuple[float, tuple[float, float]]:
     """Return letterbox gain and padding for an image.
 
     ``layout`` is the model's ``letterbox_layout(pre_cfg)``, used only when no
-    metadata was recorded.
+    metadata was recorded; ``center`` is its deprecated boolean spelling.
     """
+    layout = deprecated_center_argument(layout, center, "_ratio_pad_for_shape")
     if len(input_shape) < 2:
         raise ValueError(f"Expected at least 2 input dimensions, got {input_shape}.")
 
@@ -547,8 +556,14 @@ def _ground_truth_to_input_space(
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
     layout: LetterBoxLayout | bool = True,
+    *,
+    center: bool | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Transform original-image DOTAv1 polygons to letterboxed ``xywhr`` boxes."""
+    """Transform original-image DOTAv1 polygons to letterboxed ``xywhr`` boxes.
+
+    ``center`` is the deprecated boolean spelling of ``layout``.
+    """
+    layout = deprecated_center_argument(layout, center, "_ground_truth_to_input_space")
     gain, pad = _ratio_pad_for_shape(input_shape, org_shape, ratio_pad, layout)
 
     def transform(polygons: torch.Tensor | None, boxes: torch.Tensor) -> torch.Tensor:

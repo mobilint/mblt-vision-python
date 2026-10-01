@@ -7,7 +7,13 @@ from typing import Any
 
 import torch
 
-from ..letterbox import LetterBoxGeometry, LetterBoxLayout, RatioPad, resolve_ratio_pad
+from ..letterbox import (
+    LetterBoxGeometry,
+    LetterBoxLayout,
+    RatioPad,
+    deprecated_center_argument,
+    resolve_ratio_pad,
+)
 from .common import normalize_ratio_pads
 
 
@@ -49,6 +55,8 @@ def resolve_ratio_pads(
     shapes: Sequence[tuple[int, int]],
     input_shape: tuple[int, int],
     layout: LetterBoxLayout | bool = True,
+    *,
+    center: bool | None = None,
 ) -> list[RatioPad]:
     """Normalize letterbox metadata and derive values missing from a dense task batch.
 
@@ -59,6 +67,7 @@ def resolve_ratio_pads(
         input_shape: Configured model input shape.
         layout: The model's ``letterbox_layout(pre_cfg)`` (or the older
             ``center`` boolean), used for metadata the caller did not record.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         One resolved ratio/padding pair per batch item.
@@ -67,6 +76,7 @@ def resolve_ratio_pads(
         ValueError: If ratio/padding metadata is invalid for the batch.
     """
 
+    layout = deprecated_center_argument(layout, center, "resolve_ratio_pads")
     pads = normalize_ratio_pads(ratio_pad, batch_size)
     return [
         resolve_ratio_pad(input_shape, shape, pad, layout)

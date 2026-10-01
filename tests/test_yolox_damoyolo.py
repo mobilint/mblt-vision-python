@@ -628,7 +628,8 @@ def test_top_left_mask_crop_without_metadata_matches_the_explicit_pads(
 # DAMO-YOLO's December 2022 ``Resize`` + ``to_image_list`` (tinyvision/DAMO-YOLO
 # 55ae14f), whose checkpoints are the only ones still downloadable.
 
-# Shapes whose r * side lands on or above .5, where truncation and rounding differ.
+# Shapes where truncation and half-to-even rounding differ (335 * 1.28 = 428.8), plus
+# exact and tiny ones where they agree.
 UPSTREAM_SHAPES = [(335, 500), (427, 640), (480, 640), (500, 333), (1, 7), (123, 457)]
 
 
@@ -935,3 +936,86 @@ def test_semantic_loaders_accept_the_deprecated_center_keyword(loader_name) -> N
 
     _, _, _, ratio_pads, _ = next(iter(loader))
     assert ratio_pads == [((1.0, 1.0), (0, 0))]
+
+
+def _renamed_center_callables() -> list[tuple[str, object]]:
+    """Every callable whose ``center`` parameter became ``layout``, with a top-left call."""
+
+    import importlib
+
+    from mblt_vision.utils.datasets import dataloader
+    from mblt_vision.utils.letterbox import resolve_ratio_pad
+    from mblt_vision.utils.postprocess._letterbox import resolve_ratio_pads
+    from mblt_vision.utils.preprocess import letterbox_semantic_mask
+    from mblt_vision.utils.preprocess.letterbox import _apply_letterbox
+
+    eval_dota = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
+    mask = np.zeros((48, 64), dtype=np.uint8)
+    preprocess = build_preprocess(
+        {"LetterBox": {"img_size": [64, 64], "center": False}}
+    )
+    sample = [(np.zeros((48, 64, 3), np.uint8), np.zeros((48, 64), np.uint8), "s")]
+    # One 10x10 square, so the result shows whether the 80-row centered pad was added.
+    square = torch.tensor([[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]])
+    gt = {"cls": torch.zeros(1), "bboxes": torch.zeros((1, 5)), "polygons": square}
+
+    def loader(name: str):
+        return lambda **kw: next(
+            iter(
+                getattr(dataloader, name)(
+                    sample, 1, preprocess.with_metadata, image_size=(64, 64), **kw
+                )
+            )
+        )[3]
+
+    return [
+        (
+            "from_shapes",
+            lambda **kw: LetterBoxGeometry.from_shapes(
+                (640, 640), (480, 640), **kw
+            ).pad,
+        ),
+        (
+            "resolve_ratio_pad",
+            lambda **kw: resolve_ratio_pad((640, 640), (480, 640), **kw),
+        ),
+        (
+            "resolve_ratio_pads",
+            lambda **kw: resolve_ratio_pads(None, 1, [(480, 640)], (640, 640), **kw),
+        ),
+        (
+            "letterbox_semantic_mask",
+            lambda **kw: letterbox_semantic_mask(mask, [64, 64], **kw)[1],
+        ),
+        (
+            "_apply_letterbox",
+            lambda **kw: _apply_letterbox(mask, [64, 64], cv2.INTER_NEAREST, 0, **kw)[
+                1
+            ],
+        ),
+        ("get_ade20k_loader", loader("get_ade20k_loader")),
+        ("get_cityscapes_loader", loader("get_cityscapes_loader")),
+        (
+            "_ratio_pad_for_shape",
+            lambda **kw: eval_dota._ratio_pad_for_shape(
+                (640, 640), (480, 640), None, **kw
+            ),
+        ),
+        (
+            "_ground_truth_to_input_space",
+            lambda **kw: eval_dota._ground_truth_to_input_space(
+                gt, (640, 640), (480, 640), None, **kw
+            )["bboxes"].tolist(),
+        ),
+    ]
+
+
+@pytest.mark.parametrize("name", [name for name, _ in _renamed_center_callables()])
+def test_every_renamed_callable_accepts_the_deprecated_center_keyword(name) -> None:
+    call = dict(_renamed_center_callables())[name]
+
+    with pytest.warns(DeprecationWarning, match="center"):
+        legacy = call(center=False)
+    assert legacy == call(layout=LetterBoxLayout(center=False))
+    with pytest.raises(TypeError, match="not both"):
+        call(layout=LetterBoxLayout(center=False), center=False)
