@@ -54,7 +54,7 @@ def resolve_ratio_pads(
     batch_size: int,
     shapes: Sequence[tuple[int, int]],
     input_shape: tuple[int, int],
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> list[RatioPad]:

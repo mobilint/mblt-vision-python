@@ -442,7 +442,7 @@ def get_ade20k_loader(
     batch_size: int,
     preprocess_fn: Callable,
     image_size: tuple[int, int],
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> torch.utils.data.DataLoader:
@@ -617,7 +617,7 @@ def get_cityscapes_loader(
     batch_size: int,
     preprocess_fn: Callable,
     image_size: tuple[int, int],
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> torch.utils.data.DataLoader:

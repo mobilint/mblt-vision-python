@@ -57,25 +57,27 @@ class LetterBoxLayout:
 
 
 def deprecated_center_argument(
-    layout: LetterBoxLayout | bool, center: bool | None, owner: str
+    layout: LetterBoxLayout | bool | None, center: bool | None, owner: str
 ) -> LetterBoxLayout | bool:
     """Resolve the ``center=`` keyword that ``layout=`` replaced.
 
     Args:
-        layout: The ``layout`` argument as passed, ``True`` when omitted.
+        layout: The ``layout`` argument as passed, ``None`` when omitted, so an
+            explicit ``layout=True`` still counts as given.
         center: The deprecated ``center`` keyword, ``None`` when omitted.
         owner: Function name used in the warning and error.
 
     Returns:
-        ``center`` when it was given, otherwise ``layout``.
+        ``center`` when it was given, else ``layout``, else Ultralytics' default
+        ``True``.
 
     Raises:
         TypeError: If both ``layout`` and ``center`` were given.
     """
 
     if center is None:
-        return layout
-    if layout is not True:
+        return True if layout is None else layout
+    if layout is not None:
         raise TypeError(f"{owner}() takes layout or the deprecated center, not both.")
     warnings.warn(
         f"{owner}(center=...) is deprecated; pass layout=LetterBoxLayout(center=...).",
@@ -109,7 +111,7 @@ class LetterBoxGeometry:
         cls,
         input_shape: tuple[int, int],
         original_shape: tuple[int, int],
-        layout: LetterBoxLayout | bool = True,
+        layout: LetterBoxLayout | bool | None = None,
         *,
         center: bool | None = None,
     ) -> LetterBoxGeometry:
@@ -216,7 +218,7 @@ def resolve_ratio_pad(
     input_shape: tuple[int, int],
     original_shape: tuple[int, int],
     ratio_pad: RatioPad | None = None,
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> RatioPad:

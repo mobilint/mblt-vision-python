@@ -22,7 +22,7 @@ def _apply_letterbox(
     img_size: list[int],
     interpolation: int,
     padding_value: int | tuple[int, int, int],
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> tuple[np.ndarray, RatioPad]:
@@ -77,7 +77,7 @@ def letterbox_semantic_mask(
     mask: np.ndarray,
     img_size: list[int],
     ignore_label: int = 255,
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> tuple[np.ndarray, RatioPad]:

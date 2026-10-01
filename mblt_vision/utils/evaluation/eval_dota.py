@@ -527,7 +527,7 @@ def _ratio_pad_for_shape(
     input_shape: tuple[int, ...],
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> tuple[float, tuple[float, float]]:
@@ -555,7 +555,7 @@ def _ground_truth_to_input_space(
     input_shape: tuple[int, ...],
     org_shape: tuple[int, int],
     ratio_pad: RatioPad | None,
-    layout: LetterBoxLayout | bool = True,
+    layout: LetterBoxLayout | bool | None = None,
     *,
     center: bool | None = None,
 ) -> dict[str, torch.Tensor]:

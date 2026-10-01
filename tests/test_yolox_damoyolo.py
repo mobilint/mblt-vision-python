@@ -1017,5 +1017,18 @@ def test_every_renamed_callable_accepts_the_deprecated_center_keyword(name) -> N
     with pytest.warns(DeprecationWarning, match="center"):
         legacy = call(center=False)
     assert legacy == call(layout=LetterBoxLayout(center=False))
+    # An explicit layout=True is given, not omitted, even though it equals the default.
+    for layout in (LetterBoxLayout(center=False), True, False):
+        with pytest.raises(TypeError, match="not both"):
+            call(layout=layout, center=False)
+
+
+def test_deprecated_center_argument_tells_an_omitted_layout_from_layout_true() -> None:
+    from mblt_vision.utils.letterbox import deprecated_center_argument
+
+    assert deprecated_center_argument(None, None, "f") is True
+    assert deprecated_center_argument(True, None, "f") is True
+    with pytest.warns(DeprecationWarning):
+        assert deprecated_center_argument(None, False, "f") is False
     with pytest.raises(TypeError, match="not both"):
-        call(layout=LetterBoxLayout(center=False), center=False)
+        deprecated_center_argument(True, False, "f")
