@@ -168,6 +168,10 @@ The current ownership boundary is deliberate:
   objects (flag `1` or `2`) as ordinary targets, as Ultralytics' validation does: its
   `convert_dota_to_yolo_obb` drops the flag. `evaluate_dota_predictions` still honours ignore
   regions a caller supplies explicitly (the DOTA devkit protocol), but the loader produces none.
+- Run YOLOv7 models (`YOLOv7`, `-x`, `-w6`, `-e6`, `-d6`, `-e6e`) at `iou_thres: 0.65`, the
+  value WongKinYiu/yolov7's `test.py --iou-thres` defaults to and its README reproduces every
+  published COCO number with. The `iou_thres=0.6` in that script's `test()` signature is always
+  overridden by the command line.
 - Reuse `wrapper.download_hub_artifact` (extracted from `MBLT_Engine._download_hub_artifact`) for
   any future model needing more than one Hub artifact, rather than duplicating Hub-resolution
   logic.

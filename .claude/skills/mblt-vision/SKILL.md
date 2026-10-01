@@ -104,6 +104,7 @@ description: >-
   secondary metrics, with median-aligned metrics averaged per image.
 - Rank DOTAv1 evaluation by rotated mAP50, with mAP50-95 secondary (Ultralytics' published
   metric). Load difficult objects as ordinary targets, as Ultralytics' validation does.
+- Run YOLOv7 models at `iou_thres: 0.65`, WongKinYiu/yolov7's own `test.py` default.
 
 ## Runtime and Packaging
 

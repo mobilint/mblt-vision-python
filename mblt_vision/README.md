@@ -375,6 +375,9 @@ validation split, following Ultralytics' depth-validation convention.
   follows its December 2022 checkpoints, the only ones still downloadable: it decodes with
   PIL (`Reader.style: pil`) and restores each axis by its own ratio
   (`LetterBox.per_axis_ratio: true`).
+- YOLOv7 models run NMS at `iou_thres` 0.65, the value WongKinYiu/yolov7's `test.py` defaults
+  to and its README reproduces with. Their scores above were measured at 0.6 and are pending
+  re-measurement.
 
 </details>
 
