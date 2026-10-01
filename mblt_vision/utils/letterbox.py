@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
@@ -55,6 +56,35 @@ class LetterBoxLayout:
         return self == LetterBoxLayout()
 
 
+def deprecated_center_argument(
+    layout: LetterBoxLayout | bool, center: bool | None, owner: str
+) -> LetterBoxLayout | bool:
+    """Resolve the ``center=`` keyword that ``layout=`` replaced.
+
+    Args:
+        layout: The ``layout`` argument as passed, ``True`` when omitted.
+        center: The deprecated ``center`` keyword, ``None`` when omitted.
+        owner: Function name used in the warning and error.
+
+    Returns:
+        ``center`` when it was given, otherwise ``layout``.
+
+    Raises:
+        TypeError: If both ``layout`` and ``center`` were given.
+    """
+
+    if center is None:
+        return layout
+    if layout is not True:
+        raise TypeError(f"{owner}() takes layout or the deprecated center, not both.")
+    warnings.warn(
+        f"{owner}(center=...) is deprecated; pass layout=LetterBoxLayout(center=...).",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return center
+
+
 def _as_layout(layout: LetterBoxLayout | bool) -> LetterBoxLayout:
     """Accept the older ``center`` boolean wherever a layout is expected."""
 
@@ -80,6 +110,8 @@ class LetterBoxGeometry:
         input_shape: tuple[int, int],
         original_shape: tuple[int, int],
         layout: LetterBoxLayout | bool = True,
+        *,
+        center: bool | None = None,
     ) -> LetterBoxGeometry:
         """Calculate letterbox geometry, Ultralytics' by default.
 
@@ -89,12 +121,15 @@ class LetterBoxGeometry:
             layout: The model's ``LetterBoxLayout``. A boolean is read as
                 ``LetterBoxLayout(center=layout)``: ``False`` anchors the image at
                 the top-left corner and pads only the bottom and right.
+            center: Deprecated spelling of a boolean ``layout``.
 
         Returns:
             Calculated resize ratio, resized shape, and top-left padding.
         """
 
-        layout = _as_layout(layout)
+        layout = _as_layout(
+            deprecated_center_argument(layout, center, "LetterBoxGeometry.from_shapes")
+        )
         input_height, input_width = input_shape
         original_height, original_width = original_shape
         ratio = min(input_height / original_height, input_width / original_width)
@@ -182,6 +217,8 @@ def resolve_ratio_pad(
     original_shape: tuple[int, int],
     ratio_pad: RatioPad | None = None,
     layout: LetterBoxLayout | bool = True,
+    *,
+    center: bool | None = None,
 ) -> RatioPad:
     """Return supplied letterbox metadata or derive it from image shapes.
 
@@ -191,11 +228,13 @@ def resolve_ratio_pad(
         ratio_pad: Optional metadata recorded during preprocessing.
         layout: Layout used to derive missing metadata; see
             ``LetterBoxGeometry.from_shapes``.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         Resize ratios and top-left padding as ``((ratio_x, ratio_y), (pad_x, pad_y))``.
     """
 
+    layout = deprecated_center_argument(layout, center, "resolve_ratio_pad")
     if ratio_pad is not None:
         return ratio_pad
     return LetterBoxGeometry.from_shapes(input_shape, original_shape, layout).ratio_pad

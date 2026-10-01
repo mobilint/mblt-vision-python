@@ -46,6 +46,7 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
             return len(self.ids)
 
     class _Model:
+        pre_cfg: dict[str, Any] = {}
         post_cfg = {"task": "pose_estimation", "dataset": "coco"}
 
         def set_postprocess_thresholds(
@@ -85,7 +86,9 @@ def test_pose_evaluation_uses_all_keypoints_annotation_images(
 def test_coco_evaluation_rejects_non_coco_model_taxonomy() -> None:
     """Do not evaluate another taxonomy using the hard-coded COCO ID mapping."""
 
-    model = SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "dotav1"})
+    model = SimpleNamespace(
+        pre_cfg={}, post_cfg={"task": "object_detection", "dataset": "dotav1"}
+    )
 
     with pytest.raises(ValueError, match="post_cfg.dataset to be 'coco'"):
         eval_coco_module.eval_coco_metrics(model, "/dataset", batch_size=1)
@@ -97,11 +100,13 @@ def test_coco_evaluation_rejects_noncanonical_artifact_categories(
     """Do not score direct COCO artifacts with an incompatible category taxonomy."""
 
     dataset = SimpleNamespace(coco=SimpleNamespace(cats={999: {}}, anns={}))
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match=r"unsupported category IDs: \[999\]"):
         eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            SimpleNamespace(
+                pre_cfg={}, post_cfg={"task": "object_detection", "dataset": "coco"}
+            ),
             "/dataset",
             batch_size=1,
         )
@@ -132,11 +137,13 @@ def test_coco_evaluation_rejects_duplicate_raw_annotation_ids(
             anns={1: annotation},
         ),
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match="duplicate or invalid raw IDs"):
         eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            SimpleNamespace(
+                pre_cfg={}, post_cfg={"task": "object_detection", "dataset": "coco"}
+            ),
             "/dataset",
             batch_size=1,
         )
@@ -150,11 +157,13 @@ def test_coco_evaluation_rejects_empty_ground_truth(
     dataset = SimpleNamespace(
         coco=SimpleNamespace(cats={1: {}}, imgs={1: {"height": 1, "width": 1}}, anns={})
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match="at least one annotation"):
         eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            SimpleNamespace(
+                pre_cfg={}, post_cfg={"task": "object_detection", "dataset": "coco"}
+            ),
             "/dataset",
             batch_size=1,
         )
@@ -172,11 +181,13 @@ def test_coco_evaluation_rejects_undeclared_annotation_categories(
             imgs={1: {"height": 1, "width": 1}},
         )
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match="invalid task-specific annotations"):
         eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(post_cfg={"task": "object_detection", "dataset": "coco"}),
+            SimpleNamespace(
+                pre_cfg={}, post_cfg={"task": "object_detection", "dataset": "coco"}
+            ),
             "/dataset",
             batch_size=1,
         )
@@ -204,12 +215,13 @@ def test_coco_evaluation_rejects_invalid_task_payloads(
             },
         )
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match="invalid task-specific annotations"):
         eval_coco_module.eval_coco_metrics(
             SimpleNamespace(
-                post_cfg={"task": "instance_segmentation", "dataset": "coco"}
+                pre_cfg={},
+                post_cfg={"task": "instance_segmentation", "dataset": "coco"},
             ),
             "/dataset",
             batch_size=1,
@@ -238,12 +250,13 @@ def test_coco_evaluation_rejects_polygons_outside_image_bounds(
             },
         )
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match="invalid task-specific annotations"):
         eval_coco_module.eval_coco_metrics(
             SimpleNamespace(
-                post_cfg={"task": "instance_segmentation", "dataset": "coco"}
+                pre_cfg={},
+                post_cfg={"task": "instance_segmentation", "dataset": "coco"},
             ),
             "/dataset",
             batch_size=1,
@@ -336,11 +349,13 @@ def test_coco_evaluation_rejects_labeled_keypoints_outside_images(
             },
         )
     )
-    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_: dataset)
+    monkeypatch.setattr(eval_coco_module, "CustomCOCODataset", lambda *_, **__: dataset)
 
     with pytest.raises(ValueError, match="invalid task-specific annotations"):
         eval_coco_module.eval_coco_metrics(
-            SimpleNamespace(post_cfg={"task": "pose_estimation", "dataset": "coco"}),
+            SimpleNamespace(
+                pre_cfg={}, post_cfg={"task": "pose_estimation", "dataset": "coco"}
+            ),
             "/dataset",
             batch_size=1,
         )

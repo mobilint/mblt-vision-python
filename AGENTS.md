@@ -114,7 +114,9 @@ The current ownership boundary is deliberate:
   boxes restored by `/ r`. DAMO-YOLO is the December 2022 release's `Resize` and
   `to_image_list` (tinyvision/DAMO-YOLO `55ae14f`; not upstream HEAD's stretch): a PIL RGB
   decode (`Reader.style: pil`), the same truncated resize, top-left with zeros, and boxes
-  restored per axis by `BoxList.resize`. Hence `LetterBox.size_rounding: floor` on both and
+  restored per axis by `BoxList.resize`. COCO evaluation decodes with the same library as the
+  model's `Reader` (`CustomCOCODataset(decoder="pil")` for `style: pil`), because the loader
+  decodes before preprocessing. Hence `LetterBox.size_rounding: floor` on both and
   `per_axis_ratio: true` on DAMO-YOLO; tests compare both pipelines pixel-for-pixel with
   inlined copies of the upstream code. Neither declares `Normalize`: both take the unscaled
   0-255 image, and the ONNX path casts the byte tensor to the graph's float dtype. Every place

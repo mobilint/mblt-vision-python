@@ -800,3 +800,138 @@ def test_letterbox_accepts_the_pil_reader_output_and_reports_its_shape() -> None
     assert metadata["img0_shape"] == (48, 64)
     assert np.array_equal(image.numpy()[:48], rgb)
     assert not image.numpy()[48:].any()
+
+
+# --- COCO decoding and the deprecated ``center=`` keyword ------------------------
+
+
+def _write_coco(tmp_path, shape: tuple[int, int]) -> tuple[Path, Path]:
+    import json
+
+    from PIL import Image
+
+    images = tmp_path / "val2017"
+    images.mkdir()
+    Image.fromarray(_random_rgb(shape, seed=7)).save(images / "1.jpg", quality=85)
+    annotation = tmp_path / "instances_val2017.json"
+    annotation.write_text(
+        json.dumps(
+            {
+                "images": [
+                    {
+                        "id": 1,
+                        "file_name": "1.jpg",
+                        "height": shape[0],
+                        "width": shape[1],
+                    }
+                ],
+                "annotations": [],
+                "categories": [{"id": 1, "name": "person"}],
+            }
+        )
+    )
+    return images, annotation
+
+
+@pytest.mark.parametrize("decoder", ["cv2", "pil"])
+def test_coco_dataset_decodes_with_the_requested_library(tmp_path, decoder) -> None:
+    from PIL import Image
+
+    from mblt_vision.utils.datasets import CustomCOCODataset
+
+    images, annotation = _write_coco(tmp_path, (37, 53))
+    image, _, height, width = CustomCOCODataset(
+        str(images), str(annotation), decoder=decoder
+    )[0]
+
+    path = images / "1.jpg"
+    expected = (
+        np.asarray(Image.open(path).convert("RGB"))
+        if decoder == "pil"
+        else cv2.cvtColor(cv2.imread(str(path)), cv2.COLOR_BGR2RGB)
+    )
+    assert np.array_equal(image, expected)
+    assert image.flags.writeable
+    assert (height, width) == (37, 53)
+
+
+def test_coco_dataset_rejects_an_unknown_decoder(tmp_path) -> None:
+    from mblt_vision.utils.datasets import CustomCOCODataset
+
+    images, annotation = _write_coco(tmp_path, (8, 8))
+    with pytest.raises(ValueError, match="decoder"):
+        CustomCOCODataset(str(images), str(annotation), decoder="skimage")
+
+
+@pytest.mark.parametrize(
+    ("model", "decoder"), [("DAMO-YOLO-T", "pil"), ("YOLOX-s", "cv2")]
+)
+def test_coco_evaluation_decodes_like_the_models_reader(
+    monkeypatch: pytest.MonkeyPatch, model: str, decoder: str
+) -> None:
+    import importlib
+
+    eval_coco = importlib.import_module("mblt_vision.utils.evaluation.eval_coco")
+    seen: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_dataset(*args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(eval_coco, "CustomCOCODataset", fake_dataset)
+    engine = SimpleNamespace(
+        pre_cfg=_model_pre_cfg(model),
+        post_cfg={"task": "object_detection", "dataset": "coco"},
+    )
+
+    with pytest.raises(_Stop):
+        eval_coco.eval_coco_metrics(engine, "/coco", 1)
+
+    assert seen["decoder"] == decoder
+
+
+def test_deprecated_center_keyword_still_works_with_a_warning() -> None:
+    from mblt_vision.utils.letterbox import resolve_ratio_pad
+    from mblt_vision.utils.preprocess import letterbox_semantic_mask
+
+    mask = np.zeros((48, 64), dtype=np.uint8)
+    with pytest.warns(DeprecationWarning, match="center"):
+        legacy = letterbox_semantic_mask(mask, [64, 64], center=False)
+    current = letterbox_semantic_mask(mask, [64, 64], layout=False)
+    assert np.array_equal(legacy[0], current[0]) and legacy[1] == current[1]
+
+    with pytest.warns(DeprecationWarning, match="center"):
+        geometry = LetterBoxGeometry.from_shapes((640, 640), (480, 640), center=False)
+    assert geometry.pad == (0, 0)
+    with pytest.warns(DeprecationWarning, match="center"):
+        assert resolve_ratio_pad((640, 640), (480, 640), center=False)[1] == (0, 0)
+
+    with pytest.raises(TypeError, match="not both"):
+        letterbox_semantic_mask(
+            mask, [64, 64], layout=LetterBoxLayout(center=False), center=False
+        )
+
+
+@pytest.mark.parametrize("loader_name", ["get_ade20k_loader", "get_cityscapes_loader"])
+def test_semantic_loaders_accept_the_deprecated_center_keyword(loader_name) -> None:
+    from mblt_vision.utils.datasets import dataloader
+
+    preprocess = build_preprocess(
+        {"LetterBox": {"img_size": [64, 64], "center": False}}
+    )
+    image = np.full((48, 64, 3), 100, dtype=np.uint8)
+    target = np.full((48, 64), 3, dtype=np.uint8)
+    with pytest.warns(DeprecationWarning, match="center"):
+        loader = getattr(dataloader, loader_name)(
+            [(image, target, "sample")],
+            1,
+            preprocess.with_metadata,
+            image_size=(64, 64),
+            center=False,
+        )
+
+    _, _, _, ratio_pads, _ = next(iter(loader))
+    assert ratio_pads == [((1.0, 1.0), (0, 0))]

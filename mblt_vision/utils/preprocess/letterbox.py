@@ -5,7 +5,13 @@ import numpy as np
 import torch
 from PIL import Image
 
-from ..letterbox import LetterBoxGeometry, LetterBoxLayout, RatioPad, SizeRounding
+from ..letterbox import (
+    LetterBoxGeometry,
+    LetterBoxLayout,
+    RatioPad,
+    SizeRounding,
+    deprecated_center_argument,
+)
 from ..types import TensorLike
 from ._validation import normalize_image_size, normalize_uint8_rgb_array
 from .base import PreOps
@@ -68,6 +74,8 @@ def letterbox_semantic_mask(
     img_size: list[int],
     ignore_label: int = 255,
     layout: LetterBoxLayout | bool = True,
+    *,
+    center: bool | None = None,
 ) -> tuple[np.ndarray, RatioPad]:
     """Letterbox a semantic mask without interpolating class IDs.
 
@@ -77,6 +85,7 @@ def letterbox_semantic_mask(
         ignore_label: Class value used for padded pixels.
         layout: The model's ``letterbox_layout(pre_cfg)`` (or the older
             ``center`` boolean), so the target matches its image's geometry.
+        center: Deprecated spelling of a boolean ``layout``.
 
     Returns:
         The letterboxed mask and its resize/padding metadata.
@@ -89,6 +98,7 @@ def letterbox_semantic_mask(
         raise ValueError(
             f"Semantic masks must be two-dimensional, got shape {mask.shape}."
         )
+    layout = deprecated_center_argument(layout, center, "letterbox_semantic_mask")
     return _apply_letterbox(mask, img_size, cv2.INTER_NEAREST, ignore_label, layout)
 
 

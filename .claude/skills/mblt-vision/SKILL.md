@@ -78,8 +78,8 @@ description: >-
   truth for `pre_cfg`: both letterbox top-left (`LetterBox.center: false`, padding 114 / 0)
   with upstream's truncated `int(w * r)` size (`size_rounding: floor`) and take unscaled input
   (no Normalize); YOLOX reads cv2 BGR (`Reader.color_mode`) and restores boxes by `/ r`;
-  DAMO-YOLO reads PIL RGB (`Reader.style: pil`) and restores each axis separately
-  (`per_axis_ratio: true`). Shape-only geometry must follow `letterbox_layout(pre_cfg)`.
+  DAMO-YOLO reads PIL RGB (`Reader.style: pil`, which COCO evaluation honours through
+  `CustomCOCODataset(decoder=)`) and restores each axis separately (`per_axis_ratio: true`). Shape-only geometry must follow `letterbox_layout(pre_cfg)`.
   `post_cfg` follows mblt-model-ops `jm/temp` `pipeline.yaml`; YAMLs are `local_artifact_only`.
 - Rank WiderFace evaluation by Hard-set AP. Expose Medium-set then Easy-set AP
   as secondary metrics, and do not compute mean AP across difficulty splits.
