@@ -163,6 +163,11 @@ The current ownership boundary is deliberate:
 - For NYU Depth evaluation, rank results by delta1 and retain abs_rel then
   RMSE (m) as secondary metrics. Median-align each image and average every
   metric per image, following Ultralytics' depth-validation convention.
+- For DOTAv1 evaluation, rank results by rotated mAP50 and retain mAP50-95 as the secondary
+  metric, because rotated mAP50 is what Ultralytics publishes for its OBB models. Load difficult
+  objects (flag `1` or `2`) as ordinary targets, as Ultralytics' validation does: its
+  `convert_dota_to_yolo_obb` drops the flag. `evaluate_dota_predictions` still honours ignore
+  regions a caller supplies explicitly (the DOTA devkit protocol), but the loader produces none.
 - Reuse `wrapper.download_hub_artifact` (extracted from `MBLT_Engine._download_hub_artifact`) for
   any future model needing more than one Hub artifact, rather than duplicating Hub-resolution
   logic.

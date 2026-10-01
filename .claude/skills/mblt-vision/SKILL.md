@@ -102,6 +102,8 @@ description: >-
   together.
 - Rank NYU Depth evaluation by delta1. Expose abs_rel then RMSE (m) as
   secondary metrics, with median-aligned metrics averaged per image.
+- Rank DOTAv1 evaluation by rotated mAP50, with mAP50-95 secondary (Ultralytics' published
+  metric). Load difficult objects as ordinary targets, as Ultralytics' validation does.
 
 ## Runtime and Packaging
 

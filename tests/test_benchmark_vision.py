@@ -157,8 +157,9 @@ def test_benchmark_accepts_obb_model_task(
         FakeModel(), args, tmp_path
     )
 
-    assert (score, score_name) == (0.5, "map50_95")
-    assert metrics == {"map50_95": 0.5, "map50": 0.7}
+    # Ultralytics publishes its DOTAv1 models by rotated mAP50.
+    assert (score, score_name) == (0.7, "map50")
+    assert metrics == {"map50": 0.7, "map50_95": 0.5}
 
 
 def test_benchmark_ranks_widerface_by_hard_ap(

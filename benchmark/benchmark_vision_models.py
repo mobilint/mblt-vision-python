@@ -317,10 +317,10 @@ def _evaluate(
         )
         return (
             float(result.primary_score),
-            "map50_95",
+            "map50",
             {
-                "map50_95": float(result.map5095),
                 "map50": float(result.map50),
+                "map50_95": float(result.map5095),
             },
         )
     if args.task == "face_detection":

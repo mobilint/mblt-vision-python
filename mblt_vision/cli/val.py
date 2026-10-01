@@ -433,8 +433,8 @@ def _run_validation(args: argparse.Namespace) -> float:
             )
             print(
                 "Validation score "
-                f"(rotated mAP50-95): {dota_result.map5095:.5f}, "
-                f"(rotated mAP50): {dota_result.map50:.5f}"
+                f"(rotated mAP50): {dota_result.map50:.5f}, "
+                f"(rotated mAP50-95): {dota_result.map5095:.5f}"
             )
             return dota_result.primary_score
 
