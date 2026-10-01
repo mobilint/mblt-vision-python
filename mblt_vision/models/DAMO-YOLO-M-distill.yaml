@@ -1,9 +1,13 @@
 DEFAULT:
-  # pre_cfg/post_cfg follow mblt-model-ops' DAMO-YOLO-M-distill/pipeline.yaml (branch jm/temp, 0368367e8):
-  # the downloadable checkpoints are the December 2022 release, whose test
-  # transform letterboxes RGB with zeros anchored top-left (41.79 mAP50-95 on
-  # COCO val2017, against 39.72 through upstream HEAD's stretch) and feeds the
-  # unscaled image -- hence no Normalize. reg_max 16 means 17 distance bins.
+  # pre_cfg is the test transform of upstream DAMO-YOLO's December 2022 release
+  # (tinyvision/DAMO-YOLO 55ae14f), the only checkpoints still downloadable: a
+  # PIL RGB decode, cv2 resized to int(w * r) x int(h * r) -- truncated, hence
+  # size_rounding: floor -- zero-padded into the top-left corner, and left
+  # unscaled, hence no Normalize. BoxList.resize restores each axis by its own
+  # original-over-resized ratio, hence per_axis_ratio. (41.79 mAP50-95 on COCO
+  # val2017, against 39.72 through upstream HEAD's stretch.) post_cfg follows
+  # mblt-model-ops' DAMO-YOLO-M-distill/pipeline.yaml (branch jm/temp, 0368367e8);
+  # reg_max 16 means 17 distance bins.
   # No Hub artifact is published yet: pass a local model_path.
   file_cfg:
     repo_id: mobilint/DAMO-YOLO-M-distill
@@ -12,14 +16,15 @@ DEFAULT:
     local_artifact_only: true
   pre_cfg:
     Reader:
-      style: numpy
-      color_mode: RGB
+      style: pil
     LetterBox:
       img_size:
       - 640
       - 640
       center: false
       padding_value: 0
+      size_rounding: floor
+      per_axis_ratio: true
     SetOrder:
       shape: HWC
   post_cfg:

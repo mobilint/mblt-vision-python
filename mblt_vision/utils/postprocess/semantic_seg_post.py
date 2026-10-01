@@ -8,7 +8,7 @@ from typing import Any
 import torch
 import torch.nn.functional as functional
 
-from ..letterbox import RatioPad, letterbox_center
+from ..letterbox import RatioPad, letterbox_layout
 from ..types import ListTensorLike, TensorLike
 from ._letterbox import crop_letterbox, get_letterbox_input_shape, resolve_ratio_pads
 from .base import PostBase
@@ -30,7 +30,8 @@ class SemanticSegPost(PostBase):
         self.input_shape = get_letterbox_input_shape(
             pre_cfg, "Semantic segmentation", "Semantic"
         )
-        self.letterbox_center = letterbox_center(pre_cfg)
+        self.letterbox_layout = letterbox_layout(pre_cfg)
+        self.letterbox_center = self.letterbox_layout.center
         dataset = post_cfg.get("dataset")
         if not isinstance(dataset, str):
             raise ValueError(
@@ -75,7 +76,7 @@ class SemanticSegPost(PostBase):
             output.shape[0],
             shapes,
             self.input_shape,
-            self.letterbox_center,
+            self.letterbox_layout,
         )
         restored = [
             self._restore(output[index], is_logits, shapes[index], pads[index])
@@ -175,7 +176,14 @@ class SemanticSegPost(PostBase):
                     align_corners=False,
                 )[0]
             channels = [
-                crop_letterbox(channel, shape, ratio_pad, self.input_shape, "Semantic")
+                crop_letterbox(
+                    channel,
+                    shape,
+                    ratio_pad,
+                    self.input_shape,
+                    "Semantic",
+                    self.letterbox_layout,
+                )
                 for channel in output
             ]
             cropped_logits = torch.stack(channels)
@@ -193,7 +201,14 @@ class SemanticSegPost(PostBase):
                 size=self.input_shape,
                 mode="nearest",
             )[0, 0].to(dtype=torch.int64)
-        cropped = crop_letterbox(output, shape, ratio_pad, self.input_shape, "Semantic")
+        cropped = crop_letterbox(
+            output,
+            shape,
+            ratio_pad,
+            self.input_shape,
+            "Semantic",
+            self.letterbox_layout,
+        )
         return functional.interpolate(
             cropped[None, None].float(), size=shape, mode="nearest"
         )[0, 0].to(torch.int64)

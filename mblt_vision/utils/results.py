@@ -30,6 +30,7 @@ from .letterbox import (
     LetterBoxGeometry,
     RatioPad,
     letterbox_center,
+    letterbox_layout,
     resolve_ratio_pad,
 )
 from mblt_vision.utils.postprocess.common import (
@@ -414,15 +415,17 @@ class Results:
     ) -> RatioPad | None:
         """Return letterbox metadata for a plot, which only has the image shapes.
 
-        ``None`` lets the shared helpers derive their centered geometry, which is
-        right for Ultralytics models; a top-left model (``LetterBox.center: false``)
-        needs its own zero padding spelled out.
+        ``None`` lets the shared helpers derive their centered, rounded geometry,
+        which is right for Ultralytics models; any other layout (a top-left
+        ``LetterBox.center: false``, ``size_rounding: floor``, ``per_axis_ratio``)
+        needs its own geometry spelled out.
         """
 
-        if letterbox_center(self.pre_cfg):
+        layout = letterbox_layout(self.pre_cfg)
+        if layout.is_default:
             return None
         return resolve_ratio_pad(
-            (int(img1_shape[0]), int(img1_shape[1])), img0_shape, center=False
+            (int(img1_shape[0]), int(img1_shape[1])), img0_shape, layout=layout
         )
 
     def _restore_dense_map(
@@ -443,7 +446,7 @@ class Results:
         geometry = LetterBoxGeometry.from_shapes(
             (int(input_shape[0]), int(input_shape[1])),
             image_shape,
-            letterbox_center(self.pre_cfg),
+            letterbox_layout(self.pre_cfg),
         )
         output_shape = (int(output.shape[0]), int(output.shape[1]))
         top, bottom, left, right = geometry.crop_bounds(output_shape)

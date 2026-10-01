@@ -4,11 +4,14 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
+from PIL import Image
 
 
 def _spatial_shape(value: Any) -> tuple[int, int] | None:
     """Return the height and width of image-like preprocessing input."""
 
+    if isinstance(value, Image.Image):
+        return value.height, value.width
     shape = getattr(value, "shape", None)
     if shape is None or len(shape) < 2:
         return None

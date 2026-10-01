@@ -107,15 +107,22 @@ The current ownership boundary is deliberate:
   bins -- decoded as the softmax expectation times stride. Neither adds Ultralytics' half-cell
   offset. A 640 input's stride-8 DAMO class map is 80x80x80, so the head set's layout (NCHW
   or NHWC) is resolved jointly from the unambiguous distribution maps and a mixed set fails.
-- Their `pre_cfg` follows mblt-model-ops' `models/<Model>/pipeline.yaml` on branch
-  `jm/temp` (commit `0368367e8`): YOLOX is BGR (`Reader.color_mode: BGR`), top-left
-  letterboxed with 114; DAMO-YOLO is RGB, top-left with zeros (the December 2022 checkpoints'
-  geometry, not upstream HEAD's stretch). Neither declares `Normalize`: both take the
-  unscaled 0-255 image, and the ONNX path casts the byte tensor to the graph's float dtype.
-  `LetterBox.center: false` anchors top-left; every place that derives geometry from shapes
-  alone (`PostBase.ratio_pads_for`, `Results` plotting) must use the model's own
-  `letterbox_center(pre_cfg)` rather than the centered default. No Hub repository exists
-  yet, so their YAMLs keep `file_cfg.local_artifact_only: true`.
+- Their `pre_cfg` is upstream's own test transform, which is the source of truth (their
+  `post_cfg` follows mblt-model-ops' `models/<Model>/pipeline.yaml` on branch `jm/temp`,
+  commit `0368367e8`). YOLOX is `yolox/data/data_augment.py:preproc`: a cv2 BGR image
+  (`Reader.color_mode: BGR`), resized to `int(w * r) x int(h * r)`, top-left on a 114 canvas,
+  boxes restored by `/ r`. DAMO-YOLO is the December 2022 release's `Resize` and
+  `to_image_list` (tinyvision/DAMO-YOLO `55ae14f`; not upstream HEAD's stretch): a PIL RGB
+  decode (`Reader.style: pil`), the same truncated resize, top-left with zeros, and boxes
+  restored per axis by `BoxList.resize`. Hence `LetterBox.size_rounding: floor` on both and
+  `per_axis_ratio: true` on DAMO-YOLO; tests compare both pipelines pixel-for-pixel with
+  inlined copies of the upstream code. Neither declares `Normalize`: both take the unscaled
+  0-255 image, and the ONNX path casts the byte tensor to the graph's float dtype. Every place
+  that derives geometry from shapes alone (`PostBase.ratio_pads_for`, `Results` plotting,
+  dense crops, semantic targets) must use the model's own `letterbox_layout(pre_cfg)`
+  rather than Ultralytics' default. Instance segmentation rejects `size_rounding: floor` and
+  `per_axis_ratio`, and OBB rejects `per_axis_ratio`, because their restorations cannot honour
+  them. No Hub repository exists yet, so their YAMLs keep `file_cfg.local_artifact_only: true`.
 - For WiderFace evaluation, rank results by Hard-set AP and retain Medium-set
   then Easy-set AP as secondary metrics. Do not compute a mean across splits.
 - The YOLOv5/YOLOv7 face repositories do not yet publish project-pinned immutable revisions

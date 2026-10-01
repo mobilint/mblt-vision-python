@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
@@ -9,7 +10,12 @@ import numpy as np
 import pytest
 import torch
 
-from mblt_vision.utils.letterbox import LetterBoxGeometry, letterbox_center
+from mblt_vision.utils.letterbox import (
+    LetterBoxGeometry,
+    LetterBoxLayout,
+    letterbox_center,
+    letterbox_layout,
+)
 from mblt_vision.utils.postprocess import build_postprocess
 from mblt_vision.utils.postprocess.damoyolo_post import DAMOYOLODetectionPost
 from mblt_vision.utils.postprocess.yolox_post import YOLOXDetectionPost
@@ -82,7 +88,7 @@ def _damo_heads(batch: int = 1, seed: int = 0) -> tuple[list, list]:
 
 
 def test_top_left_geometry_pads_only_bottom_and_right() -> None:
-    geometry = LetterBoxGeometry.from_shapes((640, 640), (480, 640), center=False)
+    geometry = LetterBoxGeometry.from_shapes((640, 640), (480, 640), layout=False)
 
     assert geometry.pad == (0, 0)
     assert geometry.borders == (0, 160, 0, 0)
@@ -536,7 +542,7 @@ def test_semantic_targets_follow_a_top_left_letterbox(loader_name: str) -> None:
         1,
         preprocess.with_metadata,
         image_size=(64, 64),
-        center=False,
+        layout=LetterBoxLayout(center=False),
     )
 
     _, targets, _, ratio_pads, _ = next(iter(loader))
@@ -572,7 +578,7 @@ def test_semantic_evaluation_passes_the_models_anchoring_to_its_loader(
     with pytest.raises(_Stop):
         eval_module.eval_semantic_segmentation(model, "/ade20k", 1)
 
-    assert seen["center"] is False
+    assert seen["layout"] == LetterBoxLayout(center=False)
 
 
 def test_dota_ground_truth_fallback_follows_the_models_anchoring() -> None:
@@ -582,7 +588,7 @@ def test_dota_ground_truth_fallback_follows_the_models_anchoring() -> None:
 
     centered = eval_dota._ratio_pad_for_shape((640, 640), (480, 640), None)
     top_left = eval_dota._ratio_pad_for_shape(
-        (640, 640), (480, 640), None, center=False
+        (640, 640), (480, 640), None, LetterBoxLayout(center=False)
     )
 
     assert centered == (1.0, (0.0, 80.0))
@@ -613,3 +619,184 @@ def test_top_left_mask_crop_without_metadata_matches_the_explicit_pads(
 
     assert bool((derived > 0.5).all())
     torch.testing.assert_close(derived, explicit, rtol=0, atol=0)
+
+
+# --- Upstream preprocessing parity -----------------------------------------------
+#
+# The references below copy upstream's own test transforms, which are the source of
+# truth for these families: YOLOX ``yolox/data/data_augment.py:preproc`` and
+# DAMO-YOLO's December 2022 ``Resize`` + ``to_image_list`` (tinyvision/DAMO-YOLO
+# 55ae14f), whose checkpoints are the only ones still downloadable.
+
+# Shapes whose r * side lands on or above .5, where truncation and rounding differ.
+UPSTREAM_SHAPES = [(335, 500), (427, 640), (480, 640), (500, 333), (1, 7), (123, 457)]
+
+
+def _model_pre_cfg(name: str) -> dict:
+    import yaml
+
+    import mblt_vision
+
+    path = Path(mblt_vision.__file__).parent / "models" / f"{name}.yaml"
+    return yaml.safe_load(path.read_text())["DEFAULT"]["pre_cfg"]
+
+
+def _upstream_yolox_preproc(bgr: np.ndarray, input_size: tuple[int, int]) -> np.ndarray:
+    padded_img = np.ones((input_size[0], input_size[1], 3), dtype=np.uint8) * 114
+    r = min(input_size[0] / bgr.shape[0], input_size[1] / bgr.shape[1])
+    resized_img = cv2.resize(
+        bgr,
+        (int(bgr.shape[1] * r), int(bgr.shape[0] * r)),
+        interpolation=cv2.INTER_LINEAR,
+    ).astype(np.uint8)
+    padded_img[: int(bgr.shape[0] * r), : int(bgr.shape[1] * r)] = resized_img
+    return padded_img
+
+
+def _upstream_damo_transform(rgb: np.ndarray, size: int) -> np.ndarray:
+    h, w = rgb.shape[:2]
+    r = min(size / w, size / h)
+    resized = cv2.resize(
+        rgb, (int(w * r), int(h * r)), interpolation=cv2.INTER_LINEAR
+    ).astype(np.uint8)
+    canvas = np.zeros((size, size, 3), dtype=np.uint8)
+    canvas[: resized.shape[0], : resized.shape[1]] = resized
+    return canvas
+
+
+def _random_rgb(shape: tuple[int, int], seed: int) -> np.ndarray:
+    return np.random.default_rng(seed).integers(0, 256, (*shape, 3), dtype=np.uint8)
+
+
+def test_floor_rounding_truncates_the_resized_size_as_upstream_does() -> None:
+    floor = LetterBoxGeometry.from_shapes(
+        (640, 640), (335, 500), LetterBoxLayout(center=False, size_rounding="floor")
+    )
+    rounded = LetterBoxGeometry.from_shapes((640, 640), (335, 500), False)
+
+    # 335 * 1.28 = 428.8: upstream's int() keeps 428 where round() gives 429.
+    assert floor.resized_shape == (428, 640)
+    assert rounded.resized_shape == (429, 640)
+    assert floor.ratio_pad == ((1.28, 1.28), (0, 0))
+
+
+def test_per_axis_ratio_records_each_axis_resized_over_original() -> None:
+    geometry = LetterBoxGeometry.from_shapes(
+        (640, 640),
+        (335, 500),
+        LetterBoxLayout(center=False, size_rounding="floor", per_axis_ratio=True),
+    )
+
+    assert geometry.ratio_pad == ((640 / 500, 428 / 335), (0, 0))
+
+
+@pytest.mark.parametrize("model", ["YOLOX-s", "YOLOX-Nano"])
+@pytest.mark.parametrize("shape", UPSTREAM_SHAPES)
+def test_yolox_preprocessing_matches_upstream_preproc(model: str, shape) -> None:
+    pre_cfg = _model_pre_cfg(model)
+    size = tuple(pre_cfg["LetterBox"]["img_size"])
+    rgb = _random_rgb(shape, seed=shape[0])
+
+    image, metadata = build_preprocess(pre_cfg).with_metadata(rgb)
+
+    expected = _upstream_yolox_preproc(np.ascontiguousarray(rgb[..., ::-1]), size)
+    assert np.array_equal(image.numpy(), expected)
+    # Upstream's COCOEvaluator restores boxes by dividing by r alone.
+    r = min(size[0] / shape[0], size[1] / shape[1])
+    assert metadata["ratio_pad"] == ((r, r), (0, 0))
+    assert metadata["img0_shape"] == shape
+
+
+@pytest.mark.parametrize("shape", UPSTREAM_SHAPES)
+def test_damoyolo_preprocessing_matches_the_december_2022_transform(
+    tmp_path, shape
+) -> None:
+    from PIL import Image
+
+    pre_cfg = _model_pre_cfg("DAMO-YOLO-T")
+    path = tmp_path / "sample.jpg"
+    Image.fromarray(_random_rgb(shape, seed=shape[1])).save(path, quality=90)
+
+    image, metadata = build_preprocess(pre_cfg).with_metadata(path)
+
+    # Upstream decodes with PIL, not cv2, whose JPEG decode can differ.
+    decoded = np.asarray(Image.open(path).convert("RGB"))
+    assert np.array_equal(image.numpy(), _upstream_damo_transform(decoded, 640))
+    h, w = shape
+    r = min(640 / w, 640 / h)
+    assert metadata["ratio_pad"] == ((int(w * r) / w, int(h * r) / h), (0, 0))
+    assert metadata["img0_shape"] == shape
+
+
+def test_damoyolo_restores_boxes_per_axis_like_boxlist_resize() -> None:
+    pre_cfg = _model_pre_cfg("DAMO-YOLO-T")
+    post = build_postprocess(pre_cfg, DAMO_POST)
+    shape = (335, 500)
+    boxes = torch.tensor([[10.0, 20.0, 300.0, 400.0, 0.9, 0.0]])
+
+    _, (restored,), _ = post.nmsout2eval([boxes], (640, 640), [shape])
+
+    # BoxList.resize: x by w / resized_w, y by h / resized_h (428 rows, not 429).
+    ratio_w, ratio_h = 500 / 640, 335 / 428
+    x1, y1, x2, y2 = 10 * ratio_w, 20 * ratio_h, 300 * ratio_w, 400 * ratio_h
+    assert restored[0] == pytest.approx([x1, y1, x2 - x1, min(y2, 335) - y1], abs=1e-3)
+
+
+def test_yolox_restores_boxes_by_dividing_by_r() -> None:
+    post = build_postprocess(_model_pre_cfg("YOLOX-s"), YOLOX_POST)
+    shape = (335, 500)
+    boxes = torch.tensor([[10.0, 20.0, 300.0, 400.0, 0.9, 0.0]])
+
+    _, (restored,), _ = post.nmsout2eval([boxes], (640, 640), [shape])
+
+    r = 1.28
+    assert restored[0] == pytest.approx(
+        [10 / r, 20 / r, 300 / r - 10 / r, min(400 / r, 335) - 20 / r], abs=1e-3
+    )
+
+
+def test_letterbox_layout_reads_and_validates_model_config() -> None:
+    assert letterbox_layout({}) == LetterBoxLayout()
+    assert letterbox_layout(_model_pre_cfg("DAMO-YOLO-T")) == LetterBoxLayout(
+        center=False, size_rounding="floor", per_axis_ratio=True
+    )
+    with pytest.raises(ValueError, match="pre_cfg.LetterBox size_rounding"):
+        letterbox_layout({"LetterBox": {"size_rounding": "ceil"}})
+    with pytest.raises(TypeError, match="per_axis_ratio"):
+        letterbox_layout({"LetterBox": {"per_axis_ratio": 1}})
+
+
+@pytest.mark.parametrize(
+    ("task", "option"),
+    [
+        ("instance_segmentation", {"size_rounding": "floor"}),
+        ("instance_segmentation", {"per_axis_ratio": True}),
+        ("obb", {"per_axis_ratio": True}),
+    ],
+)
+def test_tasks_that_cannot_restore_a_layout_option_reject_it(task, option) -> None:
+    pre_cfg = {"LetterBox": {"img_size": [640, 640], "center": False, **option}}
+    post_cfg = {
+        "task": task,
+        "dataset": "dotav1" if task == "obb" else "coco",
+        "nl": 3,
+    }
+
+    with pytest.raises(ValueError, match="LetterBox"):
+        build_postprocess(pre_cfg, post_cfg)
+
+
+def test_letterbox_accepts_the_pil_reader_output_and_reports_its_shape() -> None:
+    from PIL import Image
+
+    rgb = _random_rgb((48, 64), seed=1)
+    pre_cfg = {
+        "Reader": {"style": "pil"},
+        "LetterBox": {"img_size": [64, 64], "center": False, "padding_value": 0},
+    }
+
+    image, metadata = build_preprocess(pre_cfg).with_metadata(Image.fromarray(rgb))
+
+    assert metadata["img0_shape"] == (48, 64)
+    assert np.array_equal(image.numpy()[:48], rgb)
+    assert not image.numpy()[48:].any()
