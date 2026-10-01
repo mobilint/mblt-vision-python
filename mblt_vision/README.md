@@ -375,6 +375,9 @@ validation split, following Ultralytics' depth-validation convention.
   follows its December 2022 checkpoints, the only ones still downloadable: it decodes with
   PIL (`Reader.style: pil`) and restores each axis by its own ratio
   (`LetterBox.per_axis_ratio: true`).
+- YOLOv7 models run NMS at `iou_thres` 0.65, the value WongKinYiu/yolov7's `test.py` defaults
+  to and its README reproduces with. Their scores above were measured at 0.6 and are pending
+  re-measurement.
 
 </details>
 
@@ -439,15 +442,16 @@ validation split, following Ultralytics' depth-validation convention.
 
 ### OBB
 
-| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$<br>(NPU) | $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
+| Model | Input Size<br>(H,W,C) | $\underset{\texttt{50}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$<br>(NPU) | $\underset{\texttt{50}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$<br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 
 <details>
 <summary>OBB (DOTA v1.0)</summary>
 
-- $\underset{\texttt{50-95}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ is the primary metric
+- $\underset{\texttt{50}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ is the primary metric
   for single-model single-scale validation on the
-  [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset. Validation also reports
-  rotated mAP50 as the secondary metric.
+  [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset, the metric Ultralytics
+  publishes for its OBB models. Validation also reports rotated mAP50-95 as the secondary metric.
+- Difficult objects count as ordinary targets, as in Ultralytics' validation.
 
 </details>

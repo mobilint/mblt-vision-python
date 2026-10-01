@@ -417,6 +417,20 @@ def batch_probiou(
 ROTATED_NMS_BLOCK = 512
 
 
+def descending_order(values: torch.Tensor) -> torch.Tensor:
+    """Return the indices that sort ``values`` high to low, ties in ascending index order.
+
+    This is Ultralytics' validation order, which every candidate ranking here must
+    reproduce. ``non_max_suppression`` hands its candidates to ``torchvision.ops.nms``,
+    whose sort is stable on CPU and CUDA, and the ``argsort(descending=True)`` it runs
+    above ``max_nms`` candidates, like the ``torch.topk`` of an end-to-end head, is stable
+    on CUDA, its normal validation device. Those unstable calls order ties differently on
+    CPU, and quantized MXQ scores tie often, so a plain ``argsort`` made the result depend
+    on the device. A stable sort gives Ultralytics' CUDA order everywhere.
+    """
+    return torch.sort(values, descending=True, stable=True).indices
+
+
 def rotated_nms(
     boxes: torch.Tensor,
     scores: torch.Tensor,
@@ -436,7 +450,7 @@ def rotated_nms(
     """
     if boxes.numel() == 0:
         return torch.empty((0,), dtype=torch.int64, device=boxes.device)
-    sorted_idx = torch.argsort(scores, descending=True)
+    sorted_idx = descending_order(scores)
     sorted_boxes = boxes[sorted_idx]
     count = int(sorted_boxes.shape[0])
     suppressed = torch.zeros(count, dtype=torch.bool, device=sorted_boxes.device)
@@ -568,15 +582,20 @@ def dual_topk(
         return torch.zeros(
             (0, 6 + n_extra), dtype=torch.float32, device=pre_topk.device
         )
-    max_det = min(pre_topk.shape[0], max_det)
-
-    row_index = torch.topk(
-        pre_topk[:, score_start:score_end].amax(dim=-1), max_det, dim=0
-    ).indices
+    # Ultralytics' Detect.get_topk_index ranks every anchor and keeps the best
+    # ``max_det`` (anchor, class) pairs; the validator then drops the rows at or
+    # below the threshold. Ranking only the anchors that clear it gives the same
+    # rows provided the second stage may still return ``max_det`` pairs: capping it
+    # at the anchor count dropped every further class of those anchors whenever
+    # fewer than ``max_det`` of them cleared the threshold (100 anchors with three
+    # classes each kept 100 rows where Ultralytics keeps 300).
+    row_index = descending_order(pre_topk[:, score_start:score_end].amax(dim=-1))[
+        :max_det
+    ]
     selected = pre_topk[row_index]
-    top_scores, flat_index = torch.topk(
-        selected[:, score_start:score_end].reshape(-1), max_det
-    )
+    flat_scores = selected[:, score_start:score_end].reshape(-1)
+    flat_index = descending_order(flat_scores)[:max_det]
+    top_scores = flat_scores[flat_index]
     keep = top_scores > threshold
     if not torch.any(keep):
         return torch.zeros(

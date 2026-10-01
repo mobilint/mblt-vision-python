@@ -56,13 +56,13 @@ class DOTAResult(NamedTuple):
 
     @property
     def primary_score(self) -> float:
-        """Return the primary DOTAv1 validation metric."""
-        return self.map5095
+        """Return rotated mAP50, the metric Ultralytics publishes for its DOTAv1 models."""
+        return self.map50
 
     @property
     def secondary_score(self) -> float:
-        """Return the secondary DOTAv1 validation metric."""
-        return self.map50
+        """Return rotated mAP50-95."""
+        return self.map5095
 
 
 def _label_to_index(label: str) -> int:
@@ -134,9 +134,15 @@ def _load_ground_truths(
         data_path: DOTAv1 root directory.
         dataset: Dataset containing image IDs and image paths.
 
+    Difficult objects (flag ``1`` or ``2``) load as ordinary targets, as Ultralytics,
+    whose checkpoints these are, validates them: its ``convert_dota_to_yolo_obb`` keeps
+    the coordinates and class and drops the flag. The DOTA devkit behind the test server
+    ignores them instead; callers who want that protocol can still pass ignore regions to
+    ``evaluate_dota_predictions``. The flag is validated either way.
+
     Returns:
-        Mapping from image ID to tensors for positive and ignored classes, polygons,
-        and ``xywhr`` boxes.
+        Mapping from image ID to tensors for target classes, polygons, and ``xywhr``
+        boxes, with empty ignored-region tensors.
     """
     label_dir = Path(data_path) / "labels" / "val"
     original_label_dir = Path(data_path) / "labels" / "val_original"
@@ -213,12 +219,8 @@ def _load_ground_truths(
                         f"{label_path}:{line_number}."
                     )
                 seen_targets.add(target_key)
-                if len(parts) >= 10 and parts[9] in {"1", "2"}:
-                    ignore_classes.append(cls)
-                    ignore_polygons.append(coords)
-                else:
-                    classes.append(cls)
-                    polygons.append(coords)
+                classes.append(cls)
+                polygons.append(coords)
         elif original_label_path.is_file():
             for line_number, line in enumerate(
                 original_label_path.read_text(encoding="utf-8").splitlines(), start=1
@@ -267,12 +269,8 @@ def _load_ground_truths(
                         f"{original_label_path}:{line_number}."
                     )
                 seen_targets.add(target_key)
-                if parts[9] in {"1", "2"}:
-                    ignore_classes.append(cls)
-                    ignore_polygons.append(coords)
-                else:
-                    classes.append(cls)
-                    polygons.append(coords)
+                classes.append(cls)
+                polygons.append(coords)
 
         else:
             raise FileNotFoundError(
@@ -674,8 +672,8 @@ def evaluate_dota_predictions(
 
     Returns:
         Rotated mAP at IoU ``0.50`` followed by mAP averaged across ``0.50:0.95``.
-        The ``primary_score`` and ``secondary_score`` properties expose mAP50-95
-        and mAP50, respectively.
+        The ``primary_score`` and ``secondary_score`` properties expose mAP50
+        and mAP50-95, respectively.
     """
     iouv = torch.linspace(0.5, 0.95, 10)
     stats = _empty_stats()

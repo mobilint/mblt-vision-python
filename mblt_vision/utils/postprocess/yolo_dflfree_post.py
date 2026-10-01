@@ -13,6 +13,7 @@ from .common import (
     YOLOSegPostMixin,
     concat_converted_obb_outputs,
     decode_split_converted_obb_outputs,
+    descending_order,
     dist2bbox,
     dist2rbox,
     dual_topk,
@@ -589,7 +590,7 @@ class YOLODFLFreePosePost(YOLOPosePostMixin, YOLODFLFreeDetectionPost):
                 retained_batches = self._final_detection_batches(detections)
                 selected_batches = []
                 for batch in retained_batches:
-                    order = torch.argsort(batch[:, 4], descending=True)
+                    order = descending_order(batch[:, 4])
                     ordered = batch[order]
                     keep = non_max_suppression(
                         ordered[:, :4], ordered[:, 4], self.iou_thres, max_output=300
@@ -1016,7 +1017,7 @@ class YOLODFLFreeOBBPost(YOLOOBBPostMixin, YOLODFLFreeDetectionPost):
             if xi.numel() == 0:
                 output.append(xi.new_zeros((0, 7)))
                 continue
-            xi = xi[torch.argsort(xi[:, 4], descending=True)[:max_nms]]
+            xi = xi[descending_order(xi[:, 4])[:max_nms]]
             c = xi[:, 5:6] * max_wh
             boxes = torch.cat([xi[:, :2] + c, xi[:, 2:4], xi[:, 6:7]], dim=-1)
             keep = rotated_nms(boxes, xi[:, 4], self.iou_thres)[:max_det]

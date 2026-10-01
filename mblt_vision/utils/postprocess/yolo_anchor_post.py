@@ -9,7 +9,12 @@ from typing import Any, cast
 import torch
 
 from .base import YOLODetectionPostBase
-from .common import YOLOFaceDetectionMixin, YOLOSegPostMixin, non_max_suppression
+from .common import (
+    YOLOFaceDetectionMixin,
+    YOLOSegPostMixin,
+    descending_order,
+    non_max_suppression,
+)
 
 
 class YOLOAnchorDetectionPost(YOLODetectionPostBase):
@@ -252,7 +257,7 @@ class YOLOAnchorDetectionPost(YOLODetectionPostBase):
         out[:, 5] = j.to(rows.dtype)
         if self.n_extra > 0:
             out[:, 6:] = rows[:, mi:]
-        out = out[out[:, 4].argsort(descending=True)[:max_nms]]
+        out = out[descending_order(out[:, 4])[:max_nms]]
         c = out[:, 5:6] * max_wh
         boxes, score = out[:, :4] + c, out[:, 4]
         i_idx = non_max_suppression(boxes, score, self.iou_thres, max_det)

@@ -106,8 +106,12 @@ def test_dota_ground_truth_requires_annotation_for_every_image(tmp_path) -> None
         _load_ground_truths(str(tmp_path), dataset)
 
 
-def test_normalized_difficult_flag_loads_as_an_ignored_region(tmp_path) -> None:
-    """Read organizer-produced difficult metadata before selecting evaluation targets."""
+def test_normalized_difficult_flag_loads_as_an_ordinary_target(tmp_path) -> None:
+    """Count difficult objects as targets, as Ultralytics' validation does.
+
+    Its ``convert_dota_to_yolo_obb`` drops the difficulty flag, so a difficult object is
+    found by a true positive and missed as a false negative, never ignored.
+    """
 
     label_dir = tmp_path / "labels" / "val"
     label_dir.mkdir(parents=True)
@@ -126,8 +130,8 @@ def test_normalized_difficult_flag_loads_as_an_ignored_region(tmp_path) -> None:
 
     ground_truth = _load_ground_truths(str(tmp_path), dataset)["image"]
 
-    assert ground_truth["cls"].tolist() == [0]
-    assert ground_truth["ignore_cls"].tolist() == [0]
+    assert ground_truth["cls"].tolist() == [0, 0]
+    assert ground_truth["ignore_cls"].tolist() == []
 
 
 def test_normalized_truncated_annotation_raises_with_file_and_line(tmp_path) -> None:
@@ -213,6 +217,31 @@ def test_dota_annotations_reject_equivalent_reordered_targets(
 
     with pytest.raises(ValueError, match="Duplicate DOTAv1 annotation target"):
         _load_ground_truths(str(tmp_path), dataset)
+
+
+def test_original_difficult_label_loads_as_an_ordinary_target(tmp_path) -> None:
+    """Official ``val_original`` labels count difficult objects as targets too."""
+
+    original_label_dir = tmp_path / "labels" / "val_original"
+    original_label_dir.mkdir(parents=True)
+    (original_label_dir / "image.txt").write_text(
+        "imagesource:GoogleEarth\ngsd:0.1\n"
+        "0 0 20 0 20 20 0 20 plane 0\n40 40 60 40 60 60 40 60 plane 1\n",
+        encoding="utf-8",
+    )
+    dataset = cast(
+        CustomDOTAv1,
+        SimpleNamespace(
+            ids=["image"],
+            image_paths=["unused"],
+            _load_image=lambda _: np.zeros((100, 100, 3), dtype=np.uint8),
+        ),
+    )
+
+    ground_truth = _load_ground_truths(str(tmp_path), dataset)["image"]
+
+    assert ground_truth["cls"].tolist() == [0, 0]
+    assert ground_truth["ignore_cls"].tolist() == []
 
 
 def test_original_truncated_annotation_raises_with_file_and_line(tmp_path) -> None:
@@ -445,8 +474,8 @@ def test_dota_annotations_reject_unknown_difficulty_flags(
         _load_ground_truths(str(tmp_path), dataset)
 
 
-def test_difficult_regions_do_not_count_as_positive_or_false_positive() -> None:
-    """Ignore a detection on a difficult region while retaining positive matching."""
+def test_supplied_ignore_regions_do_not_count_as_positive_or_false_positive() -> None:
+    """Ignore a detection on a caller-supplied ignore region, the DOTA devkit protocol."""
 
     ground_truths = {
         "image": {

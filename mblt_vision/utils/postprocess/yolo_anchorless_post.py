@@ -18,6 +18,7 @@ from .common import (
     YOLOSegPostMixin,
     concat_converted_obb_outputs,
     decode_split_converted_obb_outputs,
+    descending_order,
     dist2bbox,
     dist2rbox,
     non_max_suppression,
@@ -363,7 +364,7 @@ class YOLOAnchorlessDetectionPost(YOLODetectionPostBase):
             xi_out[:, 5] = cls_idx.to(xi.dtype)
             if self.n_extra > 0:
                 xi_out[:, 6:] = extra
-        xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
+        xi_out = xi_out[descending_order(xi_out[:, 4])[:max_nms]]
         c = xi_out[:, 5:6] * max_wh
         boxes, scores = xi_out[:, :4] + c, xi_out[:, 4]
         i_idx = non_max_suppression(boxes, scores, self.iou_thres, max_det)
@@ -617,7 +618,7 @@ class YOLOAnchorlessPosePost(YOLOPosePostMixin, YOLOAnchorlessDetectionPost):
                 retained_batches = self._final_detection_batches(detections)
                 selected_batches = []
                 for batch in retained_batches:
-                    order = torch.argsort(batch[:, 4], descending=True)
+                    order = descending_order(batch[:, 4])
                     ordered = batch[order]
                     keep = non_max_suppression(
                         ordered[:, :4], ordered[:, 4], self.iou_thres, max_output=300
@@ -998,7 +999,7 @@ class YOLOAnchorlessOBBPost(YOLOOBBPostMixin, YOLOAnchorlessDetectionPost):
         xi_out = yolo_multilabel_candidates(xi, self.nc, self.n_extra, self.conf_thres)
         if xi_out.numel() == 0:
             return torch.zeros((0, 7), dtype=torch.float32, device=self.device)
-        xi_out = xi_out[torch.argsort(xi_out[:, 4], descending=True)[:max_nms]]
+        xi_out = xi_out[descending_order(xi_out[:, 4])[:max_nms]]
         c = xi_out[:, 5:6] * max_wh
         boxes = torch.cat([xi_out[:, :2] + c, xi_out[:, 2:4], xi_out[:, 6:7]], dim=-1)
         keep = rotated_nms(boxes, xi_out[:, 4], self.iou_thres)[:max_det]
