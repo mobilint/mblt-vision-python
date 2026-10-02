@@ -681,6 +681,27 @@ def test_floor_rounding_truncates_the_resized_size_as_upstream_does() -> None:
     assert floor.ratio_pad == ((1.28, 1.28), (0, 0))
 
 
+@pytest.mark.parametrize("model", ["YOLOX-s", "DAMO-YOLO-T"])
+@pytest.mark.parametrize("shape", [(1, 641), (641, 1)])
+def test_floor_rounding_keeps_short_axis_nonzero(
+    model: str, shape: tuple[int, int]
+) -> None:
+    pre_cfg = _model_pre_cfg(model)
+    image = np.zeros((*shape, 3), dtype=np.uint8)
+
+    result, metadata = build_preprocess(pre_cfg).with_metadata(image)
+
+    assert result.shape == (640, 640, 3)
+    assert metadata["img0_shape"] == shape
+    geometry = LetterBoxGeometry.from_shapes(
+        (640, 640),
+        shape,
+        LetterBoxLayout(center=False, size_rounding="floor"),
+    )
+    assert min(geometry.resized_shape) == 1
+    assert max(geometry.resized_shape) == 640
+
+
 def test_per_axis_ratio_records_each_axis_resized_over_original() -> None:
     geometry = LetterBoxGeometry.from_shapes(
         (640, 640),
