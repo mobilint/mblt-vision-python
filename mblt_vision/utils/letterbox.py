@@ -141,6 +141,11 @@ class LetterBoxGeometry:
         else:
             resized_height = int(round(original_height * ratio))
             resized_width = int(round(original_width * ratio))
+        # Highly asymmetric images can round or truncate their short axis to
+        # zero. OpenCV cannot resize to an empty dimension, so retain the
+        # smallest valid extent without changing any size of at least one pixel.
+        resized_height = max(1, resized_height)
+        resized_width = max(1, resized_width)
         if layout.center:
             left = int(round((input_width - resized_width) / 2 - 0.1))
             top = int(round((input_height - resized_height) / 2 - 0.1))
