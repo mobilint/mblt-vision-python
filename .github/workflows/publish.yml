@@ -54,6 +54,46 @@ jobs:
           name: python-package-distributions
           path: dist/
 
+      - name: Diagnose PyPI and TestPyPI OIDC endpoints
+        shell: bash
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          diagnostic_dir="$(mktemp -d)"
+          trap 'rm -rf "$diagnostic_dir"' EXIT
+
+          for attempt in {1..5}; do
+            for host in pypi.org test.pypi.org; do
+              echo "::group::OIDC diagnosis: ${host}, attempt ${attempt}/5"
+              date -u '+UTC=%Y-%m-%dT%H:%M:%SZ'
+
+              # Clear previous responses so a connection failure cannot show stale data.
+              : > "$diagnostic_dir/headers"
+              : > "$diagnostic_dir/body"
+
+              curl_exit=0
+              curl --silent --show-error \
+                --connect-timeout 5 \
+                --max-time 20 \
+                --dump-header "$diagnostic_dir/headers" \
+                --output "$diagnostic_dir/body" \
+                --write-out 'HTTP=%{http_code} IP=%{remote_ip} TIME=%{time_total}s\n' \
+                "https://${host}/_/oidc/audience" || curl_exit=$?
+
+              echo "CURL_EXIT=${curl_exit}"
+              echo "--- response headers ---"
+              cat "$diagnostic_dir/headers"
+              echo "--- response body (first 4096 bytes) ---"
+              head -c 4096 "$diagnostic_dir/body"
+              echo
+              echo "::endgroup::"
+            done
+
+            if [ "$attempt" -lt 5 ]; then
+              sleep 2
+            fi
+          done
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
