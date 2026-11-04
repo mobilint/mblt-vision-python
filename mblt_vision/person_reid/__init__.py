@@ -15,11 +15,12 @@ from ..utils.evaluation.retrieval import (
     RetrievalResult,
     extract_embeddings,
 )
-from ..utils.postprocess.embedding_post import PersonReIDPost
+from ..utils.postprocess.embedding_post import EmbeddingPost, PersonReIDPost
 
 __all__ = [
     "DukeMTMCReIDDataset",
     "DukeMTMCReIDEvaluator",
+    "EmbeddingPost",
     "Market1501Dataset",
     "Market1501Evaluator",
     "OccludedDukeDataset",

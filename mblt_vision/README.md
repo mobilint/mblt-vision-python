@@ -514,7 +514,12 @@ by default; caller-owned subsets must explicitly set `validate_counts=False`.
 Only Market-1501 drops pid -1 junk; pid 0 background distractors remain.
 Duke loaders reject pid -1. Root defaults use `~/.mblt_model_zoo/datasets/<name>/eval`.
 
-`PersonReIDPost(pre_cfg, post_cfg)` extends `EmbeddingPost`. It validates one
+`PersonReIDPost(pre_cfg, post_cfg)` extends `EmbeddingPost`; both are exported
+from `mblt_vision.person_reid`. Engine postprocessing returns a `Results` object
+whose `embeddings` and `output` retain the validated `(N,D)` matrix.
+`dataset_ready(root, "person_reid", dataset)` checks source counts/metadata and
+decodes every retained query/gallery image (default dataset: Market-1501).
+`PersonReIDPost` It validates one
 floating-point `(N,D)` output or singleton-spatial NCHW/NHWC tensor, optionally
 checks `embedding_dim`, and uses `normalize: true` for row-wise L2 normalization
 (zero vectors remain zero). Return type is a float32 torch matrix, never class

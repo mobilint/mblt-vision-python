@@ -214,3 +214,63 @@ def test_family_base_inheritance(tmp_path):
             build_postprocess(cfg["pre_cfg"], cfg["post_cfg"]), PersonReIDPost
         )
         assert build_preprocess(cfg["pre_cfg"])
+
+
+def test_public_base_and_engine_result_path():
+    from mblt_vision.person_reid import EmbeddingPost as PublicEmbeddingPost
+    from mblt_vision.utils.results import Results
+    from mblt_vision.wrapper import MBLT_Engine
+
+    assert PublicEmbeddingPost is EmbeddingPost
+    engine = MBLT_Engine.__new__(MBLT_Engine)
+    engine.pre_cfg = {}
+    engine.post_cfg = {
+        "task": "person_reid",
+        "dataset": "market1501",
+        "normalize": True,
+    }
+    engine.postprocessor = build_postprocess(engine.pre_cfg, engine.post_cfg)
+    result = engine.postprocess([np.array([[3.0, 4.0]], dtype=np.float32)])
+    assert isinstance(result, Results)
+    torch.testing.assert_close(result.embeddings, torch.tensor([[0.6, 0.8]]))
+    assert result.output is result.embeddings
+    assert result.acc is None and result.box_cls is None
+    replacement = torch.tensor([[1.0, 0.0]])
+    result.set_output(replacement)
+    assert result.embeddings is replacement
+    for invalid in (
+        torch.ones(2),
+        torch.ones((1, 2), dtype=torch.int64),
+        torch.tensor([[float("nan")]]),
+    ):
+        with pytest.raises(ValueError):
+            result.set_output(invalid)
+    with pytest.raises(TypeError):
+        result.set_output([replacement])
+
+
+@pytest.mark.parametrize("name", ["market1501", "dukemtmc-reid", "occluded-duke"])
+def test_reid_readiness(tmp_path, monkeypatch, name):
+    from mblt_vision.utils.datasets import readiness, reid
+    from PIL import Image
+
+    original = reid.get_dataset_config_for_task
+
+    def tiny_config(task, dataset):
+        cfg = original(task, dataset)
+        for split in cfg["retrieval_splits"].values():
+            split["count"] = 1
+        return cfg
+
+    monkeypatch.setattr(reid, "get_dataset_config_for_task", tiny_config)
+    assert not readiness.dataset_ready(tmp_path, "person_reid", name)
+    for folder in ("query", "bounding_box_test"):
+        (tmp_path / folder).mkdir()
+        Image.new("RGB", (4, 8)).save(tmp_path / folder / "0001_c1_sample.jpg")
+    assert readiness.dataset_ready(tmp_path, "person_reid", name)
+    if name == "market1501":
+        assert readiness.dataset_ready(tmp_path, "person_reid")
+    assert not readiness.dataset_ready(tmp_path, "person_reid", "coco")
+    image = tmp_path / "query" / "0001_c1_sample.jpg"
+    image.write_bytes(b"not an image")
+    assert not readiness.dataset_ready(tmp_path, "person_reid", name)
