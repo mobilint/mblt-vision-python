@@ -183,6 +183,8 @@ The current ownership boundary is deliberate:
   resize then scaleup-disabled centered letterbox. Preserve upstream ratio_pad's
   height/width metadata and restore all xywh using its first (height) gain;
   direct-letterbox is an explicit historical mode, not the validation default.
+  The optional pinned CPU reference adapter fuses its FP32 eval model using
+  model.fuse(verbose=False), matching validation AutoBackend's fuse=True policy.
   CLI prediction leaves confidence unset until task selection: tiled DOTA uses
   dataset/model .01 by default; non-tiled prediction retains .25, overrides win.
   Merge/release candidates per completed image; run model preparation on its pool.

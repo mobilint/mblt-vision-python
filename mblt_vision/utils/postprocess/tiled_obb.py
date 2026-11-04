@@ -141,9 +141,10 @@ class UltralyticsTilePredictor:
     """Optional pinned CPU PyTorch reference adapter with validation-style tile NMS.
 
     Loads only an existing local .pt checkpoint (never downloads). Requires exactly
-    ultralytics==8.3.228. Uses raw eval-mode model + upstream multi_label=True
-    rotated NMS, not YOLO.predict's single-label defaults. All inference is CPU,
-    FP32, no augmentation. Construction loads weights; __call__ performs inference.
+    ultralytics==8.3.228. Fuses the eval-mode model like validation AutoBackend's
+    fuse=True default, then uses upstream multi_label=True rotated NMS, not
+    YOLO.predict's single-label defaults. All inference is CPU FP32, without
+    augmentation. Construction loads/fuses weights; __call__ performs inference.
     """
 
     def __init__(
@@ -185,7 +186,10 @@ class UltralyticsTilePredictor:
         wrapper = YOLO(str(Path(weights).resolve()), task="obb")
         if wrapper.task != "obb":
             raise ValueError("weights must contain an OBB model")
-        self.model = wrapper.model.cpu().float().eval()
+        # Validation's AutoBackend defaults to fuse=True (pinned autobackend.py
+        # lines 145, 200-209). Unfused Conv+BN arithmetic can cross Task1's 0.001
+        # rounding boundary even with otherwise identical pixels and detections.
+        self.model = wrapper.model.cpu().float().eval().fuse(verbose=False)
         self.names = tuple(wrapper.names[i] for i in range(len(wrapper.names)))
         self.imgsz, self.conf, self.iou, self.max_det = imgsz, conf, iou, max_det
         self._nms = non_max_suppression

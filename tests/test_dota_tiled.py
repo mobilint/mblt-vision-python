@@ -491,6 +491,7 @@ def test_reference_adapter_mocked_raw_inference_contract(tmp_path, monkeypatch) 
     model.cpu.return_value = model
     model.float.return_value = model
     model.eval.return_value = model
+    model.fuse.return_value = model
     model.return_value = torch.zeros((1, 20, 10))
     yolo = Mock(
         return_value=SimpleNamespace(task="obb", model=model, names={0: "plane"})
@@ -503,6 +504,12 @@ def test_reference_adapter_mocked_raw_inference_contract(tmp_path, monkeypatch) 
         sys.modules, "ultralytics.utils.nms", SimpleNamespace(non_max_suppression=nms)
     )
     adapter = UltralyticsTilePredictor(checkpoint, imgsz=64)
+    model.cpu.assert_called_once_with()
+    model.float.assert_called_once_with()
+    model.eval.assert_called_once_with()
+    model.fuse.assert_called_once_with(verbose=False)
+    model.assert_not_called()  # Construction fuses only, never runs inference.
+    assert adapter.model is model
     output = adapter(_tile(shape=(64, 64)))
     torch.testing.assert_close(
         output, torch.tensor([[32.0, 32.0, 8.0, 4.0, 0.3, 0.9, 0.0]])

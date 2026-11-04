@@ -119,7 +119,9 @@ description: >-
   max_det 300. Dataset inference.preprocessing defaults to ultralytics-val:
   long-side ceil resize then centered scaleup-disabled letterbox. ratio_pad records
   height/width gains; restore all xywh with its first (height) gain as upstream.
-  direct-letterbox is the explicit historical mode. CLI confidence resolves after
+  direct-letterbox is the explicit historical mode. The optional pinned CPU
+  reference adapter uses model.fuse(verbose=False) in FP32 eval mode, matching
+  validation AutoBackend's fuse=True policy. CLI confidence resolves after
   task selection: tiled DOTA dataset/model .01, non-tiled .25; explicit overrides win.
   Merge/release candidates per completed image; prepare on its pool.
   Keep scoring in evaluation, degenerate predictions as IoU-zero false positives,

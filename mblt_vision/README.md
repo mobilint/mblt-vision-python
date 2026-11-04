@@ -137,6 +137,9 @@ All source links below are immutable at the pinned commit:
   resized/original height and width ratios before letterboxing.
 - [`data/dataset.py:206–235`](https://github.com/ultralytics/ultralytics/blob/f8e6fddc89ec754b3a62eab87d5221e83058005a/ultralytics/data/dataset.py#L206-L235):
   non-augmented validation adds `LetterBox(..., scaleup=False)` after that resize.
+- [`nn/autobackend.py:135–209`](https://github.com/ultralytics/ultralytics/blob/f8e6fddc89ec754b3a62eab87d5221e83058005a/ultralytics/nn/autobackend.py#L135-L209):
+  validation AutoBackend defaults to `fuse=True` and calls `model.fuse` for an
+  in-memory PyTorch model (or loads a checkpoint with fusion enabled).
 - [`engine/validator.py:123–125`](https://github.com/ultralytics/ultralytics/blob/f8e6fddc89ec754b3a62eab87d5221e83058005a/ultralytics/engine/validator.py#L123-L125):
   default OBB validation confidence is 0.01, distinct from detection's 0.001.
 - [`models/yolo/detect/val.py:115–125`](https://github.com/ultralytics/ultralytics/blob/f8e6fddc89ec754b3a62eab87d5221e83058005a/ultralytics/models/yolo/detect/val.py#L115-L125):
@@ -269,14 +272,17 @@ The optional `UltralyticsTilePredictor(weights, *, imgsz=1024, conf=0.01,
 iou=0.7, max_det=300, preprocessing="ultralytics-val")` is a real CPU FP32 reference adapter. It requires an
 existing trusted local `.pt` checkpoint and exactly `ultralytics==8.3.228`,
 checked at construction; it never resolves a model name or downloads weights.
-It executes the raw eval-mode OBB model, then upstream `non_max_suppression`
-with `multi_label=True`, `rotated=True`, and the checkpoint's class count.
+At construction it moves the model to CPU FP32 eval mode and calls
+`model.fuse(verbose=False)`, matching the pinned validation AutoBackend's
+`fuse=True` default. Unfused Conv+BN arithmetic can cross Task1 rounding boundaries;
+fusion is part of the reference execution methodology, not just a speed option.
+It executes the fused model, then upstream `non_max_suppression` with
+`multi_label=True`, `rotated=True`, and the checkpoint's class count.
 This deliberately uses validation-style multi-label candidates, **not** the
-single-label defaults of `YOLO.predict`. It does not augment, fuse explicitly,
-use FP16, rectangular auto-padding, or select GPU/NPU. `names` exposes checkpoint
-class names so callers can validate taxonomy. Fixed-square raw-model inference
-is an explicit controlled configuration, not all of `model.val`'s dataloader,
-fusing/AutoBackend, `rect` and preprocessing optimizations.
+single-label defaults of `YOLO.predict`. It does not augment, use FP16, rectangular
+auto-padding, or select GPU/NPU. `names` exposes checkpoint class names so callers
+can validate taxonomy. Fixed-square model inference remains an explicit controlled
+configuration, not every dataloader/backend option of `model.val`.
 
 ```python
 from mblt_vision.utils.postprocess.tiled_obb import UltralyticsTilePredictor
@@ -371,8 +377,10 @@ at least 1. It should not be substituted as the exact pinned merge oracle.
   NxN matrix; suppression still includes all higher-ranked candidates, even
   suppressed ones, and uses `>= 0.3`.
 - The fixed-square reference adapter omits upstream validation dataloader's
-  optional rectangular batches and AutoBackend/fusing. It enables multi-label
-  tile NMS explicitly. No published accuracy claim is made for these choices.
+  optional rectangular batches and general AutoBackend wrapping, but does fuse
+  the model with the same `fuse=True` policy. It enables multi-label tile NMS
+  explicitly. No full-run exactness or published accuracy claim follows from
+  these settings alone; real-model comparisons remain separate evidence.
 - Decode-library/codec versions can change pixels. Default JPEG parity is tested
   against actual upstream `split_test` writes in the same OpenCV installation.
   EXIF-mismatched dimensions, colliding crop sizes/stems and unsafe filenames fail

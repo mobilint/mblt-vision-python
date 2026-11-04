@@ -168,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             "iou": args.iou,
             "max_det": args.max_det,
             "half": False,
+            "fuse": True,
             "rect": False,
             "multi_label": True,
         }
