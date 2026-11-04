@@ -69,6 +69,10 @@ The current ownership boundary is deliberate:
   floors, and rounding differs by a pixel at 224/0.9 and 224/0.95. Several names
   (ConvNext_Base) resolve in timm yet carry torchvision's transform here, so read the
   expected value from that model's source.yaml provenance rather than from the name.
+- To share processing defaults without changing legacy models, opt new family YAMLs into
+  `extends: bases/family.yaml#DEFAULT`. See the configuration-inheritance section of
+  `mblt_vision/README.md` for ordering and merge rules. Keep legacy `update` shallow and
+  prove every existing variant order-identical with `tests/test_config_inheritance.py`.
 - Require post_cfg.dataset in every model YAML and resolve output class counts using the
   dataset/task pair. Do not assume one output taxonomy for every model in a task.
 - Preserve automatic .mxq/.onnx framework detection and the fail-fast error when a local
