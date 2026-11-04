@@ -83,3 +83,14 @@ class PersonReIDPost(EmbeddingPost):
         if not isinstance(dataset, str) or not dataset:
             raise ValueError("Person ReID postprocessing requires post_cfg.dataset")
         self.dataset = get_dataset_config_for_task("person_reid", dataset)["name"]
+
+
+class FaceRecognitionPost(EmbeddingPost):
+    """One identity embedding per prepared aligned crop; no implicit flip fusion."""
+
+    def __init__(self, pre_cfg: dict, post_cfg: dict) -> None:
+        super().__init__(pre_cfg, post_cfg)
+        dataset = post_cfg.get("dataset")
+        if not isinstance(dataset, str) or not dataset:
+            raise ValueError("Face recognition postprocessing requires post_cfg.dataset")
+        self.dataset = get_dataset_config_for_task("face_recognition", dataset)["name"]

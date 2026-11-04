@@ -114,6 +114,10 @@ description: >-
   and prepared query/gallery loaders. Preserve ops stable distance ties, camera exclusions
   and dataset-specific junk handling; see the ReID API section in `mblt_vision/README.md`.
 
+- Face verification uses prepared 112x112 crops without realignment or implicit flip fusion.
+  Keep pair/fold order, source threshold search, Results embeddings and readiness connected;
+  require exact metric and preprocessing parity (face verification API section).
+
 ## Runtime and Packaging
 
 - Route NPU runtime access through mblt-npu-python; do not copy backend classes into Vision.

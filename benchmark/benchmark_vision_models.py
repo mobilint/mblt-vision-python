@@ -36,7 +36,7 @@ CORE_MODES: tuple[CoreMode, ...] = cast(
     tuple[CoreMode, ...], core_modes_for_target_device("aries-rb")
 )
 # Utility-only embedding tasks have no benchmark engine/CLI route yet.
-TASK_CHOICES = tuple(task for task in VISION_TASKS if task != "person_reid")
+TASK_CHOICES = tuple(task for task in VISION_TASKS if task not in {"person_reid", "face_recognition"})
 SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 
 

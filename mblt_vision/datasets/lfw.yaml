@@ -1,0 +1,34 @@
+name: lfw
+path: ~/.mblt_model_zoo/datasets/lfw
+tasks:
+- face_recognition
+val: eval
+image_directory: aligned
+pairs: 6000
+folds: 10
+aligned_size:
+- 112
+- 112
+source:
+  repository: https://git.mobilint.com/algorithm-team/testing/mblt-model-ops
+  revision: ec537764e36ca10da963fcb7afab157ea60ca022
+  config_path: datasets/lfw/lfw.yaml
+  name: lfw
+  dataloader_path: datasets/lfw/_private/dataloader.py
+eval_protocol:
+  id: lfw-ten-fold-verification.v1
+evaluation:
+  split: eval/pairs.csv
+  protocol: lfw-ten-fold-verification.v1
+  primary_metric: lfw_accuracy
+  secondary_metrics:
+  - lfw_accuracy_std
+  embedding_fusion: none; one normalized embedding per crop
+  implementation_reference:
+    path: datasets/lfw/_private/evaluator.py
+    shared_paths:
+    - datasets/_shared/face_pairs.py
+    - datasets/_shared/face_verification.py
+    - models/face_recognition/_shared/evaluate.py
+    - models/_shared/embeddings.py
+    revision: ec537764e36ca10da963fcb7afab157ea60ca022

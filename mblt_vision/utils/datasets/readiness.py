@@ -20,6 +20,7 @@ from scipy.io.matlab import MatReadError
 from ..._tasks import normalize_vision_task
 from ...datasets import get_dataset_category_ids
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
+from .face_pairs import LFWDataset, AgeDB30Dataset, CFPFPDataset
 from .reid import DukeMTMCReIDDataset, Market1501Dataset, OccludedDukeDataset
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -1068,6 +1069,25 @@ def _reid_ready(root: Path, dataset: str) -> bool:
     return True
 
 
+def _face_ready(root: Path, dataset: str) -> bool:
+    """Validate prepared aligned pairs and image decoding, never realign crops."""
+    loader = {"lfw": LFWDataset, "agedb-30": AgeDB30Dataset, "cfp-fp": CFPFPDataset}.get(dataset)
+    if loader is None:
+        return False
+    try:
+        data = loader(root)
+        if len({pair.fold for pair in data.pairs}) != 10:
+            return False
+        for sample in data.samples:
+            if sample.image.is_symlink():
+                return False
+            with Image.open(sample.image) as image:
+                image.load()
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) -> bool:
     """Return whether an organized dataset matches its task, taxonomy, and full validation split.
 
@@ -1093,6 +1113,8 @@ def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) 
     }.get(normalized_task)
     normalized_dataset = (dataset or expected_dataset or "").lower()
 
+    if normalized_task == "face_recognition":
+        return _face_ready(root, normalized_dataset or "lfw")
     if normalized_task == "person_reid":
         return _reid_ready(root, normalized_dataset or "market1501")
     if normalized_task == "semantic_segmentation":

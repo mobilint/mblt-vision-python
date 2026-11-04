@@ -186,6 +186,10 @@ The current ownership boundary is deliberate:
   stable distance ties, camera exclusions, junk rules, and preprocessing numeric parity tested.
   Named Normalize styles retain legacy arithmetic; explicit mean/std uses source float32 arithmetic.
 
+- Face verification utilities preserve prepared alignment and official pair/fold order.
+  Use dataset-bound `FaceRecognitionPost`, `Results.embeddings`, and face readiness checks.
+  Protocol details and source-parity requirements are in the face verification API section.
+
 ## Python-First Architecture
 
 - Keep the public layer independent from a particular backend. Define small internal interfaces

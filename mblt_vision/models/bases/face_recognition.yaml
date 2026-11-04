@@ -1,0 +1,18 @@
+# Processing only; concrete approved HF artifacts are added separately.
+# ops ec537764e36ca10da963fcb7afab157ea60ca022
+# models/face_recognition/ArcFace_IResNet_100/distribution.yaml
+DEFAULT:
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: [112, 112]
+      interpolation: bilinear
+    Normalize:
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]
+  post_cfg:
+    task: face_recognition
+    dataset: lfw
+    embedding_dim: 512
+    normalize: true
