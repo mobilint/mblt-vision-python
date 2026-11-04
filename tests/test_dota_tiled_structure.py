@@ -69,6 +69,7 @@ def test_dataset_protocol_defaults_and_selector_validation():
         **{**protocol["tiling"], "rates": tuple(protocol["tiling"]["rates"])}
     )
     assert protocol["inference"] == {
+        "preprocessing": "ultralytics-val",
         "conf_thres": 0.01,
         "iou_thres": 0.7,
         "max_det": 300,
@@ -100,6 +101,7 @@ def test_existing_update_inherits_protocol_and_reuses_decode(
     assert cls.nmsout2eval is base.nmsout2eval
     assert processor.conf_thres == 0.01 and processor.iou_thres == 0.7
     assert processor.tile_max_det == 300
+    assert processor.tile_preprocessing == "ultralytics-val"
     legacy_post = {k: v for k, v in post.items() if k != "eval_protocol"}
     legacy = build_postprocess(config["pre_cfg"], legacy_post)
     rows = torch.zeros((1, 4 + processor.nc + processor.n_extra))

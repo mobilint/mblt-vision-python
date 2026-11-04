@@ -17,6 +17,7 @@ import torch
 from ...datasets import get_dataset_class_names
 from ..datasets.dota_tiling import (
     _DEFAULT_CONFIG,
+    _DEFAULT_PREPROCESSING,
     ULTRALYTICS_VERSION,
     Tile,
     TiledConfig,
@@ -24,6 +25,7 @@ from ..datasets.dota_tiling import (
     get_eval_protocol,
     iter_tiles,
     prepare_tile,
+    validate_preprocessing,
 )
 from ..letterbox import LetterBoxGeometry
 from .common import rotated_nms, xywhr2xyxyxyxy
@@ -152,7 +154,9 @@ class UltralyticsTilePredictor:
         conf: float = 0.01,
         iou: float = 0.7,
         max_det: int = 300,
+        preprocessing: str = _DEFAULT_PREPROCESSING,
     ) -> None:
+        self.preprocessing = validate_preprocessing(preprocessing)
         if not Path(weights).is_file() or Path(weights).suffix.lower() != ".pt":
             raise ValueError("weights must be an existing trusted local .pt checkpoint")
         if type(imgsz) is not int or imgsz <= 0 or imgsz % 32:
@@ -187,7 +191,9 @@ class UltralyticsTilePredictor:
         self._nms = non_max_suppression
 
     def __call__(self, tile: Tile) -> torch.Tensor:
-        tensor, geometry = prepare_tile(tile, self.imgsz)
+        tensor, geometry = prepare_tile(
+            tile, self.imgsz, preprocessing=self.preprocessing
+        )
         with torch.inference_mode():
             raw = self.model(tensor)
             pred = self._nms(
@@ -273,6 +279,7 @@ class DOTATiledOBBPostMixin:
                 "rates": tuple(self.eval_protocol["tiling"]["rates"]),
             }
         )
+        self.tile_preprocessing = validate_preprocessing(resolved["preprocessing"])
         self.tile_max_det = resolved["max_det"]
         super().__init__(pre_cfg, resolved, **kwargs)
 

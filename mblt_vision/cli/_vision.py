@@ -292,6 +292,12 @@ def run_vision_inference(
     model = create_vision_engine(args)
     try:
         actual_task = normalize_vision_task(model.post_cfg.get("task", ""))
+        tiled_dota = (
+            actual_task == "obb"
+            and str(model.post_cfg.get("dataset", "")).lower() == "dotav1"
+            and not getattr(args, "legacy_single_image", False)
+            and getattr(getattr(model, "postprocessor", None), "e2e", True)
+        )
         plot_kwargs: dict[str, Any] = {}
         if actual_task == "image_classification":
             plot_kwargs["topk"] = args.topk
@@ -302,16 +308,21 @@ def run_vision_inference(
             "pose_estimation",
             "obb",
         }:
+            confidence = args.conf_thres
+            if confidence is None:
+                if tiled_dota:
+                    from ..utils.datasets.dota_tiling import get_eval_protocol
+
+                    confidence = model.post_cfg.get(
+                        "conf_thres", get_eval_protocol()["inference"]["conf_thres"]
+                    )
+                else:
+                    confidence = 0.25  # Preserve historical non-tiled prediction.
             model.set_postprocess_thresholds(
-                conf_thres=args.conf_thres, iou_thres=args.iou_thres
+                conf_thres=confidence, iou_thres=args.iou_thres
             )
 
-        if (
-            actual_task == "obb"
-            and str(model.post_cfg.get("dataset", "")).lower() == "dotav1"
-            and not getattr(args, "legacy_single_image", False)
-            and getattr(getattr(model, "postprocessor", None), "e2e", True)
-        ):
+        if tiled_dota:
             from ..utils.evaluation.eval_dota_tiled import predict_dota_image
 
             result = predict_dota_image(model, args.source)

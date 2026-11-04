@@ -116,7 +116,12 @@ description: >-
   Preserve BGR native tiles, Nx7 tile-pixel callback rows, pinned JSON rounding
   before offset-only restoration, JPEG default, classwise Fast-NMS probIoU >= 0.3,
   stable ties and frozen da3ef806 Task1 bytes. Inference defaults: conf .01, IoU .7,
-  max_det 300. Merge/release candidates per completed image; prepare on its pool.
+  max_det 300. Dataset inference.preprocessing defaults to ultralytics-val:
+  long-side ceil resize then centered scaleup-disabled letterbox. ratio_pad records
+  height/width gains; restore all xywh with its first (height) gain as upstream.
+  direct-letterbox is the explicit historical mode. CLI confidence resolves after
+  task selection: tiled DOTA dataset/model .01, non-tiled .25; explicit overrides win.
+  Merge/release candidates per completed image; prepare on its pool.
   Keep scoring in evaluation, degenerate predictions as IoU-zero false positives,
   strict ground truth, and protocol-specific benchmark score names. Source refs and
   complete methodology are in the DOTA section of `mblt_vision/README.md`.

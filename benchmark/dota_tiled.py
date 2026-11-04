@@ -20,6 +20,7 @@ from mblt_vision.utils.datasets.dota_tiling import (
     ULTRALYTICS_COMMIT,
     ULTRALYTICS_VERSION,
     TiledConfig,
+    get_eval_protocol,
 )
 from mblt_vision.utils.postprocess.tiled_obb import (
     UltralyticsTilePredictor,
@@ -78,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-det", type=int, default=300, help="Ultralytics adapter per-tile cap"
     )
+    parser.add_argument(
+        "--preprocessing",
+        choices=("ultralytics-val", "direct-letterbox"),
+        default=get_eval_protocol()["inference"]["preprocessing"],
+        help="Ultralytics adapter input methodology; direct-letterbox is historical",
+    )
     args = parser.parse_args(argv)
     config = TiledConfig(
         args.crop_size,
@@ -106,13 +113,19 @@ def main(argv: list[str] | None = None) -> int:
             conf=args.conf,
             iou=args.iou,
             max_det=args.max_det,
+            preprocessing=args.preprocessing,
         )
         from mblt_vision.datasets import get_dataset_class_names
 
         if predictor.names != tuple(get_dataset_class_names("dotav1")):
             parser.error("Reference checkpoint taxonomy must match DOTAv1")
     else:
-        if (args.imgsz, args.conf, args.iou, args.max_det) != (1024, 0.01, 0.7, 300):
+        if (args.imgsz, args.conf, args.iou, args.max_det) != (
+            1024,
+            0.01,
+            0.7,
+            300,
+        ) or args.preprocessing != get_eval_protocol()["inference"]["preprocessing"]:
             parser.error(
                 "Adapter flags apply only to --weights; configure custom callbacks in the factory"
             )
@@ -149,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.weights
         else args.predictor_factory,
         "reference_adapter": {
+            "preprocessing": args.preprocessing,
             "imgsz": args.imgsz,
             "conf": args.conf,
             "iou": args.iou,

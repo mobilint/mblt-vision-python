@@ -15,7 +15,13 @@ import torch
 from PIL import Image
 
 from ..datasets import CustomDOTAv1, get_dotav1_class_num, get_dotav1_label
-from ..datasets.dota_tiling import Tile, TiledConfig, get_eval_protocol, iter_tiles
+from ..datasets.dota_tiling import (
+    Tile,
+    TiledConfig,
+    get_eval_protocol,
+    iter_tiles,
+    prepare_tile_image,
+)
 from ..postprocess.common import xywhr2xyxyxyxy
 from ..postprocess.tiled_obb import (
     DOTATiledOBBPostMixin,
@@ -79,12 +85,30 @@ def predict_engine_tiles(
         tiles, completed = batch
         values, shapes, pads = [], [], []
         for tile in tiles:
+            image = tile.image
+            geometry = None
+            if tiled:
+                size = model.pre_cfg["LetterBox"]["img_size"]
+                if len(size) != 2 or size[0] != size[1]:
+                    raise ValueError(
+                        "DOTA validation preprocessing requires square LetterBox input"
+                    )
+                image, geometry = prepare_tile_image(
+                    tile, size[0], preprocessing=processor.tile_preprocessing
+                )
+            # The selected model still owns normalization/layout. A prepared
+            # square has identity letterboxing; restore using native-tile metadata,
+            # not the identity metadata returned for that intermediate input.
             value, metadata = model.preprocess_with_metadata(
-                np.ascontiguousarray(tile.image[..., ::-1])
+                np.ascontiguousarray(image[..., ::-1])
             )
             values.append(value)
             shapes.append(tuple(tile.image.shape[:2]))
-            pads.append(metadata.get("ratio_pad"))
+            pads.append(
+                ((geometry.ratio, geometry.ratio), geometry.pad)
+                if geometry is not None
+                else metadata.get("ratio_pad")
+            )
         return tiles, np.stack(values), shapes, pads, completed
 
     def infer(batch: Any) -> Any:

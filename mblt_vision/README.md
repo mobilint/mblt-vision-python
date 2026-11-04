@@ -97,7 +97,9 @@ and forwards the dataset's per-tile cap to inherited NMS. Normal postprocess cal
 still return the established tile/network-space result contract; raw engine tensor
 inference does not silently become image tiling. Prediction and evaluation bridge
 through `utils/evaluation/eval_dota_tiled.py`, using that same model pre/post.
-Explicit model thresholds and CLI threshold overrides remain supported.
+Explicit model thresholds and CLI threshold overrides remain supported. With no
+`--conf-thres`, tiled DOTA prediction uses the dataset/model default of 0.01;
+non-tiled prediction (including `--legacy-single-image`) retains 0.25.
 
 Windows, crops, `TiledConfig`, `Tile`, `prepare_tile`, version constants and
 `get_eval_protocol` live in `utils/datasets/dota_tiling.py`; restore/merge,
@@ -204,14 +206,30 @@ in **native tile pixels**, already inverse-letterboxed. Empty means shape
 nonnegative integers. The merge creates owned CPU float32 tensors and never
 mutates callback rows. It rejects mixing original image IDs in one merge call.
 
-`prepare_tile(tile, imgsz=1024)` supplies the frozen v1 direct-letterbox
-fixed-square input helper: centered aspect-preserving letterbox with rounded resized size,
-INTER_LINEAR, pad 114, scaleup enabled, then BGR->RGB, contiguous NCHW float32
-`/255` on CPU. It returns the input and shared `LetterBoxGeometry` metadata.
+`prepare_tile(tile, imgsz=1024, *, preprocessing="ultralytics-val")` follows the
+pinned validation loader: resize the longest side to imgsz using `ceil` dimensions,
+then apply centered `LetterBox(scaleup=False)`, INTER_LINEAR and pad 114. It returns
+contiguous RGB NCHW float32 `/255` on CPU and `LetterBoxGeometry` metadata.
+`prepare_tile_image` exposes the same prepared square as uint8 HWC BGR so the engine
+can retain its existing normalization/layout pipeline without resizing again.
+Dataset `eval_protocol.inference.preprocessing` selects the default; a genuine
+model deviation may set `post_cfg.preprocessing`. The engine bridge and optional
+reference adapter use the same methodology. Square model inputs are required.
+
+Validation metadata deliberately reproduces upstream's **height, width** ratios:
+`geometry.ratio_pad=((resized_h/original_h, resized_w/original_w), (left,top))`.
+Upstream OBB `scale_preds` consumes only the first ratio for all four xywh values,
+even when ceil makes the ratios unequal. Accordingly `geometry.ratio` is that
+scalar height gain, not a nominal long-side ratio or an anisotropic inverse.
 `restore_tile_boxes(network_rows, geometry)` subtracts center padding and divides
-centers/sizes by the actual letterbox ratio once. Angles, scores and classes are
-unchanged. It deliberately does not clip rotated centers or vertices. A runtime
-may change tensor layout/dtype at its own boundary while keeping this geometry.
+centers/sizes by that gain once. The engine bridge passes the same scalar gain
+through inherited OBB conversion. Angles, scores and classes are unchanged;
+rotated centers and vertices are not clipped by this inverse.
+
+Explicit `preprocessing="direct-letterbox"` retains the historical one-stage
+rounded resize with scaleup enabled, uniform gain and pad 114. This is a different
+methodology on rectangular inputs, not the default validation path. A runtime
+may change tensor layout/dtype at its own boundary while preserving this metadata.
 
 Merge rounds native rboxes to 3 decimals and scores to 5 using Python `round`,
 adds tile x/y offsets to the rounded Python floats, constructs float32 rows, then
@@ -248,7 +266,7 @@ head decoding and tied-score behavior still require numerical validation.
 No device is opened by this tiled module itself.
 
 The optional `UltralyticsTilePredictor(weights, *, imgsz=1024, conf=0.01,
-iou=0.7, max_det=300)` is a real CPU FP32 reference adapter. It requires an
+iou=0.7, max_det=300, preprocessing="ultralytics-val")` is a real CPU FP32 reference adapter. It requires an
 existing trusted local `.pt` checkpoint and exactly `ultralytics==8.3.228`,
 checked at construction; it never resolves a model name or downloads weights.
 It executes the raw eval-mode OBB model, then upstream `non_max_suppression`
@@ -287,7 +305,7 @@ python benchmark/dota_tiled.py --source /data/DOTA/images/test \
 
 Callbacks are trusted Python code; loading a factory is not a sandbox. Custom
 callbacks configure their inference settings themselves. `--imgsz`, `--conf`,
-`--iou` and `--max-det` apply only to the optional reference adapter; nondefault
+`--iou`, `--max-det` and `--preprocessing` apply only to the optional reference adapter; nondefault
 values with a factory are rejected rather than silently ignored.
 `--no-jpeg-roundtrip` opts into lossless in-memory crops, a deliberate numerical
 difference from the JPEG-producing upstream splitter.
@@ -332,17 +350,17 @@ at least 1. It should not be substituted as the exact pinned merge oracle.
 
 ### Explicit differences and reproducibility limits
 
-- The frozen v1 direct-letterbox helper and engine bridge are **not pixel-exact
-  upstream validation-loader preprocessing on all rectangular tiles**. Upstream
-  first resizes the longest side to imgsz using `ceil` for the other dimension,
-  then applies scaleup-disabled letterbox; direct letterbox uses rounded resized
-  dimensions once. A synthetic 7x31 input at imgsz64 yields upstream height15
-  versus direct height14 before padding, with different pixels and ratio metadata.
-  `test_dota_validation_preprocess_reference.py` runs the actual pinned loader,
-  transform builder and letterbox definitions without model inference to pin this
-  distinction (square controls match). This restructure intentionally preserves
-  existing Task1 numerics; correcting validation preprocessing is a separate,
-  explicit behavior/protocol change, not an invisible refactor.
+- The default `ultralytics-val` preprocessing is an intentional correction after
+  the byte-preserving config/utils restructure at `22a6ccf`. It changes rectangular
+  inputs and restored predictions relative to historical `direct-letterbox`.
+  A synthetic 7x31 input at imgsz64 yields validation height15 versus direct
+  height14, with different pixels and ratio metadata. Source-hashed tests in
+  `test_dota_validation_preprocess_reference.py` execute pinned loader, transform,
+  and OBB `scale_preds` definitions; they require exact prepared tensor/metadata
+  parity and matching restored rows through both adapter and engine boundaries,
+  using only synthetic stubs (no model inference). Square controls match.
+  The frozen da3ef806 Task1 fixture remains unchanged: it proves merge/export
+  invariance for identical native-tile rows, **not** end-to-end inference parity.
 
 - Tied merge scores use this package's stable `descending_order` on every device,
   as required by its selection contract. Upstream Fast-NMS uses an unstable

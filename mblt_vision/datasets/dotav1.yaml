@@ -16,6 +16,7 @@ eval_protocol:
     eps: 0.01
     jpeg_roundtrip: true
   inference:
+    preprocessing: ultralytics-val
     conf_thres: 0.01
     iou_thres: 0.7
     max_det: 300

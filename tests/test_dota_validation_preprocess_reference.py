@@ -1,8 +1,4 @@
-"""Pin a known direct-letterbox versus upstream validation-loader difference.
-
-This is an intermediate-only CPU check: no model, upstream imports or inference.
-It deliberately does not change the frozen v1 callback/preprocessing contract.
-"""
+"""Pin upstream validation pixels and OBB restoration without model inference."""
 
 from __future__ import annotations
 
@@ -10,18 +6,26 @@ import ast
 import hashlib
 import math
 import os
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import pytest
+import torch
 from mblt_vision.utils.datasets.dota_tiling import Tile, prepare_tile
+from mblt_vision.utils.postprocess.tiled_obb import (
+    UltralyticsTilePredictor,
+    restore_tile_boxes,
+)
 
 HASHES = {
     "data/base.py": "dac2668755540afc637ddbc401095d2bd3cb56cc3ea43563732a3c8022e56eea",
     "data/dataset.py": "2f941882273f0757b5cdf7e0440e65a8a0dde4f42e30383a3d955df914d403b1",
     "data/augment.py": "db2c9e2880014ea8087fbfeca54a8647ce3a91ac38d130e5965dfa098cfc6354",
+    "utils/ops.py": "c4bf1b77ff1cd32e8c2ecfc106a0b0060bc39a175f17a240bde281da460793e4",
+    "models/yolo/obb/val.py": "e17fd5998d8be62d1cf865c00a09d25dc08fca13ee47275069b2f5380d5fd661",
 }
 
 
@@ -35,7 +39,9 @@ def _definition(relative, class_name, method=None, namespace=None):
     assert hashlib.sha256(path.read_bytes()).hexdigest() == HASHES[relative]
     source = ast.parse(path.read_text(), filename=str(path))
     node = next(
-        n for n in source.body if isinstance(n, ast.ClassDef) and n.name == class_name
+        n
+        for n in source.body
+        if isinstance(n, (ast.ClassDef, ast.FunctionDef)) and n.name == class_name
     )
     if method is not None:
         node = next(
@@ -55,7 +61,10 @@ def _definition(relative, class_name, method=None, namespace=None):
     return scope[method or class_name]
 
 
-@pytest.mark.parametrize("shape,expected_equal", [((7, 31), False), ((31, 31), True)])
+@pytest.mark.parametrize(
+    "shape,expected_equal",
+    [((7, 31), False), ((31, 31), True), ((31, 7), False), ((803, 1025), False)],
+)
 def test_validation_loader_ceil_then_letterbox_not_direct_round(
     tmp_path, shape, expected_equal
 ):
@@ -99,13 +108,112 @@ def test_validation_loader_ceil_then_letterbox_not_direct_round(
         dataset, SimpleNamespace(mask_ratio=4, overlap_mask=True)
     )[0]
     assert transform.scaleup is False
-    upstream = transform(image=resized)
-    tile = Tile("P", "P__64__0___0", 1.0, 64, 0, (0, 0, 64, 64), image)
-    direct, _ = prepare_tile(tile, 64)
-    ours = np.rint(direct[0].numpy().transpose(1, 2, 0)[..., ::-1] * 255).astype(
-        np.uint8
+    get_image_and_label = _definition(
+        "data/base.py", "BaseDataset", "get_image_and_label", {"deepcopy": deepcopy}
     )
-    assert np.array_equal(ours, upstream) == expected_equal
-    if not expected_equal:
-        assert resized_shape == (15, 64)  # upstream ceil; direct round is 14 pixels
-        assert np.count_nonzero(ours != upstream) > 0
+    dataset.labels = [{}]
+    dataset.load_image = lambda _index: (resized, original_shape, resized_shape)
+    dataset.rect = False
+    dataset.update_labels_info = lambda labels: labels
+    labels = get_image_and_label(dataset, 0)
+    # No annotated instances are needed for this image/metadata-only reference.
+    transform._update_labels = lambda labels, *_args: labels
+    upstream = transform(labels)
+    tile = Tile("P", "P__64__0___0", 1.0, 64, 0, (0, 0, 64, 64), image)
+    direct, _ = prepare_tile(tile, 64, preprocessing="direct-letterbox")
+    official, geometry = prepare_tile(tile, 64)
+    expected_tensor = (
+        torch.from_numpy(
+            np.ascontiguousarray(upstream["img"][..., ::-1].transpose(2, 0, 1))
+        )
+        .float()
+        .unsqueeze(0)
+        / 255
+    )
+    assert torch.equal(official, expected_tensor)
+    assert torch.equal(direct, official) == expected_equal
+    assert geometry.ratio_pad == upstream["ratio_pad"]
+    assert geometry.ratio == upstream["ratio_pad"][0][0]
+    if shape == (7, 31):
+        assert resized_shape == (15, 64)  # historical direct round gives height14
+        assert geometry.pad == (0, 24) and geometry.ratio == 15 / 7
+
+    scale_boxes = _definition("utils/ops.py", "scale_boxes")
+    scale_preds = _definition(
+        "models/yolo/obb/val.py",
+        "OBBValidator",
+        "scale_preds",
+        {"ops": SimpleNamespace(scale_boxes=scale_boxes)},
+    )
+    network = torch.tensor([[-8.0, 70.0, 11.0, 7.0, -0.3, 0.9, 0.0]])
+    expected = scale_preds(
+        None,
+        {"bboxes": network[:, :5]},
+        {"imgsz": (64, 64), "ori_shape": shape, "ratio_pad": upstream["ratio_pad"]},
+    )["bboxes"]
+    torch.testing.assert_close(restore_tile_boxes(network, geometry)[:, :5], expected)
+    assert expected[0, 0] < 0  # xywh=True deliberately does not clip rotated boxes
+
+    # Exercise the optional adapter's actual preparation/restoration boundary
+    # with synthetic raw/NMS stubs, without constructing/loading/running a model.
+    adapter = UltralyticsTilePredictor.__new__(UltralyticsTilePredictor)
+    adapter.imgsz, adapter.preprocessing = 64, "ultralytics-val"
+    adapter.conf, adapter.iou, adapter.max_det = 0.01, 0.7, 300
+    adapter.names = ("plane",)
+
+    def synthetic_raw(tensor):
+        assert torch.equal(tensor, expected_tensor)
+        return None
+
+    adapter.model = synthetic_raw
+    adapter._nms = lambda *_args, **_kwargs: [network[:, [0, 1, 2, 3, 5, 6, 4]]]
+    torch.testing.assert_close(adapter(tile)[:, :5], expected)
+
+    # Exercise the actual engine preparation -> inherited nmsout2eval -> merge
+    # bridge, substituting only raw inference and the already-decoded NMS rows.
+    from mblt_vision.utils.datasets.dota_tiling import TiledConfig
+    from mblt_vision.utils.evaluation.eval_dota_tiled import predict_engine_tiles
+    from mblt_vision.utils.postprocess.build_post import build_postprocess
+    from mblt_vision.utils.preprocess.build_pre import build_preprocess
+    from mblt_vision.wrapper import resolve_model_config
+
+    config = resolve_model_config("YOLO11n-obb", "DEFAULT")
+    config["pre_cfg"]["LetterBox"]["img_size"] = [64, 64]
+    preprocessor = build_preprocess(config["pre_cfg"])
+
+    class SyntheticEngine:
+        pre_cfg = config["pre_cfg"]
+        postprocessor = build_postprocess(config["pre_cfg"], config["post_cfg"])
+
+        def preprocess_with_metadata(self, rgb):
+            np.testing.assert_array_equal(rgb, upstream["img"][..., ::-1])
+            return preprocessor.with_metadata(rgb)
+
+        def __call__(self, values):
+            np.testing.assert_array_equal(
+                values[0], expected_tensor[0].permute(1, 2, 0).numpy()
+            )
+            return None
+
+        def postprocess(self, _raw):
+            return SimpleNamespace(output=[network[:, [0, 1, 2, 3, 5, 6, 4]]])
+
+    rows = predict_engine_tiles(
+        SyntheticEngine(),
+        iter([("P", image)]),
+        config=TiledConfig(
+            crop_size=max(shape), gap=0, rates=(1.0,), jpeg_roundtrip=False
+        ),
+    )["P"]
+    rounded = torch.tensor([[round(v, 3) for v in expected[0].tolist()]])
+    torch.testing.assert_close(rows[:, :5], rounded)
+
+
+def test_invalid_preprocessing_fails_before_reference_model_load(tmp_path):
+    tile = Tile(
+        "P", "P__64__0___0", 1.0, 64, 0, (0, 0, 64, 64), np.zeros((7, 31, 3), np.uint8)
+    )
+    with pytest.raises(ValueError, match="preprocessing"):
+        prepare_tile(tile, 64, preprocessing="unsupported")
+    with pytest.raises(ValueError, match="preprocessing"):
+        UltralyticsTilePredictor(tmp_path / "missing.pt", preprocessing="unsupported")

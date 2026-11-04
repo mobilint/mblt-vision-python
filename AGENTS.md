@@ -179,6 +179,12 @@ The current ownership boundary is deliberate:
   pinned v8.3.228 JSON rounding before offsets, JPEG default, classwise Fast-NMS
   probIoU >= 0.3, stable ties, conf 0.01, tile IoU 0.7 and max_det 300. Preserve
   frozen da3ef806 Task1 fixture bytes and immutable upstream source references.
+  Dataset inference.preprocessing defaults to ultralytics-val: long-side ceil
+  resize then scaleup-disabled centered letterbox. Preserve upstream ratio_pad's
+  height/width metadata and restore all xywh using its first (height) gain;
+  direct-letterbox is an explicit historical mode, not the validation default.
+  CLI prediction leaves confidence unset until task selection: tiled DOTA uses
+  dataset/model .01 by default; non-tiled prediction retains .25, overrides win.
   Merge/release candidates per completed image; run model preparation on its pool.
   Scoring stays in evaluation; finite degenerate predictions have IoU zero while
   ground truth remains strict. Label benchmark protocols/primary scores explicitly.

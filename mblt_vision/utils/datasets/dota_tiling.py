@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 from ...datasets import get_dataset_config
-from ..letterbox import LetterBoxGeometry
+from ..letterbox import LetterBoxGeometry, RatioPad
 from ..preprocess.letterbox import _apply_letterbox
 
 TILED_API_VERSION = 1
@@ -63,10 +63,22 @@ def get_eval_protocol(
         raise ValueError(
             "DOTA inference requires valid conf_thres, iou_thres and max_det"
         )
+    validate_preprocessing(inference.get("preprocessing"))
     return protocol
 
 
-_TILING = get_eval_protocol()["tiling"]
+def validate_preprocessing(preprocessing: str) -> str:
+    """Require an explicit supported validation input methodology."""
+    if preprocessing not in ("ultralytics-val", "direct-letterbox"):
+        raise ValueError(
+            "DOTA preprocessing must be 'ultralytics-val' or 'direct-letterbox'"
+        )
+    return preprocessing
+
+
+_PROTOCOL = get_eval_protocol()
+_TILING = _PROTOCOL["tiling"]
+_DEFAULT_PREPROCESSING = _PROTOCOL["inference"]["preprocessing"]
 
 
 @dataclass(frozen=True)
@@ -222,21 +234,78 @@ def iter_tiles(
         )
 
 
-def prepare_tile(
-    tile: Tile, imgsz: int = 1024
-) -> tuple[torch.Tensor, LetterBoxGeometry]:
-    """Prepare fixed-square validation input: BGR->RGB, NCHW float32 /255 on CPU.
+class _ValidationGeometry(LetterBoxGeometry):
+    """Preserve upstream's (height, width) ratio metadata and scalar height gain.
 
-    Uses shared centered letterbox, INTER_LINEAR, pad=114 and scaleup=True.
-    Returns owned contiguous tensor and exact forward metadata for NPU adapters.
-    No inference occurs. Rectangular auto-padding and TTA are deliberately off.
+    BaseDataset records ratios in hw order, and scale_boxes consumes only the
+    first ratio for all four coordinates. Do not substitute a nominal long-side
+    gain or an anisotropic inverse: either differs on ceil-resized rectangles.
+    """
+
+    @property
+    def ratio_pad(self) -> RatioPad:
+        return (
+            (
+                self.resized_shape[0] / self.original_shape[0],
+                self.resized_shape[1] / self.original_shape[1],
+            ),
+            self.pad,
+        )
+
+
+def prepare_tile_image(
+    tile: Tile, imgsz: int = 1024, *, preprocessing: str = _DEFAULT_PREPROCESSING
+) -> tuple[np.ndarray, LetterBoxGeometry]:
+    """Return owned square uint8 BGR input and exact validation restoration metadata.
+
+    ``ultralytics-val`` matches BaseDataset.load_image's long-side ceil resize,
+    followed by centered LetterBox(scaleup=False), INTER_LINEAR and pad 114.
+    ``direct-letterbox`` preserves the historical one-stage rounded resize.
+    The validation geometry's ratio is upstream's scalar height gain, not a
+    claim that the ceil resize is exactly isotropic. No auto-padding or TTA.
     """
     if type(imgsz) is not int or imgsz <= 0:
         raise ValueError("imgsz must be a positive integer")
-    geometry = LetterBoxGeometry.from_shapes(
-        (imgsz, imgsz), tuple(tile.image.shape[:2])
-    )
-    image, _ = _apply_letterbox(tile.image, [imgsz, imgsz], cv2.INTER_LINEAR, 114)
+    validate_preprocessing(preprocessing)
+    image = tile.image
+    original_shape = tuple(image.shape[:2])
+    if preprocessing == "ultralytics-val":
+        height, width = original_shape
+        ratio = imgsz / max(height, width)
+        if ratio != 1:
+            resized_shape = (
+                min(math.ceil(height * ratio), imgsz),
+                min(math.ceil(width * ratio), imgsz),
+            )
+            image = cv2.resize(
+                image, resized_shape[::-1], interpolation=cv2.INTER_LINEAR
+            )
+        resized_shape = tuple(image.shape[:2])
+        # The long side already equals imgsz, so the shared letterbox has gain
+        # exactly one: this is the scaleup=False validation transform.
+        padding = LetterBoxGeometry.from_shapes((imgsz, imgsz), resized_shape)
+        geometry = _ValidationGeometry(
+            (imgsz, imgsz),
+            original_shape,
+            resized_shape[0] / height,
+            resized_shape,
+            padding.pad,
+        )
+    else:
+        geometry = LetterBoxGeometry.from_shapes((imgsz, imgsz), original_shape)
+    image, _ = _apply_letterbox(image, [imgsz, imgsz], cv2.INTER_LINEAR, 114)
+    return image, geometry
+
+
+def prepare_tile(
+    tile: Tile, imgsz: int = 1024, *, preprocessing: str = _DEFAULT_PREPROCESSING
+) -> tuple[torch.Tensor, LetterBoxGeometry]:
+    """Prepare CPU contiguous RGB NCHW float32 /255 plus restoration geometry.
+
+    Defaults to the dataset's ``ultralytics-val`` two-stage input methodology.
+    Pass ``preprocessing='direct-letterbox'`` for the frozen historical method.
+    """
+    image, geometry = prepare_tile_image(tile, imgsz, preprocessing=preprocessing)
     tensor = (
         torch.from_numpy(np.ascontiguousarray(image[..., ::-1].transpose(2, 0, 1)))
         .float()
