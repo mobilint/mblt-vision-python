@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
@@ -1087,7 +1088,7 @@ def _face_ready(root: Path, dataset: str) -> bool:
                 return False
             with Image.open(sample.image) as image:
                 image.load()
-    except (OSError, ValueError):
+    except (OSError, ValueError, csv.Error):
         return False
     return True
 

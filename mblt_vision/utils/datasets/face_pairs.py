@@ -99,6 +99,12 @@ class FacePairDataset:
                 raise ValueError(
                     f"Each official fold requires {per_fold} pairs; found {counts}"
                 )
+            for fold in counts:
+                same = sum(pair.fold == fold and pair.is_same for pair in pairs)
+                if per_fold % 2 or same != per_fold // 2:
+                    raise ValueError(
+                        f"Each official fold requires equal same/different labels; fold {fold} has {same}/{per_fold} same"
+                    )
         self.pairs = tuple(pairs)
         image_dir = self.root / self.config["image_directory"]
         if not image_dir.is_dir():
