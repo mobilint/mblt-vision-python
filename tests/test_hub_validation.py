@@ -52,6 +52,15 @@ def test_wrong_board_never_falls_back() -> None:
     assert checks[1].status == "resolved"
 
 
+def test_configured_board_and_explicit_override_precedence() -> None:
+    api = api_with_files(["regulus-ra/model.mxq", "model.onnx"])
+    configured = config(target_device="regulus-ra")
+    assert check_hub_artifacts(configured, api=api)[0].path == "regulus-ra/model.mxq"
+    override = check_hub_artifacts(configured, target_device="aries-rb", api=api)
+    assert override[0].path == "aries-rb/model.mxq"
+    assert override[0].status == "missing"
+
+
 def test_local_artifact_only_does_not_contact_hub() -> None:
     api = Mock()
     checks = check_hub_artifacts(config(local_artifact_only=True), api=api)

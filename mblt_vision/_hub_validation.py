@@ -24,7 +24,7 @@ class HubArtifactCheck:
 def check_hub_artifacts(
     config: dict[str, Any],
     *,
-    target_device: str = "aries-rb",
+    target_device: str | None = None,
     frameworks: tuple[str, ...] = ("mxq", "onnx"),
     api: HfApi | None = None,
 ) -> tuple[HubArtifactCheck, ...]:
@@ -58,7 +58,9 @@ def check_hub_artifacts(
         raise ValueError(
             "Hub verification requires nonempty repo_id and revision strings."
         )
-    board = normalize_target_device(target_device)
+    board = normalize_target_device(
+        files.get("target_device", "aries-rb") if target_device is None else target_device
+    )
     paths = []
     for framework in dict.fromkeys(frameworks):
         filename = files.get("filename" if framework == "mxq" else "onnx_filename")
