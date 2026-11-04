@@ -1,0 +1,35 @@
+name: dukemtmc-reid
+path: ~/.mblt_model_zoo/datasets/dukemtmc-reid
+tasks:
+- person_reid
+val: eval
+cameras: 8
+skip_junk: false
+retrieval_splits:
+  query:
+    directory: query
+    count: 2228
+  gallery:
+    directory: bounding_box_test
+    count: 17661
+source:
+  repository: https://git.mobilint.com/algorithm-team/testing/mblt-model-ops
+  revision: ec537764e36ca10da963fcb7afab157ea60ca022
+  config_path: datasets/dukemtmc_reid/dukemtmc_reid.yaml
+  name: dukemtmc-reid
+  dataloader_path: datasets/dukemtmc_reid/_private/dataloader.py
+  shared_path: datasets/_shared/reid.py
+eval_protocol:
+  id: dukemtmc-reid-reid-map.v1
+evaluation:
+  split: eval/query + eval/bounding_box_test
+  protocol: dukemtmc-reid-reid-map.v1
+  primary_metric: map
+  secondary_metrics:
+  - rank1
+  - rank5
+  - rank10
+  implementation_reference:
+    path: datasets/dukemtmc_reid/_private/evaluator.py
+    shared_path: datasets/_shared/reid.py
+    revision: ec537764e36ca10da963fcb7afab157ea60ca022

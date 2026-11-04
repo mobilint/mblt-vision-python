@@ -489,3 +489,52 @@ validation split, following Ultralytics' depth-validation convention.
 - Difficult objects count as ordinary targets, as in Ultralytics' validation.
 
 </details>
+
+## Person re-identification utilities
+
+`mblt_vision.person_reid` provides prepared query/gallery loaders, embedding
+postprocessing and retrieval scoring. Published model wrappers/HF artifacts are
+not added in this stage; no weights or datasets are downloaded by these utilities.
+The CLI/benchmark router is unchanged.
+
+```python
+from mblt_vision.person_reid import Market1501Dataset, Market1501Evaluator
+
+# root contains query/ and bounding_box_test/; embeddings have one row per sample.
+dataset = Market1501Dataset("/path/to/market1501/eval")
+# result = Market1501Evaluator().evaluate(embeddings, dataset.samples)
+# print(result.as_dict())
+```
+
+Also available: `DukeMTMCReIDDataset`, `OccludedDukeDataset` and matching
+`DukeMTMCReIDEvaluator`, `OccludedDukeEvaluator`. Loaders emit immutable
+`ReIDSample(image, pid, camid, split)` records, sorted query-first then gallery;
+cameras are zero-based, identities are not relabeled. Counts are source-checked
+by default; caller-owned subsets must explicitly set `validate_counts=False`.
+Only Market-1501 drops pid -1 junk; pid 0 background distractors remain.
+Duke loaders reject pid -1. Root defaults use `~/.mblt_model_zoo/datasets/<name>/eval`.
+
+`PersonReIDPost(pre_cfg, post_cfg)` extends `EmbeddingPost`. It validates one
+floating-point `(N,D)` output or singleton-spatial NCHW/NHWC tensor, optionally
+checks `embedding_dim`, and uses `normalize: true` for row-wise L2 normalization
+(zero vectors remain zero). Return type is a float32 torch matrix, never class
+probabilities. An explicit `post_cfg.dataset` is required. Processing-only base
+profiles in `models/bases/person_reid.yaml` can be selected using `extends`;
+concrete models must supply their own HF `file_cfg`, dataset and embedding dimension.
+`Normalize` accepts either a historical named style or explicit three-element
+`mean` and `std` lists; named styles retain unchanged legacy arithmetic.
+
+`extract_embeddings(batches, infer, postprocess)` runs prepared batches through
+the shared bounded inference pipeline, preserving order. Evaluators consume
+these embeddings without adding normalization, camera inputs, re-ranking or flip
+fusion. Same-ID/same-camera gallery rows are excluded; unmatched queries are
+skipped. Squared float32 Euclidean distances use stable ties in gallery order.
+Ranks beyond the gallery saturate; mAP is primary, rank-1/5/10 secondary, all
+ratios. `as_dict()` rounds to five decimals like ops; raw `mean_ap`/`cmc` remain
+unrounded. Dataset YAMLs record exact ops config, loader, evaluator and revision.
+
+Offline tests vendor the inspected ops functions at
+`ec537764e36ca10da963fcb7afab157ea60ca022`. Synthetic embeddings require exact
+distance/CMC/mAP equality; synthetic RGB preprocessing requires byte equality
+(`atol=0`) against the ops adapter for explicit source mean/std profiles. These
+are protocol tests, not measured model accuracy claims.

@@ -1,0 +1,35 @@
+name: occluded-duke
+path: ~/.mblt_model_zoo/datasets/occluded-duke
+tasks:
+- person_reid
+val: eval
+cameras: 8
+skip_junk: false
+retrieval_splits:
+  query:
+    directory: query
+    count: 2210
+  gallery:
+    directory: bounding_box_test
+    count: 17661
+source:
+  repository: https://git.mobilint.com/algorithm-team/testing/mblt-model-ops
+  revision: ec537764e36ca10da963fcb7afab157ea60ca022
+  config_path: datasets/occluded_duke/occluded_duke.yaml
+  name: occluded-duke
+  dataloader_path: datasets/occluded_duke/_private/dataloader.py
+  shared_path: datasets/_shared/reid.py
+eval_protocol:
+  id: occluded-duke-reid-map.v1
+evaluation:
+  split: eval/query + eval/bounding_box_test
+  protocol: occluded-duke-reid-map.v1
+  primary_metric: map
+  secondary_metrics:
+  - rank1
+  - rank5
+  - rank10
+  implementation_reference:
+    path: datasets/occluded_duke/_private/evaluator.py
+    shared_path: datasets/_shared/reid.py
+    revision: ec537764e36ca10da963fcb7afab157ea60ca022

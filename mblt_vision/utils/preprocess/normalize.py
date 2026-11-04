@@ -30,14 +30,40 @@ class Normalize(PreOps):
         std: Array of standard deviation values for normalization.
     """
 
-    def __init__(self, style: str) -> None:
+    def __init__(
+        self,
+        style: str | None = None,
+        *,
+        mean: list[float] | None = None,
+        std: list[float] | None = None,
+    ) -> None:
         """Initializes the Normalize layer with a specific style.
 
         Args:
-            style: The preprocessing style to use. Must be one of STYLE_LIST.
+            style: Historical named style; mutually exclusive with mean/std.
+            mean: Optional explicit three-element RGB mean, using float32 arithmetic.
+            std: Optional explicit positive RGB standard deviations.
         """
         super().__init__()
 
+        self.explicit_stats = mean is not None or std is not None
+        if self.explicit_stats:
+            if style is not None or mean is None or std is None:
+                raise ValueError("Provide either style or both mean and std")
+            self.mean = np.asarray(mean, dtype=np.float32)
+            self.std = np.asarray(std, dtype=np.float32)
+            if (
+                self.mean.shape != (3,)
+                or self.std.shape != (3,)
+                or not np.isfinite(self.mean).all()
+                or not np.isfinite(self.std).all()
+                or not (self.std > 0).all()
+            ):
+                raise ValueError(
+                    "mean/std require three finite RGB values and positive std"
+                )
+            self.style = "explicit"
+            return
         if not isinstance(style, str):
             raise TypeError(
                 f"Normalize style must be a string, got {type(style).__name__}."

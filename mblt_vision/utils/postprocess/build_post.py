@@ -9,6 +9,7 @@ from .base import PostBase
 from .cls_post import ClsPost
 from .damoyolo_post import DAMOYOLODetectionPost
 from .depth_post import DepthPost
+from .embedding_post import PersonReIDPost
 from .semantic_seg_post import SemanticSegPost
 from .yolo_anchor_post import (
     YOLOAnchorDetectionPost,
@@ -70,6 +71,8 @@ def build_postprocess(
                 f"Unsupported post_cfg.head {head!r}; expected one of {sorted(DETECTION_HEADS)}."
             )
         return DETECTION_HEADS[head](pre_cfg, post_cfg, **kwargs)
+    if task == "person_reid":
+        return PersonReIDPost(pre_cfg, post_cfg)
     if task == "image_classification":
         return ClsPost(pre_cfg, post_cfg)
     if task == "depth_estimation":

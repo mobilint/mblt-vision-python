@@ -1,0 +1,26 @@
+# Processing only: published HF artifact identities belong to concrete stage-d2 YAMLs.
+# Source: mblt-model-ops ec537764e36ca10da963fcb7afab157ea60ca022
+# models/person_reid/CLIP_ReID_RN50_Baseline_DukeMTMC/distribution.yaml
+DEFAULT:
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: [256, 128]
+      interpolation: bilinear
+    Normalize:
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+  post_cfg:
+    task: person_reid
+    dataset: dukemtmc-reid
+    normalize: true
+# Inherit this processing profile and override dataset/dimension/artifacts per model.
+MARKET1501:
+  extends: person_reid.yaml#DEFAULT
+  post_cfg:
+    dataset: market1501
+OCCLUDED_DUKE:
+  extends: person_reid.yaml#DEFAULT
+  post_cfg:
+    dataset: occluded-duke

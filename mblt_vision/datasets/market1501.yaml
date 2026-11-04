@@ -1,0 +1,35 @@
+name: market1501
+path: ~/.mblt_model_zoo/datasets/market1501
+tasks:
+- person_reid
+val: eval
+cameras: 6
+skip_junk: true
+retrieval_splits:
+  query:
+    directory: query
+    count: 3368
+  gallery:
+    directory: bounding_box_test
+    count: 15913
+source:
+  repository: https://git.mobilint.com/algorithm-team/testing/mblt-model-ops
+  revision: ec537764e36ca10da963fcb7afab157ea60ca022
+  config_path: datasets/market1501/market1501.yaml
+  name: market1501
+  dataloader_path: datasets/market1501/_private/dataloader.py
+  shared_path: datasets/_shared/reid.py
+eval_protocol:
+  id: market1501-reid-map.v1
+evaluation:
+  split: eval/query + eval/bounding_box_test
+  protocol: market1501-reid-map.v1
+  primary_metric: map
+  secondary_metrics:
+  - rank1
+  - rank5
+  - rank10
+  implementation_reference:
+    path: datasets/market1501/_private/evaluator.py
+    shared_path: datasets/_shared/reid.py
+    revision: ec537764e36ca10da963fcb7afab157ea60ca022

@@ -109,6 +109,11 @@ description: >-
   metric). Load difficult objects as ordinary targets, as Ultralytics' validation does.
 - Run YOLOv7 models at `iou_thres: 0.65`, WongKinYiu/yolov7's own `test.py` default.
 
+- ReID is utility-only until published wrappers and routing are added. Reuse
+  `EmbeddingPost` for dense vectors, explicit float32 mean/std for source preprocessing,
+  and prepared query/gallery loaders. Preserve ops stable distance ties, camera exclusions
+  and dataset-specific junk handling; see the ReID API section in `mblt_vision/README.md`.
+
 ## Runtime and Packaging
 
 - Route NPU runtime access through mblt-npu-python; do not copy backend classes into Vision.
