@@ -100,6 +100,41 @@ This section lists the publicly pre-trained models supported by the vision frame
 
 ### Image Classification
 
+Additional published ImageNet classifiers are available through the same task
+subpackage, top-level lazy exports and `MBLT_Engine`:
+
+- EfficientViT: `EfficientViT_B3`, `EfficientViT_L1`, `EfficientViT_L2`, `EfficientViT_L3`.
+- Non-convolutional LeViT: `LeViT_128`, `LeViT_128S`, `LeViT_192`, `LeViT_256`, `LeViT_384`.
+- ViT RPN, relative-position, SRelPos, GAP and CLIP families: discover exact names with
+  `list_models("image_classification")`.
+
+These configurations extend `models/bases/imagenet_classifier.yaml` and override
+only recorded processing differences. The source is each model's
+`models/image_classification/<Model>/_source/predict_float.input.json` and matching
+`distribution.yaml` in mblt-model-ops at `6fdbf471a3bd6ec22035a42c8730fe88a68881e4`.
+Input crop/resize and normalization are model-specific: in particular,
+`ViT_Large_Patch14_CLIP_224` uses TF normalization despite its CLIP name.
+All 24 additions retain the existing `revision: main` convention because their
+historical approved artifact HF commits are not recorded; current Hub tips and
+upstream source-model commits are not substituted as approval pins. This is a
+configuration/CPU processing parity addition, not a new inference accuracy claim.
+All 24 Hub repositories expose MXQ only, with no published ONNX file. Their base
+sets `file_cfg.onnx_local_artifact_only: true`: MXQ Hub loading remains enabled,
+but ONNX requires a trusted local `model_path` or `onnx_path`. Automatic ONNX
+loading fails with a specific message, and metadata verification skips only that
+framework. Existing configurations without this marker retain their behavior.
+
+`EfficientViT_B0`, `EfficientViT_B1` and `EfficientViT_B2` are intentional family
+sibling configurations using official timm 1.0.14 `r224_in1k` defaults (224 crop,
+bicubic resize to `floor(224 / 0.95) = 235`, ImageNet normalization). They are
+**pending HF (family sibling)**, not published-model claims. Their
+`file_cfg.artifact_status: pending_hf_family_sibling` makes metadata verification
+skip both frameworks without network access and allows runtime/compile use only
+with trusted local artifacts. Existing sibling configurations are not rewritten.
+EfficientViT M0–M5 is a distinct architecture and is not added here. Alternative
+ViT CLIP/GAP resolutions require exact upstream squash-mode preprocessing support;
+this change does not approximate them with center cropping.
+
 | Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | AlexNet | (224,224,3) | 56.084 | 56.556 | 1.43 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) |  |

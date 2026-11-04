@@ -5,6 +5,14 @@ from __future__ import annotations
 from .._compat import create_model_class
 
 __all__: list[str] = [
+    "VGG11",
+    "VGG11_BN",
+    "VGG13",
+    "VGG13_BN",
+    "VGG16",
+    "VGG16_BN",
+    "VGG19",
+    "VGG19_BN",
     "AlexNet",
     "CAFormer_B36",
     "CAFormer_M36",
@@ -21,10 +29,6 @@ __all__: list[str] = [
     "ConvNeXt_Large",
     "ConvNeXt_Small",
     "ConvNeXt_Tiny",
-    "DeiT_Base_Patch16_224",
-    "DeiT_Base_Patch16_384",
-    "DeiT_Small_Patch16_224",
-    "DeiT_Tiny_Patch16_224",
     "DeiT3_Base_Patch16_224",
     "DeiT3_Base_Patch16_384",
     "DeiT3_Large_Patch16_224",
@@ -32,6 +36,10 @@ __all__: list[str] = [
     "DeiT3_Medium_Patch16_224",
     "DeiT3_Small_Patch16_224",
     "DeiT3_Small_Patch16_384",
+    "DeiT_Base_Patch16_224",
+    "DeiT_Base_Patch16_384",
+    "DeiT_Small_Patch16_224",
+    "DeiT_Tiny_Patch16_224",
     "DenseNet121",
     "DenseNet161",
     "DenseNet169",
@@ -50,11 +58,23 @@ __all__: list[str] = [
     "EfficientNet_V2_L",
     "EfficientNet_V2_M",
     "EfficientNet_V2_S",
+    "EfficientViT_B0",
+    "EfficientViT_B1",
+    "EfficientViT_B2",
+    "EfficientViT_B3",
+    "EfficientViT_L1",
+    "EfficientViT_L2",
+    "EfficientViT_L3",
     "FlexiViT_Base",
     "FlexiViT_Large",
     "FlexiViT_Small",
     "GoogLeNet",
     "Inception_V3",
+    "LeViT_128",
+    "LeViT_128S",
+    "LeViT_192",
+    "LeViT_256",
+    "LeViT_384",
     "LeViT_Conv_128",
     "LeViT_Conv_128S",
     "LeViT_Conv_192",
@@ -89,14 +109,14 @@ __all__: list[str] = [
     "RepViT_M2",
     "RepViT_M2_3",
     "RepViT_M3",
+    "ResNeXt50_32x4d",
+    "ResNeXt101_32x8d",
+    "ResNeXt101_64x4d",
     "ResNet18",
     "ResNet34",
     "ResNet50",
     "ResNet101",
     "ResNet152",
-    "ResNeXt50_32x4d",
-    "ResNeXt101_32x8d",
-    "ResNeXt101_64x4d",
     "ShuffleNet_V2_X0_5",
     "ShuffleNet_V2_X1_0",
     "ShuffleNet_V2_X1_5",
@@ -106,34 +126,41 @@ __all__: list[str] = [
     "Swin_B",
     "Swin_S",
     "Swin_T",
-    "VGG11",
-    "VGG11_BN",
-    "VGG13",
-    "VGG13_BN",
-    "VGG16",
-    "VGG16_BN",
-    "VGG19",
-    "VGG19_BN",
-    "VisFormer_Small",
-    "VisFormer_Tiny",
     "ViT_B_16",
     "ViT_B_32",
     "ViT_Base_Patch8_224",
     "ViT_Base_Patch16_224",
     "ViT_Base_Patch16_384",
+    "ViT_Base_Patch16_CLIP_224",
+    "ViT_Base_Patch16_RPN_224",
     "ViT_Base_Patch32_224",
     "ViT_Base_Patch32_384",
+    "ViT_Base_Patch32_CLIP_224",
+    "ViT_Base_Patch32_CLIP_384",
+    "ViT_Base_Patch32_CLIP_448",
+    "ViT_Huge_Patch14_CLIP_224",
     "ViT_L_16",
     "ViT_L_32",
+    "ViT_Large_Patch14_CLIP_224",
     "ViT_Large_Patch16_224",
     "ViT_Large_Patch16_384",
     "ViT_Large_Patch32_384",
+    "ViT_Medium_Patch16_GAP_256",
+    "ViT_RelPos_Base_Patch16_224",
+    "ViT_RelPos_Base_Patch32_Plus_RPN_256",
+    "ViT_RelPos_Medium_Patch16_224",
+    "ViT_RelPos_Medium_Patch16_RPN_224",
+    "ViT_RelPos_Small_Patch16_224",
+    "ViT_SRelPos_Medium_Patch16_224",
+    "ViT_SRelPos_Small_Patch16_224",
     "ViT_Small_Patch16_224",
     "ViT_Small_Patch16_384",
     "ViT_Small_Patch32_224",
     "ViT_Small_Patch32_384",
     "ViT_Tiny_Patch16_224",
     "ViT_Tiny_Patch16_384",
+    "VisFormer_Small",
+    "VisFormer_Tiny",
     "Wide_ResNet50_2",
     "Wide_ResNet101_2",
     "YOLO11lCls",
@@ -158,6 +185,33 @@ __all__: list[str] = [
     "YOLOv8xCls",
 ]
 
+EfficientViT_B0 = create_model_class("EfficientViT_B0", __name__)
+EfficientViT_B1 = create_model_class("EfficientViT_B1", __name__)
+EfficientViT_B2 = create_model_class("EfficientViT_B2", __name__)
+EfficientViT_B3 = create_model_class("EfficientViT_B3", __name__)
+EfficientViT_L1 = create_model_class("EfficientViT_L1", __name__)
+EfficientViT_L2 = create_model_class("EfficientViT_L2", __name__)
+EfficientViT_L3 = create_model_class("EfficientViT_L3", __name__)
+LeViT_128 = create_model_class("LeViT_128", __name__)
+LeViT_128S = create_model_class("LeViT_128S", __name__)
+LeViT_192 = create_model_class("LeViT_192", __name__)
+LeViT_256 = create_model_class("LeViT_256", __name__)
+LeViT_384 = create_model_class("LeViT_384", __name__)
+ViT_RelPos_Medium_Patch16_RPN_224 = create_model_class("ViT_RelPos_Medium_Patch16_RPN_224", __name__)
+ViT_RelPos_Base_Patch32_Plus_RPN_256 = create_model_class("ViT_RelPos_Base_Patch32_Plus_RPN_256", __name__)
+ViT_Base_Patch16_RPN_224 = create_model_class("ViT_Base_Patch16_RPN_224", __name__)
+ViT_Base_Patch16_CLIP_224 = create_model_class("ViT_Base_Patch16_CLIP_224", __name__)
+ViT_Base_Patch32_CLIP_448 = create_model_class("ViT_Base_Patch32_CLIP_448", __name__)
+ViT_Medium_Patch16_GAP_256 = create_model_class("ViT_Medium_Patch16_GAP_256", __name__)
+ViT_Large_Patch14_CLIP_224 = create_model_class("ViT_Large_Patch14_CLIP_224", __name__)
+ViT_Base_Patch32_CLIP_224 = create_model_class("ViT_Base_Patch32_CLIP_224", __name__)
+ViT_RelPos_Small_Patch16_224 = create_model_class("ViT_RelPos_Small_Patch16_224", __name__)
+ViT_Base_Patch32_CLIP_384 = create_model_class("ViT_Base_Patch32_CLIP_384", __name__)
+ViT_SRelPos_Medium_Patch16_224 = create_model_class("ViT_SRelPos_Medium_Patch16_224", __name__)
+ViT_Huge_Patch14_CLIP_224 = create_model_class("ViT_Huge_Patch14_CLIP_224", __name__)
+ViT_RelPos_Base_Patch16_224 = create_model_class("ViT_RelPos_Base_Patch16_224", __name__)
+ViT_RelPos_Medium_Patch16_224 = create_model_class("ViT_RelPos_Medium_Patch16_224", __name__)
+ViT_SRelPos_Small_Patch16_224 = create_model_class("ViT_SRelPos_Small_Patch16_224", __name__)
 AlexNet = create_model_class("AlexNet", __name__)
 CAFormer_B36 = create_model_class("CAFormer_B36", __name__)
 CAFormer_M36 = create_model_class("CAFormer_M36", __name__)

@@ -54,7 +54,9 @@ def legacy_config(document: dict, variant: str) -> dict:
 CONFIG_VARIANTS = [
     (path, variant)
     for path in sorted(MODEL_CONFIG_DIR.glob("*.yaml"))
-    for variant in yaml.safe_load(path.read_text(encoding="utf-8"))
+    for variant, definition in yaml.safe_load(path.read_text(encoding="utf-8")).items()
+    # Only pre-existing alias/update configurations have a legacy counterpart.
+    if not isinstance(definition, dict) or "extends" not in definition
 ]
 
 
