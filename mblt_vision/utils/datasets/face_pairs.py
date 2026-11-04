@@ -89,6 +89,16 @@ class FacePairDataset:
             raise ValueError(
                 f"Pair file holds {len(pairs)} pairs, expected {self.config['pairs']}"
             )
+        if validate_counts:
+            per_fold = self.config["pairs"] // self.config["folds"]
+            counts = {
+                fold: sum(pair.fold == fold for pair in pairs)
+                for fold in range(1, self.config["folds"] + 1)
+            }
+            if any(count != per_fold for count in counts.values()):
+                raise ValueError(
+                    f"Each official fold requires {per_fold} pairs; found {counts}"
+                )
         self.pairs = tuple(pairs)
         image_dir = self.root / self.config["image_directory"]
         if not image_dir.is_dir():

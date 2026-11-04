@@ -216,3 +216,39 @@ def test_ops_preprocessing_byte_parity(tmp_path, shape):
         actual, expected
     )  # atol=0, including no-op 112x112 resize
     assert np.max(np.abs(actual - expected)) == 0.0
+
+
+@pytest.mark.parametrize(
+    "name,loader,folder",
+    [
+        ("lfw", LFWDataset, "aligned"),
+        ("agedb-30", AgeDB30Dataset, "images"),
+        ("cfp-fp", CFPFPDataset, "images"),
+    ],
+)
+def test_rejects_correct_total_with_unbalanced_official_folds(
+    tmp_path, monkeypatch, name, loader, folder
+):
+    original = face_pairs.get_dataset_config_for_task
+
+    def tiny(task, dataset):
+        cfg = original(task, dataset)
+        cfg["pairs"] = 20
+        return cfg
+
+    monkeypatch.setattr(face_pairs, "get_dataset_config_for_task", tiny)
+    rows = [(i, i // 2 + 1, i % 2, "a.png", "b.png") for i in range(20)]
+    write_pairs(tmp_path, folder, rows)
+    assert readiness.dataset_ready(tmp_path, "face_recognition", name)
+    rows[0] = (
+        0,
+        2,
+        0,
+        "a.png",
+        "b.png",
+    )  # 20 total, all ten folds, but 1/3 instead of 2/2.
+    write_pairs(tmp_path, folder, rows)
+    with pytest.raises(ValueError, match="official fold"):
+        loader(tmp_path)
+    assert not readiness.dataset_ready(tmp_path, "face_recognition", name)
+    assert len(loader(tmp_path, validate_counts=False).pairs) == 20
