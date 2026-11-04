@@ -72,6 +72,15 @@ The current ownership boundary is deliberate:
   floors, and rounding differs by a pixel at 224/0.9 and 224/0.95. Several names
   (ConvNext_Base) resolve in timm yet carry torchvision's transform here, so read the
   expected value from that model's source.yaml provenance rather than from the name.
+- Published EfficientViT, non-convolutional LeViT and additional ViT classifiers inherit
+  `bases/imagenet_classifier.yaml`. Their exact recorded preprocessing and dataset connection
+  are pinned by `tests/test_published_classifiers.py`; preserve TF normalization for
+  `ViT_Large_Patch14_CLIP_224` rather than inferring normalization from its name.
+  These 24 repositories are MXQ-only: their base uses `onnx_local_artifact_only: true`.
+  Keep automatic MXQ loading enabled, require trusted local ONNX, and test both guard paths.
+  Newly added EfficientViT B0/B1/B2 sibling configs carry
+  `artifact_status: pending_hf_family_sibling`: verify as pending without network and
+  require trusted local runtime/compile inputs. Existing sibling configs stay unchanged.
 - To share processing defaults without changing legacy models, opt new family YAMLs into
   `extends: bases/family.yaml#DEFAULT`. See the configuration-inheritance section of
   `mblt_vision/README.md` for ordering and merge rules. Keep legacy `update` shallow and

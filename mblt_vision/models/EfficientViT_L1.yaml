@@ -1,0 +1,8 @@
+# Approval HF commit: not recorded. Do not substitute upstream source-model commits.
+# Preprocessing: mblt-model-ops models/image_classification/EfficientViT_L1/_source/predict_float.input.json
+DEFAULT:
+  extends: bases/imagenet_classifier.yaml
+  file_cfg:
+    repo_id: mobilint/EfficientViT_L1
+    filename: efficientvit_l1.mxq
+    revision: main

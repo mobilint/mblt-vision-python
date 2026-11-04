@@ -1,0 +1,11 @@
+# Approval HF commit: not recorded. Do not substitute upstream source-model commits.
+# Preprocessing: mblt-model-ops models/image_classification/ViT_Huge_Patch14_CLIP_224/_source/predict_float.input.json
+DEFAULT:
+  extends: bases/imagenet_classifier.yaml
+  file_cfg:
+    repo_id: mobilint/ViT_Huge_Patch14_CLIP_224
+    filename: vit_huge_patch14_clip_224.mxq
+    revision: main
+  pre_cfg:
+    Normalize:
+      style: openai

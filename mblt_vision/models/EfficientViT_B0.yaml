@@ -1,0 +1,13 @@
+# Official timm 1.0.14 efficientvit_b0.r224_in1k pretrained_cfg:
+# 224 crop, bicubic, crop_pct 0.95 -> floor(224 / 0.95) = 235, ImageNet torch stats.
+# Family sibling configuration; no published artifact or approval is claimed.
+DEFAULT:
+  extends: bases/imagenet_classifier.yaml
+  file_cfg:
+    repo_id: mobilint/EfficientViT_B0
+    filename: efficientvit_b0.mxq
+    revision: main
+    artifact_status: pending_hf_family_sibling
+  pre_cfg:
+    Resize:
+      size: 235
