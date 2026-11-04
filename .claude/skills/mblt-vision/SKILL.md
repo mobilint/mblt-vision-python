@@ -31,6 +31,9 @@ description: >-
 - Additional published EfficientViT/LeViT/ViT classifiers use `bases/imagenet_classifier.yaml`.
   Preserve the recorded ops transforms checked by `tests/test_published_classifiers.py`,
   including the TF-normalized `ViT_Large_Patch14_CLIP_224` exception.
+- For Hub linkage changes, run `tests/test_hub_validation.py` as described in `tests/TEST.md`.
+  The metadata checker follows runtime board paths without downloading weights; live commits
+  are diagnostics, not substitutes for missing historical approval provenance.
 - For opt-in YAML family inheritance, follow `mblt_vision/README.md`'s configuration
   inheritance rules. Keep legacy `update` shallow and run `tests/test_config_inheritance.py`
   to prove every existing variant's values and processing order remain identical.

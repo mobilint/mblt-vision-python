@@ -60,6 +60,9 @@ The current ownership boundary is deliberate:
   onnx_path as compatibility aliases.
 - Update task-package exports and lazy top-level exports together. Confirm that
   list_models() discovers every public model class.
+- Verify Hub configuration changes with the metadata-only checks in
+  `tests/test_hub_validation.py` (see `tests/TEST.md`). Use exact runtime board paths;
+  treat live Hub commits as diagnostics, never as invented approval provenance.
 - Keep each model YAML's file_cfg, pre_cfg, and post_cfg shape stable.
   file_cfg.filename is the canonical MXQ Hub artifact; derive the same-stem ONNX filename
   unless the Hub artifact requires an explicit onnx_filename.
