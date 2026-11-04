@@ -24,7 +24,7 @@ class HubArtifactCheck:
 def check_hub_artifacts(
     config: dict[str, Any],
     *,
-    target_device: str = "aries-rb",
+    target_device: str | None = None,
     frameworks: tuple[str, ...] = ("mxq", "onnx"),
     api: HfApi | None = None,
 ) -> tuple[HubArtifactCheck, ...]:
@@ -58,7 +58,9 @@ def check_hub_artifacts(
         raise ValueError(
             "Hub verification requires nonempty repo_id and revision strings."
         )
-    board = normalize_target_device(target_device)
+    board = normalize_target_device(
+        files.get("target_device", "aries-rb") if target_device is None else target_device
+    )
     paths = []
     for framework in dict.fromkeys(frameworks):
         filename = files.get("filename" if framework == "mxq" else "onnx_filename")
@@ -69,21 +71,7 @@ def check_hub_artifacts(
         paths.append(
             (framework, f"{board}/{filename}" if framework == "mxq" else filename)
         )
-
-    if files.get("artifact_status") == "pending_hf_family_sibling":
-        return tuple(
-            HubArtifactCheck(
-                repo_id, revision, None, framework, path, "pending_hf_family_sibling"
-            )
-            for framework, path in paths
-        )
-
-    def is_local_only(framework: str) -> bool:
-        return bool(files.get("local_artifact_only")) or (
-            framework == "onnx" and bool(files.get("onnx_local_artifact_only"))
-        )
-
-    if all(is_local_only(framework) for framework, _ in paths):
+    if files.get("local_artifact_only"):
         return tuple(
             HubArtifactCheck(
                 repo_id, revision, None, framework, path, "local_artifact_only"
@@ -103,14 +91,10 @@ def check_hub_artifacts(
         HubArtifactCheck(
             repo_id,
             revision,
-            None if is_local_only(framework) else info.sha,
+            info.sha,
             framework,
             path,
-            "local_artifact_only"
-            if is_local_only(framework)
-            else "resolved"
-            if path in available
-            else "missing",
+            "resolved" if path in available else "missing",
         )
         for framework, path in paths
     )

@@ -1053,12 +1053,12 @@ def _reid_ready(root: Path, dataset: str) -> bool:
         "dukemtmc-reid": DukeMTMCReIDDataset,
         "occluded-duke": OccludedDukeDataset,
     }.get(dataset)
-    if loader is None:
+    if loader is None or _path_has_symlink_component(root):
         return False
     try:
         samples = loader(root).samples
         for sample in samples:
-            if not sample.image.is_file() or sample.image.is_symlink():
+            if not sample.image.is_file() or _path_has_symlink_component(sample.image):
                 return False
             with Image.open(sample.image) as image:
                 image.load()
@@ -1072,14 +1072,18 @@ def _reid_ready(root: Path, dataset: str) -> bool:
 def _face_ready(root: Path, dataset: str) -> bool:
     """Validate prepared aligned pairs and image decoding, never realign crops."""
     loader = {"lfw": LFWDataset, "agedb-30": AgeDB30Dataset, "cfp-fp": CFPFPDataset}.get(dataset)
-    if loader is None:
+    if (
+        loader is None
+        or _path_has_symlink_component(root)
+        or _path_has_symlink_component(root / "pairs.csv")
+    ):
         return False
     try:
         data = loader(root)
         if len({pair.fold for pair in data.pairs}) != 10:
             return False
         for sample in data.samples:
-            if sample.image.is_symlink():
+            if _path_has_symlink_component(sample.image):
                 return False
             with Image.open(sample.image) as image:
                 image.load()

@@ -55,6 +55,8 @@ class ReIDDataset:
                         f"ReID file name carries no <pid>_c<cam> token: {path}"
                     )
                 pid, camera = map(int, match.groups())
+                if pid < -1:
+                    raise ValueError(f"Unsupported negative person identity {pid}: {path}")
                 if pid == -1:
                     if self.config["skip_junk"]:
                         continue
