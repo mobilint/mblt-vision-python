@@ -31,6 +31,7 @@ _TASK_MODULES = (
     object_detection,
     obb,
     pose_estimation,
+    person_reid,
     semantic_segmentation,
 )
 

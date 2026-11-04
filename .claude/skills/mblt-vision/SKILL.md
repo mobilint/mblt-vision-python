@@ -120,7 +120,8 @@ description: >-
   metric). Load difficult objects as ordinary targets, as Ultralytics' validation does.
 - Run YOLOv7 models at `iou_thres: 0.65`, WongKinYiu/yolov7's own `test.py` default.
 
-- ReID is utility-only until published wrappers and routing are added. Reuse
+- Published CLIP-ReID wrappers use RN50/ViT processing bases and matching retrieval datasets;
+  keep their MXQ-only ONNX runtime/compile guards. CLI/benchmark routing remains unavailable. Reuse
   `EmbeddingPost` for dense vectors, explicit float32 mean/std for source preprocessing,
   and prepared query/gallery loaders. Preserve ops stable distance ties, camera exclusions
   and dataset-specific junk handling; see the ReID API section in `mblt_vision/README.md`.

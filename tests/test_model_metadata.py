@@ -19,6 +19,7 @@ DATASETS_BY_TASK = {
     "object_detection": {"coco"},
     "obb": {"dotav1"},
     "pose_estimation": {"coco"},
+    "person_reid": {"market1501", "dukemtmc-reid", "occluded-duke"},
     "semantic_segmentation": {"ade20k", "cityscapes"},
 }
 
