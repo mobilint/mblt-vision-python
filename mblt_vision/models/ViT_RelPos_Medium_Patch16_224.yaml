@@ -1,0 +1,14 @@
+# Approval HF commit: not recorded. Do not substitute upstream source-model commits.
+# Preprocessing: mblt-model-ops models/image_classification/ViT_RelPos_Medium_Patch16_224/_source/predict_float.input.json
+DEFAULT:
+  extends: bases/imagenet_classifier.yaml
+  file_cfg:
+    repo_id: mobilint/ViT_RelPos_Medium_Patch16_224
+    filename: vit_relpos_medium_patch16_224.mxq
+    revision: main
+  pre_cfg:
+    Normalize:
+      style: tf
+    Resize:
+      interpolation: bicubic
+      size: 248

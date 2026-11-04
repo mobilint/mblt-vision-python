@@ -71,7 +71,21 @@ def check_hub_artifacts(
         paths.append(
             (framework, f"{board}/{filename}" if framework == "mxq" else filename)
         )
-    if files.get("local_artifact_only"):
+
+    if files.get("artifact_status") == "pending_hf_family_sibling":
+        return tuple(
+            HubArtifactCheck(
+                repo_id, revision, None, framework, path, "pending_hf_family_sibling"
+            )
+            for framework, path in paths
+        )
+
+    def is_local_only(framework: str) -> bool:
+        return bool(files.get("local_artifact_only")) or (
+            framework == "onnx" and bool(files.get("onnx_local_artifact_only"))
+        )
+
+    if all(is_local_only(framework) for framework, _ in paths):
         return tuple(
             HubArtifactCheck(
                 repo_id, revision, None, framework, path, "local_artifact_only"
@@ -91,10 +105,14 @@ def check_hub_artifacts(
         HubArtifactCheck(
             repo_id,
             revision,
-            info.sha,
+            None if is_local_only(framework) else info.sha,
             framework,
             path,
-            "resolved" if path in available else "missing",
+            "local_artifact_only"
+            if is_local_only(framework)
+            else "resolved"
+            if path in available
+            else "missing",
         )
         for framework, path in paths
     )

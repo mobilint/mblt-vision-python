@@ -430,11 +430,16 @@ def _run_validation(args: argparse.Namespace) -> float:
                 batch_size=args.batch_size,
                 conf_thres=args.conf_thres,
                 iou_thres=args.iou_thres,
+                legacy_single_image=getattr(args, "legacy_single_image", False),
+            )
+            protocol_label = (
+                "legacy whole-image probabilistic mAP50"
+                if getattr(args, "legacy_single_image", False)
+                else "original-image polygon VOC07 mAP50"
             )
             print(
-                "Validation score "
-                f"(rotated mAP50): {dota_result.map50:.5f}, "
-                f"(rotated mAP50-95): {dota_result.map5095:.5f}"
+                f"Validation score ({protocol_label}): {dota_result.map50:.5f}, "
+                f"(diagnostic probabilistic mAP50-95): {dota_result.map5095:.5f}"
             )
             return dota_result.primary_score
 
@@ -475,6 +480,11 @@ def add_val_parser(
         "val", help="Validate a vision model on its benchmark dataset."
     )
     parser.set_defaults(_handler=_cmd_val)
+    parser.add_argument(
+        "--legacy-single-image",
+        action="store_true",
+        help="DOTA OBB only: historical whole-image probabilistic-IoU evaluation.",
+    )
     parser.add_argument(
         "--model",
         required=True,
