@@ -143,6 +143,37 @@ def test_readiness(tmp_path, monkeypatch, loader, name, folder):
     assert not readiness.dataset_ready(tmp_path, "face_recognition", name)
 
 
+@pytest.mark.parametrize(
+    "folder,name", [("aligned", "lfw"), ("images", "agedb-30"), ("images", "cfp-fp")]
+)
+@pytest.mark.parametrize("component", ["root", "images", "manifest"])
+def test_readiness_rejects_symlink_ancestors(
+    tmp_path, monkeypatch, folder, name, component
+):
+    original = face_pairs.get_dataset_config_for_task
+
+    def tiny(task, dataset):
+        cfg = original(task, dataset)
+        cfg["pairs"] = 10
+        return cfg
+
+    monkeypatch.setattr(face_pairs, "get_dataset_config_for_task", tiny)
+    root = tmp_path / "cache"
+    root.mkdir()
+    write_pairs(root, folder, [(i, i, 1, "a.png", "b.png") for i in range(1, 11)])
+    assert readiness.dataset_ready(root, "face_recognition", name)
+    if component == "root":
+        alias = tmp_path / "alias"
+        alias.symlink_to(root, target_is_directory=True)
+        root = alias
+    else:
+        source = root / (folder if component == "images" else "pairs.csv")
+        target = tmp_path / "outside"
+        source.rename(target)
+        source.symlink_to(target, target_is_directory=component == "images")
+    assert not readiness.dataset_ready(root, "face_recognition", name)
+
+
 @pytest.mark.parametrize("seed", range(5))
 def test_ops_metric_exact_parity(seed):
     ops = reference("verification")
