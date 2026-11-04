@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import numpy as np
 import torch
-import yaml
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
-
 from mblt_npu import MobilintNPUBackend, ONNXBackend, normalize_target_device
+
+from ._config import load_model_variant
 from ._model_paths import resolve_framework as _resolve_framework
 from ._model_paths import split_model_paths as _split_model_paths
 from ._model_paths import (
@@ -365,63 +365,7 @@ def resolve_model_config(
     if not config_path.is_file():
         config_path = MODEL_CONFIG_DIR / _model_name_aliasing(model_cls)
 
-    with config_path.open(encoding="utf-8") as config_file:
-        full_config = yaml.safe_load(config_file)
-    if not isinstance(full_config, dict):
-        raise TypeError(
-            f"Model configuration '{config_path}' should define a dictionary."
-        )
-
-    resolving: set[str] = set()
-
-    def _resolve_variant(variant: str) -> dict[str, Any]:
-        if variant in resolving:
-            raise ValueError(
-                f"Circular model configuration reference detected for '{variant}'."
-            )
-        resolving.add(variant)
-        try:
-            model_config_part = full_config.get(variant)
-            if model_config_part is None:
-                raise ValueError(f"Model type '{variant}' not found in configuration.")
-            if isinstance(model_config_part, str):
-                if model_config_part not in full_config:
-                    raise ValueError(
-                        f"Model alias '{model_config_part}' not found in configuration."
-                    )
-                return _resolve_variant(model_config_part)
-            if not isinstance(model_config_part, dict):
-                raise TypeError(
-                    f"Resolved model configuration for '{variant}' is not a dictionary."
-                )
-
-            resolved = copy.deepcopy(model_config_part)
-            base_config_key = resolved.pop("update", None)
-            if base_config_key is None:
-                return resolved
-            if (
-                not isinstance(base_config_key, str)
-                or base_config_key not in full_config
-            ):
-                raise ValueError(
-                    f"Base configuration '{base_config_key}' not found for update."
-                )
-
-            merged_config = _resolve_variant(base_config_key)
-            for key, value in resolved.items():
-                if (
-                    key in merged_config
-                    and isinstance(merged_config[key], dict)
-                    and isinstance(value, dict)
-                ):
-                    merged_config[key].update(value)
-                else:
-                    merged_config[key] = value
-            return merged_config
-        finally:
-            resolving.remove(variant)
-
-    return _normalize_model_artifacts(_resolve_variant(model_type))
+    return _normalize_model_artifacts(load_model_variant(config_path, model_type))
 
 
 class MBLT_Engine:

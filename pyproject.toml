@@ -68,6 +68,7 @@ version = { attr = "mblt_vision.__version__" }
 "mblt_vision" = [
     "py.typed",
     "models/*.yaml",
+    "models/bases/*.yaml",
     "datasets/*.yaml",
     "datasets/*.txt",
 ]

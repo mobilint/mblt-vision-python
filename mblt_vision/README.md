@@ -60,6 +60,40 @@ and `list_models()` are the preferred discovery and loading APIs for new code.
 Top-level model imports remain available for compatibility. `obb` is the sole
 oriented-bounding-box task name.
 
+## Model configuration inheritance
+
+Model variants may opt into local family YAMLs with `extends`. This keeps the
+artifact, preprocessing and dataset connection together without duplicating a
+family's processing defaults. Existing `update: VARIANT` and alias behavior is
+unchanged; no shipped model YAML has been migrated by this loader refactor.
+
+```yaml
+DEFAULT:
+  extends: bases/classifier.yaml#DEFAULT
+  file_cfg:
+    repo_id: mobilint/YourPublishedModel
+    filename: model.mxq
+    revision: approved-hf-commit
+  pre_cfg:
+    Resize:
+      size: 256
+```
+
+The example is a schema illustration, not a downloadable model registration.
+The base path is relative to the declaring YAML; omit `#DEFAULT` to select the
+same default variant. Family bases belong in `models/bases/`, outside top-level
+model discovery. `extends` recursively merges mappings and replaces lists and
+scalars. Inherited mapping order is preserved: existing preprocessing operations
+stay in place and new operations append. Use a standalone pipeline when operation
+order must change. In contrast, `update` retains its historical one-section merge,
+so replacing `pre_cfg.Resize` replaces that whole operation's parameters. A variant
+cannot combine `update` and `extends`; an `update` may reference another variant
+that uses `extends`. References are local only and cycles fail before inference.
+
+`tests/test_config_inheritance.py` compares every existing YAML variant with the
+legacy resolver, including ordered processing mappings and derived ONNX filenames,
+and checks exact CPU preprocessing equality for representative model families.
+
 ## Pre-Trained Vision Models
 
 This section lists the publicly pre-trained models supported by the vision framework.
