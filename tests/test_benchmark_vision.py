@@ -8,7 +8,6 @@ import runpy
 from pathlib import Path
 
 import pytest
-
 from benchmark import benchmark_vision_models, compare_benchmark_results
 from mblt_vision.datasets import get_dataset_config
 from mblt_vision.utils.evaluation import (
@@ -157,9 +156,22 @@ def test_benchmark_accepts_obb_model_task(
         FakeModel(), args, tmp_path
     )
 
-    # Ultralytics publishes its DOTAv1 models by rotated mAP50.
-    assert (score, score_name) == (0.7, "map50")
-    assert metrics == {"map50": 0.7, "map50_95": 0.5}
+    assert (score, score_name) == (0.7, "original_polygon_voc07_map50")
+    assert metrics == {
+        "original_polygon_voc07_map50": 0.7,
+        "diagnostic_probiou_map50_95": 0.5,
+        "evaluation": "native_multirate_tiled",
+        "scoring": "original_polygon_voc07_ap50",
+        "official_test_server": False,
+    }
+    args.legacy_single_image = True
+    score, score_name, metrics = benchmark_vision_models._evaluate(
+        FakeModel(), args, tmp_path
+    )
+    assert (score, score_name) == (0.7, "legacy_single_image_probiou_map50")
+    assert metrics["evaluation"] == "legacy_single_image_probiou"
+    assert metrics["scoring"] == "legacy_probiou_interpolated"
+    assert "map50" not in metrics and "map50_95" not in metrics
 
 
 def test_benchmark_ranks_widerface_by_hard_ap(
@@ -507,7 +519,7 @@ def test_comparison_uses_result_directory_names(
             "model,core_mode,task,status,score_name,score\nmodel-a,global8,object_detection,ok,map50_95,0.5\n",
             encoding="utf-8",
         )
-    import mblt_vision.benchmark.chart_utils as chart_utils
+    from mblt_vision.benchmark import chart_utils
 
     captured: dict[str, object] = {}
 

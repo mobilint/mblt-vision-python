@@ -11,6 +11,7 @@ from .damoyolo_post import DAMOYOLODetectionPost
 from .depth_post import DepthPost
 from .embedding_post import PersonReIDPost
 from .semantic_seg_post import SemanticSegPost
+from .tiled_obb import YOLOAnchorlessTiledOBBPost, YOLODFLFreeTiledOBBPost
 from .yolo_anchor_post import (
     YOLOAnchorDetectionPost,
     YOLOAnchorFaceDetectionPost,
@@ -158,6 +159,13 @@ def build_postprocess(
             **kwargs,
         )
     if task == "obb":
+        if post_cfg.get("tiled", str(post_cfg.get("dataset", "")).lower() == "dotav1"):
+            post_cls = (
+                YOLODFLFreeTiledOBBPost
+                if post_cfg.get("dflfree", False)
+                else YOLOAnchorlessTiledOBBPost
+            )
+            return post_cls(pre_cfg, post_cfg, **kwargs)
         if post_cfg.get("dflfree", False):
             return YOLODFLFreeOBBPost(
                 pre_cfg,

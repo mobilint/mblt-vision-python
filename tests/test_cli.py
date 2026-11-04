@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,54 @@ def test_standalone_cli_registers_vision_commands() -> None:
     assert compile_args.target_device == "aries-rb"
     assert predict_args.target_device == "aries-rb"
     assert val_args.target_device == "aries-rb"
+
+
+@pytest.mark.parametrize(
+    "task,dataset,extra,expected",
+    [
+        ("obb", "dotav1", [], 0.01),
+        ("obb", "dotav1", ["--conf-thres", "0.4"], 0.4),
+        ("obb", "dotav1", ["--legacy-single-image"], 0.25),
+        ("object_detection", "coco", [], 0.25),
+        ("object_detection", "coco", ["--conf-thres", "0.3"], 0.3),
+    ],
+)
+def test_predict_threshold_default_follows_selected_protocol(
+    monkeypatch, task, dataset, extra, expected
+):
+    from mblt_vision.cli import _vision
+    import mblt_vision.utils.evaluation.eval_dota_tiled as tiled
+
+    class StopAfterThreshold(Exception):
+        pass
+
+    class Engine:
+        post_cfg = {"task": task, "dataset": dataset}
+        postprocessor = SimpleNamespace(e2e=True)
+        closed = False
+
+        def set_postprocess_thresholds(self, **thresholds):
+            assert thresholds == {"conf_thres": expected, "iou_thres": None}
+            raise StopAfterThreshold
+
+        def dispose(self):
+            self.closed = True
+
+    engine = Engine()
+    monkeypatch.setattr(_vision, "require_source_file", lambda _path: None)
+    monkeypatch.setattr(_vision, "create_vision_engine", lambda _args: engine)
+    # Stop before model inference or file output; only threshold selection runs.
+    monkeypatch.setattr(
+        tiled, "predict_dota_image", lambda *_args: pytest.fail("inference")
+    )
+    args = build_parser().parse_args(
+        ["predict", "--source", "image.jpg", "--model", "stub", *extra]
+    )
+    if not extra or extra == ["--legacy-single-image"]:
+        assert args.conf_thres is None
+    with pytest.raises(StopAfterThreshold):
+        _vision.run_vision_inference(args, command="predict")
+    assert engine.closed
 
 
 def test_vision_cli_uses_single_core_mode_by_default_on_regulus() -> None:

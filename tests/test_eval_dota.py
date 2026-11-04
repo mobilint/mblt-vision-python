@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import importlib
 from types import SimpleNamespace
-from typing import cast
+from typing import ClassVar, cast
 
 import numpy as np
 import pytest
 import torch
-
 from mblt_vision.utils.datasets import CustomDOTAv1
 from mblt_vision.utils.evaluation.eval_dota import (
     _load_ground_truths,
@@ -41,8 +40,8 @@ def test_eval_dota_rejects_truncated_postprocess_batches(
             return None
 
     class _FakeModel:
-        post_cfg = {"task": "obb", "dataset": "dotav1"}
-        pre_cfg = {"LetterBox": {"img_size": [640, 640]}}
+        post_cfg: ClassVar[dict] = {"task": "obb", "dataset": "dotav1"}
+        pre_cfg: ClassVar[dict] = {"LetterBox": {"img_size": [640, 640]}}
         preprocess_with_metadata = object()
 
         def set_postprocess_thresholds(self, **kwargs) -> None:
@@ -74,7 +73,9 @@ def test_eval_dota_rejects_truncated_postprocess_batches(
         ValueError,
         match=r"DOTAv1 evaluation batch length mismatch: model outputs=1, input batch=2",
     ):
-        eval_dota_module.eval_dota(_FakeModel(), str(tmp_path), batch_size=2)
+        eval_dota_module.eval_dota(
+            _FakeModel(), str(tmp_path), batch_size=2, legacy_single_image=True
+        )
 
 
 def test_eval_dota_rejects_wrong_model_taxonomy(tmp_path) -> None:
