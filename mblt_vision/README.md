@@ -637,7 +637,9 @@ with no published ONNX. These configurations retain `revision: main` by project
 policy; the approval HF commit is explicitly **not recorded**, while the ops source
 commit and exact source paths are included under `source`. Live metadata SHAs are
 audit diagnostics, not approval pins. `onnx_local_artifact_only: true` preserves
-automatic MXQ loading and requires trusted local ONNX for runtime and compile.
+automatic MXQ loading and requires trusted local ONNX for runtime.
+`compile_vision_model` does not yet support `person_reid`; this stage does not
+add a ReID compilation/calibration path.
 The guard is inherited from the PR31 dependency, not reimplemented here.
 
 ArcFace/CosFace eight-model publication is pending. Those models remain

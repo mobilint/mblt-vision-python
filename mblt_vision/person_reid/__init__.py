@@ -64,7 +64,7 @@ CLIP_ReID_ViT_B_16_Market1501 = create_model_class(
 )
 CLIP_ReID_ViT_B_16_OccDuke = create_model_class("CLIP_ReID_ViT_B_16_OccDuke", __name__)
 
-__all__ += [
+MODEL_EXPORTS = [
     "CLIP_ReID_RN50_Baseline_DukeMTMC",
     "CLIP_ReID_RN50_Baseline_Market1501",
     "CLIP_ReID_RN50_Baseline_OccDuke",
@@ -78,3 +78,5 @@ __all__ += [
     "CLIP_ReID_ViT_B_16_Market1501",
     "CLIP_ReID_ViT_B_16_OccDuke",
 ]
+
+__all__ += MODEL_EXPORTS

@@ -79,3 +79,24 @@ def test_face_publish_pending_models_remain_inventory_only():
     root = Path(__file__).parents[1] / "mblt_vision/models"
     assert not list(root.glob("ArcFace_IResNet_*.yaml"))
     assert not list(root.glob("CosFace_IResNet_*.yaml"))
+
+
+def test_top_level_reid_exports_are_model_only():
+    assert set(mblt_vision.person_reid.MODEL_EXPORTS) == set(MODELS)
+    for name in (
+        "EmbeddingPost",
+        "ReIDSample",
+        "Market1501Dataset",
+        "RetrievalEvaluator",
+        "extract_embeddings",
+    ):
+        assert name not in mblt_vision.__all__
+        assert name not in mblt_vision._LEGACY_MODEL_EXPORTS
+        assert hasattr(mblt_vision.person_reid, name)
+
+
+def test_reid_compile_is_explicitly_unsupported():
+    from mblt_vision.compile.vision import _normalize_task
+
+    with pytest.raises(ValueError, match="Unsupported Vision task"):
+        _normalize_task("person_reid")
