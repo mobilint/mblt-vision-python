@@ -124,6 +124,17 @@ but ONNX requires a trusted local `model_path` or `onnx_path`. Automatic ONNX
 loading fails with a specific message, and metadata verification skips only that
 framework. Existing configurations without this marker retain their behavior.
 
+`EfficientViT_B0`, `EfficientViT_B1` and `EfficientViT_B2` are intentional family
+sibling configurations using official timm 1.0.14 `r224_in1k` defaults (224 crop,
+bicubic resize to `floor(224 / 0.95) = 235`, ImageNet normalization). They are
+**pending HF (family sibling)**, not published-model claims. Their
+`file_cfg.artifact_status: pending_hf_family_sibling` makes metadata verification
+skip both frameworks without network access and allows runtime/compile use only
+with trusted local artifacts. Existing sibling configurations are not rewritten.
+EfficientViT M0–M5 is a distinct architecture and is not added here. Alternative
+ViT CLIP/GAP resolutions require exact upstream squash-mode preprocessing support;
+this change does not approximate them with center cropping.
+
 | Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | AlexNet | (224,224,3) | 56.084 | 56.556 | 1.43 | 61.10 | [Link](https://docs.pytorch.org/vision/stable/models/generated/torchvision.models.alexnet.html) |  |

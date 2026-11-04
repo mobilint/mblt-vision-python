@@ -786,8 +786,10 @@ def resolve_quantization_values(
         _validate_ratio("topk_ratio", topk_ratio) if topk_ratio is not None else None
     )
     hosted_config: dict[str, Any] | None = None
-    if (resolved_percentile is None or resolved_topk is None) and not file_cfg.get(
-        "local_artifact_only"
+    if (
+        (resolved_percentile is None or resolved_topk is None)
+        and not file_cfg.get("local_artifact_only")
+        and file_cfg.get("artifact_status") != "pending_hf_family_sibling"
     ):
         repo_id = file_cfg.get("repo_id")
         revision = file_cfg.get("revision", "main")
@@ -884,6 +886,11 @@ def _resolve_compile_onnx_path(
     repo_id = file_cfg.get("repo_id")
     revision = file_cfg.get("revision")
     filename = _configured_onnx_filename(file_cfg)
+    if file_cfg.get("artifact_status") == "pending_hf_family_sibling":
+        raise RuntimeError(
+            "This configuration is pending HF (family sibling). Supply a trusted local "
+            "model_path or onnx_path for compilation; automatic downloads are disabled."
+        )
     if file_cfg.get("local_artifact_only"):
         repository = repo_id if isinstance(repo_id, str) and repo_id else "this model"
         raise RuntimeError(

@@ -629,6 +629,7 @@ class MBLT_Engine:
             "onnx_filename",
             "onnx_path",
             "onnx_local_artifact_only",
+            "artifact_status",
         }
         return {
             key: value
@@ -723,6 +724,11 @@ class MBLT_Engine:
         revision = self.file_cfg.pop("revision", None)
         if not repo_id or not revision:
             return
+        if self.file_cfg.get("artifact_status") == "pending_hf_family_sibling":
+            raise RuntimeError(
+                f"'{repo_id}' is pending HF (family sibling). Supply a trusted local "
+                "model_path, mxq_path, or onnx_path; automatic downloads are disabled."
+            )
         if local_artifact_only:
             raise RuntimeError(
                 f"Remote artifacts for '{repo_id}' are disabled because this model does not "

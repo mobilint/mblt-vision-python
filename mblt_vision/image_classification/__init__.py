@@ -58,6 +58,9 @@ __all__: list[str] = [
     "EfficientNet_V2_L",
     "EfficientNet_V2_M",
     "EfficientNet_V2_S",
+    "EfficientViT_B0",
+    "EfficientViT_B1",
+    "EfficientViT_B2",
     "EfficientViT_B3",
     "EfficientViT_L1",
     "EfficientViT_L2",
@@ -182,6 +185,9 @@ __all__: list[str] = [
     "YOLOv8xCls",
 ]
 
+EfficientViT_B0 = create_model_class("EfficientViT_B0", __name__)
+EfficientViT_B1 = create_model_class("EfficientViT_B1", __name__)
+EfficientViT_B2 = create_model_class("EfficientViT_B2", __name__)
 EfficientViT_B3 = create_model_class("EfficientViT_B3", __name__)
 EfficientViT_L1 = create_model_class("EfficientViT_L1", __name__)
 EfficientViT_L2 = create_model_class("EfficientViT_L2", __name__)
