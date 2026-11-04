@@ -57,6 +57,7 @@ class RetrievalResult:
     cmc: np.ndarray
     mean_ap: float
     sample_count: int
+    gallery_count: int | None = None
 
     @property
     def primary_score(self) -> float:
@@ -67,16 +68,22 @@ class RetrievalResult:
         return self.rank(1)
 
     def rank(self, k: int) -> float:
-        """Saturate ranks beyond the gallery length, as in the source scorer."""
+        """Saturate only a complete gallery curve, never a caller-truncated one."""
         if not isinstance(k, int) or isinstance(k, bool) or k <= 0:
             raise ValueError("Rank must be a positive integer")
+        if k > len(self.cmc) and self.gallery_count != len(self.cmc):
+            raise ValueError("Requested rank is beyond the computed CMC cutoff")
         return float(self.cmc[min(k, len(self.cmc)) - 1])
 
     def as_dict(self) -> dict:
         """Return source-compatible primary/secondary metrics in ratio units."""
         return {
             "primary": {"map": round(self.mean_ap, 5)},
-            "secondary": {f"rank{k}": round(self.rank(k), 5) for k in (1, 5, 10)},
+            "secondary": {
+                f"rank{k}": round(self.rank(k), 5)
+                for k in (1, 5, 10)
+                if k <= len(self.cmc) or self.gallery_count == len(self.cmc)
+            },
             "sample_count": self.sample_count,
         }
 
@@ -109,7 +116,7 @@ class RetrievalEvaluator:
             raise ValueError("Embeddings require one finite nonempty vector per sample")
         if not isinstance(max_rank, int) or isinstance(max_rank, bool) or max_rank <= 0:
             raise ValueError("max_rank must be a positive integer")
-        if any(s.split not in {"query", "gallery"} or s.pid == -1 for s in samples):
+        if any(s.split not in {"query", "gallery"} or s.pid < 0 for s in samples):
             raise ValueError(
                 "Samples require query/gallery splits with loader-filtered junk"
             )
@@ -125,7 +132,7 @@ class RetrievalEvaluator:
             np.asarray([samples[i].camid for i in gallery]),
             max_rank,
         )
-        return RetrievalResult(cmc, mean_ap, len(samples))
+        return RetrievalResult(cmc, mean_ap, len(samples), len(gallery))
 
     @staticmethod
     def evaluate_distances(

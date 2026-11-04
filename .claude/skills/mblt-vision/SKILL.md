@@ -28,6 +28,9 @@ description: >-
   Use file_cfg.filename for MXQ and derive the same-stem ONNX artifact unless
   onnx_filename is required.
 - Every post_cfg declares dataset; resolve output taxonomy from the dataset/task pair.
+- For Hub linkage changes, run `tests/test_hub_validation.py` as described in `tests/TEST.md`.
+  The metadata checker follows runtime board paths without downloading weights; live commits
+  are diagnostics, not substitutes for missing historical approval provenance.
 - For opt-in YAML family inheritance, follow `mblt_vision/README.md`'s configuration
   inheritance rules. Keep legacy `update` shallow and run `tests/test_config_inheritance.py`
   to prove every existing variant's values and processing order remain identical.
