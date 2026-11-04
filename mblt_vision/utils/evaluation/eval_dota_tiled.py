@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 import cv2
 import numpy as np
 import torch
-from PIL import Image
 
 from ..datasets import CustomDOTAv1, get_dotav1_class_num, get_dotav1_label
 from ..datasets.dota_tiling import (
@@ -21,6 +20,7 @@ from ..datasets.dota_tiling import (
     get_eval_protocol,
     iter_tiles,
     prepare_tile_image,
+    validate_image_source,
 )
 from ..postprocess.common import xywhr2xyxyxyxy
 from ..postprocess.tiled_obb import (
@@ -182,19 +182,22 @@ def eval_dota_tiled(
         else iou_thres,
     )
 
+    processor = model.postprocessor
+    config = (
+        processor.tile_config
+        if isinstance(processor, DOTATiledOBBPostMixin)
+        else TiledConfig()
+    )
+
     def images() -> Iterator[tuple[str, np.ndarray]]:
         for image_id, path in zip(dataset.ids, dataset.image_paths, strict=True):
-            with Image.open(path) as header:
-                if header.getexif().get(274, 1) != 1:
-                    raise ValueError(
-                        "DOTA tiled inference requires EXIF-normalized original images"
-                    )
+            validate_image_source(path, config)
             image = cv2.imread(path)
             if image is None:
                 raise FileNotFoundError(path)
             yield image_id, image
 
-    predictions = predict_engine_tiles(model, images(), batch_size)
+    predictions = predict_engine_tiles(model, images(), batch_size, config)
     formatted = []
     for image_id, rows in predictions.items():
         polygons = xywhr2xyxyxyxy(rows[:, :5]).reshape(-1, 8).tolist()
@@ -250,17 +253,19 @@ def predict_dota_image(
         or str(model.post_cfg.get("dataset", "")).lower() != "dotav1"
     ):
         raise ValueError("Tiled DOTA prediction requires an OBB DOTAv1 model")
-    with Image.open(source) as header:
-        if header.getexif().get(274, 1) != 1:
-            raise ValueError(
-                "DOTA tiled inference requires EXIF-normalized original images"
-            )
+    processor = model.postprocessor
+    config = config or (
+        processor.tile_config
+        if isinstance(processor, DOTATiledOBBPostMixin)
+        else TiledConfig()
+    )
+    validate_image_source(source, config)
     image = cv2.imread(str(source))
     if image is None:
         raise FileNotFoundError(source)
-    rows = predict_engine_tiles(
-        model, iter([("image", image)]), batch_size, config or TiledConfig()
-    )["image"]
+    rows = predict_engine_tiles(model, iter([("image", image)]), batch_size, config)[
+        "image"
+    ]
     # Results' normal OBB representation is cx,cy,w,h,score,class,angle. The
     # prediction is already original-pixel, so plotting must use identity scale.
     output = torch.cat((rows[:, :4], rows[:, 5:7], rows[:, 4:5]), dim=1)

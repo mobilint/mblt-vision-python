@@ -190,6 +190,19 @@ concatenated **before** filtering: retain `image_area_in_window / window_area >
 maximum by setting their rate to 1. Stops can extend beyond a small image; numpy
 slicing clips them. No synthetic pixels are added at this stage.
 
+Per-image safety limits are dataset-owned `tiling.max_pixels=64000000` and
+`tiling.max_tiles=768`, exposed on `TiledConfig`. The tile limit counts **all
+candidate windows before area filtering**, using integer arithmetic before any
+window arrays, crops, JPEG encoding or inference. An 8192x8192 image exceeds the
+pixel limit and would produce 803 candidates. File prediction/evaluation and the
+benchmark CLI inspect the image header before OpenCV decoding; array entry points
+recheck actual dimensions. `validate_image_budget((height,width), config)` returns
+the candidate count; `validate_image_source(path, config)` checks header budgets
+and EXIF, returning raster `(height,width)` without loading pixels. Trusted larger
+inputs require explicitly higher config values (CLI `--max-pixels`/`--max-tiles`).
+These are resource guards, not an upload sandbox: services still need process,
+time, memory and request limits, including limits on concurrent images.
+
 `iter_tiles(image_bgr, image_id, config)` accepts nonempty **uint8 HWC BGR** numpy
 arrays with three channels. Each `Tile.image` is an owned contiguous copy; the
 source is not modified. With the default JPEG option, the slice is encoded and
@@ -389,9 +402,14 @@ at least 1. It should not be substituted as the exact pinned merge oracle.
   creates only encountered classes. Detection row content matches apart from
   the documented tie policy. The optional package version guard does not prove
   the installed wheel's contents/hash match the pinned Git commit.
-- Only geometry, serialization and synthetic postprocessing are validated here.
-  Runtime accuracy, real checkpoints, hardware, full validation and server
-  submission must be validated separately with recorded provenance.
+- Ordinary unit tests validate geometry, serialization and synthetic boundaries,
+  without checkpoints. A separate bounded CPU comparison at `5287133` used a
+  SHA-256-recorded local YOLO11n-obb checkpoint, two original images (P0402/P2085),
+  five JPEG-matched native windows and independent pinned upstream validation.
+  All Task1 files matched exactly for 31 predictions after matching fusion
+  and preprocessing. This is narrow reference evidence, not full-validation
+  accuracy, hardware parity, published-result reproduction or a server score.
+  Full validation and server submission remain separate, unverified work.
 
 ### Tests
 

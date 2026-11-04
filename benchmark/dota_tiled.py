@@ -21,6 +21,7 @@ from mblt_vision.utils.datasets.dota_tiling import (
     ULTRALYTICS_VERSION,
     TiledConfig,
     get_eval_protocol,
+    validate_image_source,
 )
 from mblt_vision.utils.postprocess.tiled_obb import (
     UltralyticsTilePredictor,
@@ -85,12 +86,16 @@ def main(argv: list[str] | None = None) -> int:
         default=get_eval_protocol()["inference"]["preprocessing"],
         help="Ultralytics adapter input methodology; direct-letterbox is historical",
     )
+    parser.add_argument("--max-pixels", type=int, default=TiledConfig().max_pixels)
+    parser.add_argument("--max-tiles", type=int, default=TiledConfig().max_tiles)
     args = parser.parse_args(argv)
     config = TiledConfig(
         args.crop_size,
         args.gap,
         tuple(args.rates),
         jpeg_roundtrip=not args.no_jpeg_roundtrip,
+        max_pixels=args.max_pixels,
+        max_tiles=args.max_tiles,
     )
     if args.output.exists() and (
         not args.output.is_dir() or any(args.output.iterdir())
@@ -137,13 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--predictor-factory must return a callable")
     predictions = {}
     for path in paths:
-        # Match the raster read by split_test. Non-trivial EXIF orientation is
-        # deliberately unsupported by this CLI (split_test mixes exif_size/read).
-        from PIL import Image
-
-        with Image.open(path) as original:
-            if original.getexif().get(274, 1) != 1:
-                raise ValueError(f"Normalize EXIF orientation before tiling: {path}")
+        validate_image_source(path, config)
         image = cv2.imread(str(path))
         if image is None:
             raise ValueError(f"OpenCV could not decode {path}")
@@ -157,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         "rates": config.rates,
         "crop_pairs": config.crop_pairs,
         "jpeg_roundtrip": config.jpeg_roundtrip,
+        "max_pixels": config.max_pixels,
+        "max_tiles": config.max_tiles,
         "merge": "class-offset Fast-NMS probIoU >= 0.3, stable ties",
         "backend": str(args.weights.resolve())
         if args.weights

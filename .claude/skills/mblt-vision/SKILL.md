@@ -123,6 +123,10 @@ description: >-
   reference adapter uses model.fuse(verbose=False) in FP32 eval mode, matching
   validation AutoBackend's fuse=True policy. CLI confidence resolves after
   task selection: tiled DOTA dataset/model .01, non-tiled .25; explicit overrides win.
+  Dataset tiling max_pixels=64000000/max_tiles=768 are positive-integer safety
+  budgets. Count pre-filter windows before array/JPEG/inference work, check file
+  headers before decoding, and recheck array dimensions. Higher trusted-input
+  limits must be explicit; application process/time/memory limits remain necessary.
   Merge/release candidates per completed image; prepare on its pool.
   Keep scoring in evaluation, degenerate predictions as IoU-zero false positives,
   strict ground truth, and protocol-specific benchmark score names. Source refs and

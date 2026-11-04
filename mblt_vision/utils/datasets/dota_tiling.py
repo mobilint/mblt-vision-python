@@ -10,11 +10,13 @@ import itertools
 import math
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 import torch
+from PIL import Image
 
 from ...datasets import get_dataset_config
 from ..letterbox import LetterBoxGeometry, RatioPad
@@ -43,6 +45,10 @@ def get_eval_protocol(
     for section in ("tiling", "inference", "merge"):
         if not isinstance(protocol.get(section), dict):
             raise ValueError(f"eval_protocol requires a {section} mapping")
+    for name in ("max_pixels", "max_tiles"):
+        value = protocol["tiling"].get(name)
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"DOTA tiling requires a positive integer {name}")
     merge = protocol["merge"]
     if merge.get("method") != "rotated_probiou_fastnms":
         raise ValueError("DOTA tiled merge requires rotated_probiou_fastnms")
@@ -96,6 +102,8 @@ class TiledConfig:
     im_rate_thr: float = _TILING["im_rate_thr"]
     eps: float = _TILING["eps"]
     jpeg_roundtrip: bool = _TILING["jpeg_roundtrip"]
+    max_pixels: int = _TILING["max_pixels"]
+    max_tiles: int = _TILING["max_tiles"]
 
     def __post_init__(self) -> None:
         if type(self.crop_size) is not int or type(self.gap) is not int:
@@ -119,6 +127,10 @@ class TiledConfig:
             raise ValueError("Require 0 <= im_rate_thr < 1 and finite eps > 0")
         if type(self.jpeg_roundtrip) is not bool:
             raise TypeError("jpeg_roundtrip must be a boolean")
+        for name in ("max_pixels", "max_tiles"):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
 
     @property
     def crop_pairs(self) -> tuple[tuple[int, int], ...]:
@@ -129,6 +141,54 @@ class TiledConfig:
 _DEFAULT_CONFIG = TiledConfig()
 
 
+def validate_image_budget(
+    im_size: tuple[int, int], config: TiledConfig = _DEFAULT_CONFIG
+) -> int:
+    """Check pixels and pre-filter candidate count without allocating window arrays.
+
+    Returns the candidate count, including windows later rejected by area filtering.
+    Budgets are per original image; explicitly raise them only for trusted inputs.
+    Integer arithmetic prevents huge shape values from overflowing float geometry.
+    """
+    if len(im_size) != 2 or any(type(v) is not int or v <= 0 for v in im_size):
+        raise ValueError("im_size must contain positive integer (height, width)")
+    h, w = im_size
+    pixels = h * w
+    if pixels > config.max_pixels:
+        raise ValueError(
+            f"DOTA image has {pixels} pixels, exceeding max_pixels={config.max_pixels}"
+        )
+    count = 0
+    for size, gap in config.crop_pairs:
+        step = size - gap
+        xn = 1 if w <= size else (w - size + step - 1) // step + 1
+        yn = 1 if h <= size else (h - size + step - 1) // step + 1
+        count += xn * yn
+        if count > config.max_tiles:
+            raise ValueError(
+                f"DOTA candidate windows exceed max_tiles={config.max_tiles}"
+            )
+    return count
+
+
+def validate_image_source(
+    source: str | Path, config: TiledConfig = _DEFAULT_CONFIG
+) -> tuple[int, int]:
+    """Read header only, reject over-budget/non-normal-EXIF input before decoding.
+
+    Returns raster (height, width). Array entry points recheck actual dimensions;
+    applications handling untrusted uploads still need process/time/memory limits.
+    """
+    with Image.open(source) as header:
+        shape = (header.height, header.width)
+        validate_image_budget(shape, config)
+        if header.getexif().get(274, 1) != 1:
+            raise ValueError(
+                "DOTA tiled inference requires EXIF-normalized original images"
+            )
+    return shape
+
+
 def get_windows(
     im_size: tuple[int, int], config: TiledConfig = _DEFAULT_CONFIG
 ) -> np.ndarray:
@@ -137,8 +197,7 @@ def get_windows(
     Stops can exceed a small image's extent. Python slicing, not padding, clips
     them. The strict area comparison and near-maximum fallback are intentional.
     """
-    if len(im_size) != 2 or any(type(v) is not int or v <= 0 for v in im_size):
-        raise ValueError("im_size must contain positive integer (height, width)")
+    validate_image_budget(im_size, config)
     h, w = im_size
     windows = []
     for size, gap in config.crop_pairs:

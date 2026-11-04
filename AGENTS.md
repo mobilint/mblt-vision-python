@@ -187,6 +187,10 @@ The current ownership boundary is deliberate:
   model.fuse(verbose=False), matching validation AutoBackend's fuse=True policy.
   CLI prediction leaves confidence unset until task selection: tiled DOTA uses
   dataset/model .01 by default; non-tiled prediction retains .25, overrides win.
+  Dataset tiling safety budgets default to max_pixels=64000000/max_tiles=768;
+  count all pre-filter windows with integer arithmetic before arrays/JPEG/inference,
+  and check source headers before OpenCV decode. Explicit higher trusted-input
+  budgets are allowed; keep application process/time/memory limits separately.
   Merge/release candidates per completed image; run model preparation on its pool.
   Scoring stays in evaluation; finite degenerate predictions have IoU zero while
   ground truth remains strict. Label benchmark protocols/primary scores explicitly.
