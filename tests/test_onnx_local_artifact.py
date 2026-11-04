@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from mblt_vision._hub_validation import check_hub_artifacts
+from mblt_vision.compile import vision as compile_module
 from mblt_vision.wrapper import MBLT_Engine, resolve_model_config
 
 
@@ -44,6 +45,9 @@ def test_marked_mxq_keeps_hub_download() -> None:
         revision="main",
         subfolders=["aries-rb"],
     )
+    kwargs = engine._mxq_backend_kwargs()
+    assert "onnx_local_artifact_only" not in kwargs
+    assert kwargs["mxq_path"] == "/downloaded/artifact"
 
 
 def test_unmarked_remote_onnx_keeps_hub_download() -> None:
@@ -74,3 +78,34 @@ def test_onnx_only_verification_stays_offline() -> None:
     )
     assert checks[0].status == "local_artifact_only"
     assert not api.mock_calls
+
+
+def test_compile_resolver_requires_local_onnx(monkeypatch, tmp_path) -> None:
+    download = Mock()
+    monkeypatch.setattr(compile_module, "hf_hub_download", download)
+    config = resolve_model_config("EfficientViT_B3")["file_cfg"]
+    with pytest.raises(RuntimeError, match="trusted local"):
+        compile_module._resolve_compile_onnx_path(config, None)
+    download.assert_not_called()
+    local = tmp_path / "trusted.onnx"
+    local.write_bytes(b"fixture")
+    assert compile_module._resolve_compile_onnx_path(config, local) == local.resolve()
+    assert (
+        compile_module._resolve_compile_onnx_path(
+            {**config, "onnx_path": str(local)}, None
+        )
+        == local.resolve()
+    )
+    download.assert_not_called()
+
+
+def test_compile_unmarked_config_retains_download(monkeypatch, tmp_path) -> None:
+    local = tmp_path / "downloaded.onnx"
+    local.write_bytes(b"fixture")
+    download = Mock(return_value=str(local))
+    monkeypatch.setattr(compile_module, "hf_hub_download", download)
+    monkeypatch.setattr(compile_module, "get_mobilint_cache_dir", lambda: str(tmp_path))
+    config = resolve_model_config("EfficientViT_B3")["file_cfg"]
+    config.pop("onnx_local_artifact_only")
+    assert compile_module._resolve_compile_onnx_path(config, None) == local.resolve()
+    download.assert_called_once()

@@ -628,6 +628,7 @@ class MBLT_Engine:
             "revision",
             "onnx_filename",
             "onnx_path",
+            "onnx_local_artifact_only",
         }
         return {
             key: value

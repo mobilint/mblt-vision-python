@@ -891,6 +891,12 @@ def _resolve_compile_onnx_path(
             "have a repository-pinned immutable revision and SHA-256 digest. Supply a "
             "trusted local model_path or onnx_path instead."
         )
+    if file_cfg.get("onnx_local_artifact_only"):
+        repository = repo_id if isinstance(repo_id, str) and repo_id else "this model"
+        raise RuntimeError(
+            f"'{repository}' publishes MXQ artifacts only. ONNX compilation requires a trusted "
+            "local model_path or onnx_path; automatic ONNX downloads are disabled."
+        )
     if isinstance(repo_id, str) and isinstance(revision, str) and filename:
         downloaded_path = Path(
             hf_hub_download(
