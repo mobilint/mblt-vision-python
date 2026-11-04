@@ -60,5 +60,5 @@ For export-style YOLO output, use --e2e false and optionally save it with --raw-
         "--raw-output",
         help="Path to save raw export-style output with `--e2e false`.",
     )
-    add_threshold_args(parser, conf_default=0.25, iou_default=None)
+    add_threshold_args(parser, conf_default=None, iou_default=None)
     add_e2e_arg(parser)

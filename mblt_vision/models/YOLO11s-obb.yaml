@@ -17,11 +17,10 @@ DEFAULT:
   post_cfg:
     task: obb
     dataset: dotav1
+    tiled: true
     nl: 3
     n_extra: 1
     reg_max: 16
-    conf_thres: 0.01
-    iou_thres: 0.7
 TURBO:
   update: DEFAULT
   file_cfg:

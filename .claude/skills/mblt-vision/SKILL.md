@@ -116,8 +116,43 @@ description: >-
   together.
 - Rank NYU Depth evaluation by delta1. Expose abs_rel then RMSE (m) as
   secondary metrics, with median-aligned metrics averaged per image.
-- Rank DOTAv1 evaluation by rotated mAP50, with mAP50-95 secondary (Ultralytics' published
-  metric). Load difficult objects as ordinary targets, as Ultralytics' validation does.
+- DOTAv1 OBB CLI prediction and evaluation default to native multi-scale tiling.
+  Primary map50 is original-polygon VOC07 AP with difficult objects ignored;
+  map5095 remains a diagnostic probIoU field. Explicit legacy_single_image retains
+  historical whole-image probIoU evaluation with difficult-as-ordinary targets.
+- DOTA uses plain dataset YAML tiling/inference/merge hyperparameters and model
+  post_cfg overrides through existing update inheritance. Simplified per maintainer:
+  YAML hyperparameters instead of protocol IDs. get_dota_settings returns owned
+  mappings; no API marker or source-hash gate. Keep shared loader semantics unchanged.
+  Native windows/crops/preparation live in utils/datasets/dota_tiling.py;
+  restore/merge/Task1 export/reference adapter live
+  in `utils/postprocess/tiled_obb.py`. Thin tiled mixin subclasses reuse existing
+  OBB decode, per-tile NMS and box conversion via build_post. No standalone engine.
+  Preserve BGR native tiles, Nx7 tile-pixel callback rows, pinned JSON rounding
+  before offset-only restoration, JPEG default, classwise Fast-NMS probIoU >= 0.3,
+  stable ties and frozen da3ef806 Task1 bytes. Inference defaults: conf .01, IoU .7,
+  max_det 300. Dataset inference.preprocessing defaults to ultralytics-val:
+  long-side ceil resize then centered scaleup-disabled letterbox. ratio_pad records
+  height/width gains; restore all xywh with its first (height) gain as upstream.
+  direct-letterbox is the explicit historical mode. The optional pinned CPU
+  reference adapter uses model.fuse(verbose=False) in FP32 eval mode, matching
+  validation AutoBackend's fuse=True policy. CLI confidence resolves after
+  task selection: tiled DOTA dataset/model .01, non-tiled .25; explicit overrides win.
+  Dataset tiling max_pixels=64000000/max_tiles=768 are positive-integer safety
+  budgets. Count pre-filter windows before array/JPEG/inference work, check file
+  headers before decoding, and recheck array dimensions. Higher trusted-input
+  limits must be explicit; application process/time/memory limits remain necessary.
+  Official merging is uncapped: merge.max_candidates defaults to null. Services
+  opt into a positive-integer guard (e.g. 30000) via owned settings
+  (predict_tiled accepts keyword-only settings), rejecting excess before quadratic
+  NMS, never truncate/top-k. This is not upstream's per-tile max_nms; uncapped
+  benchmarks are not upload-safe and services still need external limits.
+  Explicitly pass multi_label=True through inherited tiled postprocessing.
+  Merge/release candidates per completed image; enumerate lightweight windows on
+  the caller, copy/JPEG crops and prepare models on the bounded preparation pool.
+  Keep scoring in evaluation, degenerate predictions as IoU-zero false positives,
+  strict ground truth, and protocol-specific benchmark score names. Source refs and
+  complete methodology are in the DOTA section of `mblt_vision/README.md`.
 - Run YOLOv7 models at `iou_thres: 0.65`, WongKinYiu/yolov7's own `test.py` default.
 
 - Published CLIP-ReID wrappers use RN50/ViT processing bases and matching retrieval datasets;

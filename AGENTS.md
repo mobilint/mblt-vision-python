@@ -179,11 +179,47 @@ The current ownership boundary is deliberate:
 - For NYU Depth evaluation, rank results by delta1 and retain abs_rel then
   RMSE (m) as secondary metrics. Median-align each image and average every
   metric per image, following Ultralytics' depth-validation convention.
-- For DOTAv1 evaluation, rank results by rotated mAP50 and retain mAP50-95 as the secondary
-  metric, because rotated mAP50 is what Ultralytics publishes for its OBB models. Load difficult
-  objects (flag `1` or `2`) as ordinary targets, as Ultralytics' validation does: its
-  `convert_dota_to_yolo_obb` drops the flag. `evaluate_dota_predictions` still honours ignore
-  regions a caller supplies explicitly (the DOTA devkit protocol), but the loader produces none.
+- DOTAv1 OBB CLI prediction and evaluation default to multi-scale native tiles;
+  primary `map50` is merged original-polygon VOC07 AP with difficult targets ignored.
+  `map5095` is a legacy probabilistic diagnostic only, not an official DOTA score.
+  Explicit `legacy_single_image=True` retains historical whole-image evaluation;
+  its loader treats flags 1/2 as ordinary targets. Keep the two protocols labeled.
+- DOTA tiled hyperparameters are plain tiling/inference/merge mappings in
+  datasets/dotav1.yaml, with model post_cfg overrides and existing update inheritance.
+  Simplified per maintainer: YAML hyperparameters instead of protocol IDs.
+  get_dota_settings returns owned settings; no API marker or source-hash gate.
+  Keep shared loader semantics unchanged. utils/datasets/dota_tiling.py owns
+  native windows/crops/preparation; utils/postprocess/tiled_obb.py owns restore/merge/export.
+  Tiled subclasses extend existing OBB postprocessors through a mixin and build_post;
+  reuse decode, per-tile NMS and box conversion. No standalone public OBB engine.
+  Keep native uint8 BGR and callback Nx7 `[cx,cy,w,h,angle,score,class0]` tile pixels,
+  pinned v8.3.228 JSON rounding before offsets, JPEG default, classwise Fast-NMS
+  probIoU >= 0.3, stable ties, conf 0.01, tile IoU 0.7 and max_det 300. Preserve
+  frozen da3ef806 Task1 fixture bytes and upstream reproduction references.
+  Dataset inference.preprocessing defaults to ultralytics-val: long-side ceil
+  resize then scaleup-disabled centered letterbox. Preserve upstream ratio_pad's
+  height/width metadata and restore all xywh using its first (height) gain;
+  direct-letterbox is an explicit historical mode, not the validation default.
+  The optional pinned CPU reference adapter fuses its FP32 eval model using
+  model.fuse(verbose=False), matching validation AutoBackend's fuse=True policy.
+  CLI prediction leaves confidence unset until task selection: tiled DOTA uses
+  dataset/model .01 by default; non-tiled prediction retains .25, overrides win.
+  Dataset tiling safety budgets default to max_pixels=64000000/max_tiles=768;
+  count all pre-filter windows with integer arithmetic before arrays/JPEG/inference,
+  and check source headers before OpenCV decode. Explicit higher trusted-input
+  budgets are allowed; keep application process/time/memory limits separately.
+  Official merged Fast-NMS has no cap: merge.max_candidates defaults to null,
+  unlike upstream's per-tile max_nms. Services must opt into a positive-integer
+  guard (e.g. 30000) plus external concurrency/time/memory limits; fail closed on
+  excess before quadratic NMS, never truncate/top-k. Pass owned settings
+  through predict_tiled's optional keyword-only settings argument; accepted results
+  stay numerical-identical. Do not describe the uncapped benchmark as upload-safe.
+  Explicitly pass multi_label=True through inherited tiled postprocessing.
+  Merge/release candidates per completed image; enumerate lightweight windows on
+  the caller, copy/JPEG crops and prepare models on the bounded preparation pool.
+  Scoring stays in evaluation; finite degenerate predictions have IoU zero while
+  ground truth remains strict. Label benchmark protocols/primary scores explicitly.
+  See the DOTA section of `mblt_vision/README.md` and thin `benchmark/dota_tiled.py`.
 - Run YOLOv7 models (`YOLOv7`, `-x`, `-w6`, `-e6`, `-d6`, `-e6e`) at `iou_thres: 0.65`, the
   value WongKinYiu/yolov7's `test.py --iou-thres` defaults to and its README reproduces every
   published COCO number with. The `iou_thres=0.6` in that script's `test()` signature is always
