@@ -107,8 +107,8 @@ backward compatibility.
 
 See [the Vision API guide](mblt_vision/README.md) for supported model families,
 model details, artifact selection, and output taxonomy behavior. See the
-[DOTA native multiscale tiling guide](mblt_vision/obb/TILED.md) for the separate
-backend-swappable OBB API and Task1 export CLI, and the
+[DOTA native multiscale tiling section](mblt_vision/README.md#dota-multiscale-native-tiles)
+for the dataset-owned default OBB protocol and Task1 export CLI, and the
 [compilation guide](compile/README.md) for calibration-data preparation
 and MXQ compilation. The [test guide](tests/TEST.md) explains offline, Hugging
 Face, and NPU test runs.

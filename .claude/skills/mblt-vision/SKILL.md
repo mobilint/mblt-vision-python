@@ -106,13 +106,20 @@ description: >-
   Primary map50 is original-polygon VOC07 AP with difficult objects ignored;
   map5095 remains a diagnostic probIoU field. Explicit legacy_single_image retains
   historical whole-image probIoU evaluation with difficult-as-ordinary targets.
-- Keep the separate `mblt_vision.obb.tiled` API (`TILED_API_VERSION = 1`) explicit:
-  native uint8 BGR tiles; callback Nx7 `[cx,cy,w,h,angle,score,class0]` already
-  inverse-letterboxed to tile pixels. Preserve pinned v8.3.228 windows, default
-  JPEG roundtrip, Python JSON rounding before offset-only restoration, class-offset
-  Fast-NMS probIoU >= 0.3 and stable score ties. Do not divide by nominal rate.
-  See `mblt_vision/obb/TILED.md` and `benchmark/dota_tiled.py`; original-polygon AP,
-  diagnostic probIoU AP and official DOTA test-server AP are distinct results.
+- Dataset `eval_protocol` owns the DOTA tiled methodology, id
+  `dota-native-multirate-1024-500.v1`; model `post_cfg.eval_protocol` selects it
+  through existing `update:` inheritance. Do not alter shared loader merge semantics.
+  Native windows/crops/preparation and `TILED_API_VERSION = 1` live in
+  `utils/datasets/dota_tiling.py`; restore/merge/Task1 export/reference adapter live
+  in `utils/postprocess/tiled_obb.py`. Thin tiled mixin subclasses reuse existing
+  OBB decode, per-tile NMS and box conversion via build_post. No standalone engine.
+  Preserve BGR native tiles, Nx7 tile-pixel callback rows, pinned JSON rounding
+  before offset-only restoration, JPEG default, classwise Fast-NMS probIoU >= 0.3,
+  stable ties and frozen da3ef806 Task1 bytes. Inference defaults: conf .01, IoU .7,
+  max_det 300. Merge/release candidates per completed image; prepare on its pool.
+  Keep scoring in evaluation, degenerate predictions as IoU-zero false positives,
+  strict ground truth, and protocol-specific benchmark score names. Source refs and
+  complete methodology are in the DOTA section of `mblt_vision/README.md`.
 - Run YOLOv7 models at `iou_thres: 0.65`, WongKinYiu/yolov7's own `test.py` default.
 
 ## Runtime and Packaging

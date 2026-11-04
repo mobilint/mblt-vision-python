@@ -168,13 +168,21 @@ The current ownership boundary is deliberate:
   `map5095` is a legacy probabilistic diagnostic only, not an official DOTA score.
   Explicit `legacy_single_image=True` retains historical whole-image evaluation;
   its loader treats flags 1/2 as ordinary targets. Keep the two protocols labeled.
-- The explicit `mblt_vision.obb.tiled` API (`TILED_API_VERSION = 1`) takes native uint8
-  BGR crops and callback Nx7 `[cx,cy,w,h,angle,score,class0]` rows already restored
-  to tile pixels. Keep the pinned Ultralytics v8.3.228 window/JSON rounding/offset-only
-  merge semantics, JPEG roundtrip default, Fast-NMS probIoU >= 0.3, and stable tie policy.
-  Do not substitute the legacy Task1 writer as an exact merge oracle. The separate
-  `benchmark/dota_tiled.py` CLI and `mblt_vision/obb/TILED.md` document the methodology;
-  distinguish original-polygon AP, diagnostic probIoU AP and DOTA test-server AP.
+- DOTA tiled configuration belongs to `datasets/dotav1.yaml`'s versioned `eval_protocol`
+  (`dota-native-multirate-1024-500.v1`); model `post_cfg.eval_protocol` selects it and
+  inherits through existing `update:`. Keep shared loader semantics unchanged.
+  `utils/datasets/dota_tiling.py` owns native windows/crops/preparation and
+  `TILED_API_VERSION = 1`; `utils/postprocess/tiled_obb.py` owns restore/merge/export.
+  Tiled subclasses extend existing OBB postprocessors through a mixin and build_post;
+  reuse decode, per-tile NMS and box conversion. No standalone public OBB engine.
+  Keep native uint8 BGR and callback Nx7 `[cx,cy,w,h,angle,score,class0]` tile pixels,
+  pinned v8.3.228 JSON rounding before offsets, JPEG default, classwise Fast-NMS
+  probIoU >= 0.3, stable ties, conf 0.01, tile IoU 0.7 and max_det 300. Preserve
+  frozen da3ef806 Task1 fixture bytes and immutable upstream source references.
+  Merge/release candidates per completed image; run model preparation on its pool.
+  Scoring stays in evaluation; finite degenerate predictions have IoU zero while
+  ground truth remains strict. Label benchmark protocols/primary scores explicitly.
+  See the DOTA section of `mblt_vision/README.md` and thin `benchmark/dota_tiled.py`.
 - Run YOLOv7 models (`YOLOv7`, `-x`, `-w6`, `-e6`, `-d6`, `-e6e`) at `iou_thres: 0.65`, the
   value WongKinYiu/yolov7's `test.py --iou-thres` defaults to and its README reproduces every
   published COCO number with. The `iou_thres=0.6` in that script's `test()` signature is always

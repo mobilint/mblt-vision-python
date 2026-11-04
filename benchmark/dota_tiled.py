@@ -1,6 +1,8 @@
-"""Opt-in native DOTA tiled submission CLI; no change to mblt-vision val defaults."""
+"""Native DOTA tiled submission CLI over the default library protocol."""
 
 from __future__ import annotations
+
+# ruff: noqa: E402
 
 import argparse
 import importlib
@@ -14,10 +16,12 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from mblt_vision.obb.tiled import (
+from mblt_vision.utils.datasets.dota_tiling import (
     ULTRALYTICS_COMMIT,
     ULTRALYTICS_VERSION,
     TiledConfig,
+)
+from mblt_vision.utils.postprocess.tiled_obb import (
     UltralyticsTilePredictor,
     predict_tiled,
     write_task1,

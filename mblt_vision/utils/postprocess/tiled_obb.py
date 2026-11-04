@@ -1,183 +1,34 @@
-"""Opt-in DOTA native-crop inference, pinned to Ultralytics v8.3.228.
+"""Tiled OBB restore/merge helpers and thin subclasses of existing YOLO heads.
 
-See ``mblt_vision/obb/TILED.md`` for provenance, numerical differences and the
-callback contract. Import this module explicitly; ordinary predict/val is unchanged.
+Decoding, per-tile NMS and evaluation box conversion remain inherited. Only
+native tiling orchestration, restoration and cross-tile merging are added here.
+See the package README for the pinned Ultralytics source and callback contract.
 """
 
 from __future__ import annotations
 
-import itertools
-import math
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
-import cv2
 import numpy as np
 import torch
 
-from ..datasets import get_dataset_class_names
-from ..utils.letterbox import LetterBoxGeometry
-from ..utils.postprocess.common import rotated_nms, xywhr2xyxyxyxy
-from ..utils.preprocess.letterbox import _apply_letterbox
-
-TILED_API_VERSION = 1
-ULTRALYTICS_VERSION = "8.3.228"
-ULTRALYTICS_COMMIT = "f8e6fddc89ec754b3a62eab87d5221e83058005a"
-
-
-@dataclass(frozen=True)
-class TiledConfig:
-    """Native-window configuration; nominal rates change crop size, not pixels.
-
-    ``jpeg_roundtrip`` reproduces split_test's default OpenCV JPEG write/read.
-    Disable it explicitly for lossless in-memory slicing (a documented difference).
-    Filtering is applied jointly across all rates, as in the reference.
-    """
-
-    crop_size: int = 1024
-    gap: int = 500
-    rates: tuple[float, ...] = (0.5, 1.0, 1.5)
-    im_rate_thr: float = 0.6
-    eps: float = 0.01
-    jpeg_roundtrip: bool = True
-
-    def __post_init__(self) -> None:
-        if type(self.crop_size) is not int or type(self.gap) is not int:
-            raise TypeError("crop_size and gap must be integers")
-        if not 0 <= self.gap < self.crop_size:
-            raise ValueError("Require 0 <= gap < crop_size")
-        if not self.rates or any(not math.isfinite(r) or r <= 0 for r in self.rates):
-            raise ValueError("rates must be non-empty, finite and positive")
-        pairs = self.crop_pairs
-        if any(not 0 <= gap < size for size, gap in pairs):
-            raise ValueError("Each int(crop_size / rate) must exceed int(gap / rate)")
-        if len({size for size, _ in pairs}) != len(pairs):
-            raise ValueError(
-                "Rates must produce distinct crop sizes (reference filenames otherwise collide)"
-            )
-        if (
-            not 0 <= self.im_rate_thr < 1
-            or not math.isfinite(self.eps)
-            or self.eps <= 0
-        ):
-            raise ValueError("Require 0 <= im_rate_thr < 1 and finite eps > 0")
-        if type(self.jpeg_roundtrip) is not bool:
-            raise TypeError("jpeg_roundtrip must be a boolean")
-
-    @property
-    def crop_pairs(self) -> tuple[tuple[int, int], ...]:
-        """Return truncated crop/gap pairs in rate order."""
-        return tuple((int(self.crop_size / r), int(self.gap / r)) for r in self.rates)
-
-
-_DEFAULT_CONFIG = TiledConfig()
-
-
-def get_windows(
-    im_size: tuple[int, int], config: TiledConfig = _DEFAULT_CONFIG
-) -> np.ndarray:
-    """Return reference int64 ``[x1,y1,x2,y2]`` windows, x-major within each rate.
-
-    Stops can exceed a small image's extent. Python slicing, not padding, clips
-    them. The strict area comparison and near-maximum fallback are intentional.
-    """
-    if len(im_size) != 2 or any(type(v) is not int or v <= 0 for v in im_size):
-        raise ValueError("im_size must contain positive integer (height, width)")
-    h, w = im_size
-    windows = []
-    for size, gap in config.crop_pairs:
-        step = size - gap
-        xn = 1 if w <= size else math.ceil((w - size) / step + 1)
-        yn = 1 if h <= size else math.ceil((h - size) / step + 1)
-        xs, ys = [step * i for i in range(xn)], [step * i for i in range(yn)]
-        if len(xs) > 1 and xs[-1] + size > w:
-            xs[-1] = w - size
-        if len(ys) > 1 and ys[-1] + size > h:
-            ys[-1] = h - size
-        start = np.array(list(itertools.product(xs, ys)), dtype=np.int64)
-        windows.append(np.concatenate((start, start + size), axis=1))
-    result = np.concatenate(windows, axis=0)
-    clipped = result.copy()
-    clipped[:, 0::2] = np.clip(clipped[:, 0::2], 0, w)
-    clipped[:, 1::2] = np.clip(clipped[:, 1::2], 0, h)
-    area = (clipped[:, 2] - clipped[:, 0]) * (clipped[:, 3] - clipped[:, 1])
-    win_area = (result[:, 2] - result[:, 0]) * (result[:, 3] - result[:, 1])
-    rates = area / win_area
-    if not (rates > config.im_rate_thr).any():
-        rates[abs(rates - rates.max()) < config.eps] = 1
-    return result[rates > config.im_rate_thr]
-
-
-def _image_id(image_id: str) -> None:
-    if not isinstance(image_id, str) or not image_id or "__" in image_id:
-        raise ValueError("image_id must be a non-empty original stem without '__'")
-    if (
-        any(c.isspace() for c in image_id)
-        or any(c in image_id for c in "/\\")
-        or image_id in {".", ".."}
-    ):
-        raise ValueError("image_id must be a whitespace-free filename stem")
-
-
-@dataclass(frozen=True)
-class Tile:
-    """Native tile and explicit original-image metadata, without inferred filename parsing.
-
-    ``image`` is an owned, contiguous uint8 HWC BGR copy, never resized or padded.
-    ``window`` holds nominal bounds; actual dimensions may be smaller. Callbacks
-    may modify their owned image, but must not mutate the metadata.
-    """
-
-    image_id: str
-    name: str
-    rate: float
-    crop_size: int
-    gap: int
-    window: tuple[int, int, int, int]
-    image: np.ndarray
-
-
-def iter_tiles(
-    image_bgr: np.ndarray, image_id: str, config: TiledConfig = _DEFAULT_CONFIG
-) -> Iterator[Tile]:
-    """Yield native BGR crops, optionally JPEG round-tripped like split_test.
-
-    Input must be non-empty uint8 HWC BGR with three channels. It is never mutated
-    or retained by the yielded owned images. EXIF rotation is the caller's job;
-    dimensions must describe the same decoded raster that is being sliced.
-    """
-    _image_id(image_id)
-    if not isinstance(image_bgr, np.ndarray) or image_bgr.dtype != np.uint8:
-        raise TypeError("image_bgr must be a uint8 numpy array")
-    if image_bgr.ndim != 3 or image_bgr.shape[2] != 3 or min(image_bgr.shape[:2]) <= 0:
-        raise ValueError("image_bgr must be non-empty HWC BGR with three channels")
-    pairs = {
-        size: (rate, gap)
-        for rate, (size, gap) in zip(config.rates, config.crop_pairs, strict=True)
-    }
-    for coords in get_windows(tuple(image_bgr.shape[:2]), config):
-        x1, y1, x2, y2 = (int(c) for c in coords)
-        size = x2 - x1
-        rate, gap = pairs[size]
-        patch = image_bgr[y1:y2, x1:x2].copy(order="C")
-        if config.jpeg_roundtrip:
-            ok, encoded = cv2.imencode(".jpg", patch)
-            if not ok:
-                raise RuntimeError("OpenCV failed to encode native DOTA crop")
-            patch = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-            if patch is None:
-                raise RuntimeError("OpenCV failed to decode native DOTA crop")
-        yield Tile(
-            image_id,
-            f"{image_id}__{size}__{x1}___{y1}",
-            rate,
-            size,
-            gap,
-            (x1, y1, x2, y2),
-            patch,
-        )
+from ...datasets import get_dataset_class_names
+from ..datasets.dota_tiling import (
+    _DEFAULT_CONFIG,
+    ULTRALYTICS_VERSION,
+    Tile,
+    TiledConfig,
+    _image_id,
+    get_eval_protocol,
+    iter_tiles,
+    prepare_tile,
+)
+from ..letterbox import LetterBoxGeometry
+from .common import rotated_nms, xywhr2xyxyxyxy
+from .yolo_anchorless_post import YOLOAnchorlessOBBPost
+from .yolo_dflfree_post import YOLODFLFreeOBBPost
 
 
 class TilePredictor(Protocol):
@@ -213,6 +64,7 @@ def _rows(rows: np.ndarray | torch.Tensor) -> torch.Tensor:
 
 def merge_tile_predictions(
     predictions: Iterable[tuple[Tile, np.ndarray | torch.Tensor]],
+    protocol: Mapping[str, Any] | None = None,
 ) -> torch.Tensor:
     """Restore and merge one original image's tiles, returning owned CPU float32 Nx7.
 
@@ -221,6 +73,7 @@ def merge_tile_predictions(
     no rate division, polygon clipping, additional conf filter or merged max_det.
     Stable score ties follow this package's device-independent selection policy.
     """
+    merge = (get_eval_protocol() if protocol is None else protocol)["merge"]
     restored = []
     image_id = None
     for tile, rows in predictions:
@@ -245,10 +98,14 @@ def merge_tile_predictions(
     if not len(boxes):
         return boxes
     # Deliberately no clamp to 1: val.py uses exactly max(center) * 2.
-    class_offset = boxes[:, 6:7] * (torch.max(boxes[:, :2]).item() * 2)
+    class_offset = (
+        boxes[:, 6:7] * (torch.max(boxes[:, :2]).item() * 2)
+        if merge["classwise"]
+        else torch.zeros_like(boxes[:, 6:7])
+    )
     shifted = boxes[:, :5].clone()
     shifted[:, :2] += class_offset
-    return boxes[rotated_nms(shifted, boxes[:, 5], 0.3)]
+    return boxes[rotated_nms(shifted, boxes[:, 5], merge["iou_thres"])]
 
 
 def predict_tiled(
@@ -261,30 +118,6 @@ def predict_tiled(
     return merge_tile_predictions(
         (tile, predictor(tile)) for tile in iter_tiles(image_bgr, image_id, config)
     )
-
-
-def prepare_tile(
-    tile: Tile, imgsz: int = 1024
-) -> tuple[torch.Tensor, LetterBoxGeometry]:
-    """Prepare fixed-square validation input: BGR->RGB, NCHW float32 /255 on CPU.
-
-    Uses shared centered letterbox, INTER_LINEAR, pad=114 and scaleup=True.
-    Returns owned contiguous tensor and exact forward metadata for NPU adapters.
-    No inference occurs. Rectangular auto-padding and TTA are deliberately off.
-    """
-    if type(imgsz) is not int or imgsz <= 0:
-        raise ValueError("imgsz must be a positive integer")
-    geometry = LetterBoxGeometry.from_shapes(
-        (imgsz, imgsz), tuple(tile.image.shape[:2])
-    )
-    image, _ = _apply_letterbox(tile.image, [imgsz, imgsz], cv2.INTER_LINEAR, 114)
-    tensor = (
-        torch.from_numpy(np.ascontiguousarray(image[..., ::-1].transpose(2, 0, 1)))
-        .float()
-        .unsqueeze(0)
-        / 255
-    )
-    return tensor, geometry
 
 
 def restore_tile_boxes(
@@ -416,3 +249,57 @@ def write_task1(
     for name, contents in zip(names, lines, strict=True):
         (root / f"Task1_{name}.txt").write_text("".join(contents), encoding="utf-8")
     return root
+
+
+class DOTATiledOBBPostMixin:
+    """Add dataset protocol selection and tile orchestration, not another decoder.
+
+    ``__call__`` and ``nmsout2eval`` are inherited unchanged. Raw engine inference
+    and the single-tile output order therefore keep their established contract.
+    Model-level threshold overrides win over dataset inference defaults.
+    """
+
+    def __init__(
+        self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs: Any
+    ) -> None:
+        self.eval_protocol = get_eval_protocol(
+            post_cfg["dataset"], post_cfg["eval_protocol"]
+        )
+        resolved = dict(self.eval_protocol["inference"])
+        resolved.update(post_cfg)
+        self.tile_config = TiledConfig(
+            **{
+                **self.eval_protocol["tiling"],
+                "rates": tuple(self.eval_protocol["tiling"]["rates"]),
+            }
+        )
+        self.tile_max_det = resolved["max_det"]
+        super().__init__(pre_cfg, resolved, **kwargs)
+
+    def iter_tiles(
+        self, image_bgr: np.ndarray, image_id: str, config: TiledConfig | None = None
+    ) -> Iterable[Tile]:
+        """Yield dataset-native crops without changing model preprocessing."""
+        return iter_tiles(
+            image_bgr, image_id, self.tile_config if config is None else config
+        )
+
+    def merge_tiles(
+        self, predictions: Iterable[tuple[Tile, np.ndarray | torch.Tensor]]
+    ) -> torch.Tensor:
+        """Merge existing tile-pixel OBB rows under the selected dataset protocol."""
+        return merge_tile_predictions(predictions, self.eval_protocol)
+
+    def nms(self, x: Any, *args: Any, **kwargs: Any) -> list[torch.Tensor]:
+        """Reuse the head's NMS with the dataset's per-tile detection cap."""
+        if not args:
+            kwargs.setdefault("max_det", self.tile_max_det)
+        return super().nms(x, *args, **kwargs)
+
+
+class YOLOAnchorlessTiledOBBPost(DOTATiledOBBPostMixin, YOLOAnchorlessOBBPost):
+    """DOTA tiling over the existing YOLOv8/YOLO11 OBB postprocessor."""
+
+
+class YOLODFLFreeTiledOBBPost(DOTATiledOBBPostMixin, YOLODFLFreeOBBPost):
+    """DOTA tiling over the existing DFL-free OBB postprocessor."""

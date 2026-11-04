@@ -65,7 +65,7 @@ def test_engine_tile_color_and_geometry_seam(monkeypatch):
     import importlib
 
     legacy = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
-    from mblt_vision.obb.tiled import TiledConfig
+    from mblt_vision.utils.datasets.dota_tiling import TiledConfig
     from mblt_vision.utils.evaluation.eval_dota_tiled import predict_engine_tiles
 
     seen = []

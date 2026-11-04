@@ -5,6 +5,24 @@ tasks:
   - obb
 val: images
 labels: labels/val_original
+# Dataset-owned evaluation methodology, selected by model post_cfg.eval_protocol.
+eval_protocol:
+  id: dota-native-multirate-1024-500.v1
+  tiling:
+    crop_size: 1024
+    gap: 500
+    rates: [0.5, 1.0, 1.5]
+    im_rate_thr: 0.6
+    eps: 0.01
+    jpeg_roundtrip: true
+  inference:
+    conf_thres: 0.01
+    iou_thres: 0.7
+    max_det: 300
+  merge:
+    method: rotated_probiou_fastnms
+    iou_thres: 0.3
+    classwise: true
 names:
   0: plane
   1: ship

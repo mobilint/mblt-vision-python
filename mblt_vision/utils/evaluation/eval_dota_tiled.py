@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -13,20 +14,20 @@ import numpy as np
 import torch
 from PIL import Image
 
-from ...obb.tiled import (
-    Tile,
-    TiledConfig,
-    iter_tiles,
+from ..datasets import CustomDOTAv1, get_dotav1_class_num, get_dotav1_label
+from ..datasets.dota_tiling import Tile, TiledConfig, get_eval_protocol, iter_tiles
+from ..postprocess.common import xywhr2xyxyxyxy
+from ..postprocess.tiled_obb import (
+    DOTATiledOBBPostMixin,
     merge_tile_predictions,
     write_task1,
 )
-from ..datasets import CustomDOTAv1, get_dotav1_class_num, get_dotav1_label
-from ..postprocess.common import xywhr2xyxyxyxy
 from ._pipeline import map_batched_inference
 from .dota_polygon import score_original_polygons
 
 if TYPE_CHECKING:
     from ...wrapper import MBLT_Engine
+    from ..results import Results
 
 
 def predict_engine_tiles(
@@ -46,26 +47,36 @@ def predict_engine_tiles(
 
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    config = config or TiledConfig()
-    grouped: dict[str, list[tuple[Tile, torch.Tensor]]] = defaultdict(list)
+    processor = model.postprocessor
+    tiled = isinstance(processor, DOTATiledOBBPostMixin)
+    config = config or (processor.tile_config if tiled else TiledConfig())
+    predictions: dict[str, torch.Tensor] = {}
+    current: list[tuple[Tile, torch.Tensor]] = []
 
-    def batches() -> Iterator[
-        tuple[list[Tile], np.ndarray, list[tuple[int, int]], list[Any]]
-    ]:
-        pending = []
+    def batches() -> Iterator[tuple[list[Tile], str | None]]:
+        seen = set()
         for image_id, image in images:
-            grouped[image_id] = []
-            for tile in iter_tiles(image, image_id, config):
-                pending.append(tile)
+            if image_id in seen:
+                raise ValueError("Duplicate original image IDs")
+            seen.add(image_id)
+            pending: list[Tile] = []
+            tiles = (
+                processor.iter_tiles(image, image_id, config)
+                if tiled
+                else iter_tiles(image, image_id, config)
+            )
+            for tile in tiles:
+                # Hold one batch until its image boundary is known. Candidate rows
+                # for a completed image can then be merged and discarded immediately.
                 if len(pending) == batch_size:
-                    yield prepare(pending)
+                    yield pending, None
                     pending = []
-        if pending:
-            yield prepare(pending)
+                pending.append(tile)
+            if pending:
+                yield pending, image_id
 
-    def prepare(
-        tiles: list[Tile],
-    ) -> tuple[list[Tile], np.ndarray, list[tuple[int, int]], list[Any]]:
+    def prepare(batch: tuple[list[Tile], str | None]) -> Any:
+        tiles, completed = batch
         values, shapes, pads = [], [], []
         for tile in tiles:
             value, metadata = model.preprocess_with_metadata(
@@ -74,13 +85,15 @@ def predict_engine_tiles(
             values.append(value)
             shapes.append(tuple(tile.image.shape[:2]))
             pads.append(metadata.get("ratio_pad"))
-        return tiles, np.stack(values), shapes, pads
+        return tiles, np.stack(values), shapes, pads, completed
 
     def infer(batch: Any) -> Any:
         return model(batch[1])
 
-    def decode(batch: Any, raw: Any) -> list[tuple[Tile, torch.Tensor]]:
-        tiles, values, shapes, pads = batch
+    def decode(
+        batch: Any, raw: Any
+    ) -> tuple[list[tuple[Tile, torch.Tensor]], str | None]:
+        tiles, values, shapes, pads, completed = batch
         results = model.postprocess(raw)
         formatted = format_dota_results(
             results,
@@ -97,23 +110,26 @@ def predict_engine_tiles(
             )
         return [
             (
-                tile,
+                replace(tile, image=np.empty((0, 0, 3), dtype=np.uint8)),
                 torch.tensor(rows_by_name[tile.name], dtype=torch.float32).reshape(
                     -1, 7
                 ),
             )
             for tile in tiles
-        ]
+        ], completed
 
-    for decoded in map_batched_inference(batches(), infer, decode):
-        for tile, rows in decoded:
-            grouped[tile.image_id].append(
-                (replace(tile, image=np.empty((0, 0, 3), dtype=np.uint8)), rows)
+    for decoded, completed in map_batched_inference(
+        batches(), infer, decode, prepare=prepare
+    ):
+        current.extend(decoded)
+        if completed is not None:
+            predictions[completed] = (
+                processor.merge_tiles(current)
+                if tiled
+                else merge_tile_predictions(current)
             )
-    return {
-        image_id: merge_tile_predictions(predictions)
-        for image_id, predictions in grouped.items()
-    }
+            current.clear()
+    return predictions
 
 
 def eval_dota_tiled(
@@ -132,9 +148,14 @@ def eval_dota_tiled(
     from .eval_dota import DOTAResult, _load_ground_truths, evaluate_dota_predictions
 
     dataset = CustomDOTAv1(data_path)
+    defaults = get_eval_protocol()["inference"]
     model.set_postprocess_thresholds(
-        conf_thres=0.01 if conf_thres is None else conf_thres,
-        iou_thres=0.7 if iou_thres is None else iou_thres,
+        conf_thres=model.post_cfg.get("conf_thres", defaults["conf_thres"])
+        if conf_thres is None
+        else conf_thres,
+        iou_thres=model.post_cfg.get("iou_thres", defaults["iou_thres"])
+        if iou_thres is None
+        else iou_thres,
     )
 
     def images() -> Iterator[tuple[str, np.ndarray]]:
@@ -183,3 +204,42 @@ def eval_dota_tiled(
         "DOTAv1 original-image tiled polygon VOC07 evaluation completed; no test-server submission"
     )
     return DOTAResult(polygon_score["map50"], diagnostic.map5095)
+
+
+def predict_dota_image(
+    model: MBLT_Engine,
+    source: str | Path,
+    *,
+    config: TiledConfig | None = None,
+    batch_size: int = 1,
+) -> Results:
+    """Return ordinary Results in original pixels after three-scale tiled merge.
+
+    This high-level path does not change ``MBLT_Engine.__call__``: that remains
+    raw tensor inference. The source is decoded as BGR and each JPEG-native crop
+    enters the same engine preprocessing/postprocessing used for validation.
+    """
+    from ..results import Results
+
+    if (
+        model.post_cfg.get("task") != "obb"
+        or str(model.post_cfg.get("dataset", "")).lower() != "dotav1"
+    ):
+        raise ValueError("Tiled DOTA prediction requires an OBB DOTAv1 model")
+    with Image.open(source) as header:
+        if header.getexif().get(274, 1) != 1:
+            raise ValueError(
+                "DOTA tiled inference requires EXIF-normalized original images"
+            )
+    image = cv2.imread(str(source))
+    if image is None:
+        raise FileNotFoundError(source)
+    rows = predict_engine_tiles(
+        model, iter([("image", image)]), batch_size, config or TiledConfig()
+    )["image"]
+    # Results' normal OBB representation is cx,cy,w,h,score,class,angle. The
+    # prediction is already original-pixel, so plotting must use identity scale.
+    output = torch.cat((rows[:, :4], rows[:, 5:7], rows[:, 4:5]), dim=1)
+    pre_cfg = deepcopy(model.pre_cfg)
+    pre_cfg["LetterBox"] = {"img_size": list(image.shape[:2])}
+    return Results(pre_cfg, model.post_cfg, [output])

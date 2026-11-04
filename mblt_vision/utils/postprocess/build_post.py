@@ -10,6 +10,7 @@ from .cls_post import ClsPost
 from .damoyolo_post import DAMOYOLODetectionPost
 from .depth_post import DepthPost
 from .semantic_seg_post import SemanticSegPost
+from .tiled_obb import YOLOAnchorlessTiledOBBPost, YOLODFLFreeTiledOBBPost
 from .yolo_anchor_post import (
     YOLOAnchorDetectionPost,
     YOLOAnchorFaceDetectionPost,
@@ -155,6 +156,13 @@ def build_postprocess(
             **kwargs,
         )
     if task == "obb":
+        if post_cfg.get("eval_protocol") is not None:
+            post_cls = (
+                YOLODFLFreeTiledOBBPost
+                if post_cfg.get("dflfree", False)
+                else YOLOAnchorlessTiledOBBPost
+            )
+            return post_cls(pre_cfg, post_cfg, **kwargs)
         if post_cfg.get("dflfree", False):
             return YOLODFLFreeOBBPost(
                 pre_cfg,

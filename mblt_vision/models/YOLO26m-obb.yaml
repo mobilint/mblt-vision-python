@@ -17,11 +17,10 @@ DEFAULT:
   post_cfg:
     task: obb
     dataset: dotav1
+    eval_protocol: dota-native-multirate-1024-500.v1
     nl: 3
     n_extra: 1
     dflfree: true
-    conf_thres: 0.01
-    iou_thres: 0.7
 TURBO:
   update: DEFAULT
   file_cfg:

@@ -312,7 +312,7 @@ def run_vision_inference(
             and not getattr(args, "legacy_single_image", False)
             and getattr(getattr(model, "postprocessor", None), "e2e", True)
         ):
-            from ..obb.engine import predict_dota_image
+            from ..utils.evaluation.eval_dota_tiled import predict_dota_image
 
             result = predict_dota_image(model, args.source)
             save_path = resolve_output_path(

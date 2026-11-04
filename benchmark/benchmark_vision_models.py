@@ -19,6 +19,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from mblt_npu import normalize_target_device
+from mblt_vision._model_paths import resolve_framework
+from mblt_vision._tasks import VISION_TASKS, normalize_vision_task
 from mblt_vision.benchmark.argparse_utils import parse_positive_int
 from mblt_vision.benchmark.io_utils import safe_filename, write_csv, write_json
 from mblt_vision.benchmark.summary_utils import (
@@ -26,10 +29,7 @@ from mblt_vision.benchmark.summary_utils import (
     markdown_table,
     write_summary_markdown,
 )
-from mblt_vision._model_paths import resolve_framework
-from mblt_vision._tasks import VISION_TASKS, normalize_vision_task
 from mblt_vision.wrapper import core_modes_for_target_device
-from mblt_npu import normalize_target_device
 
 CoreMode = Literal["single", "multi", "global4", "global8"]
 CORE_MODES: tuple[CoreMode, ...] = cast(
@@ -168,6 +168,11 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Optional IoU threshold override.",
     )
     parser.add_argument(
+        "--legacy-single-image",
+        action="store_true",
+        help="OBB only: historical whole-image probabilistic scoring instead of tiled polygon VOC07.",
+    )
+    parser.add_argument(
         "--results-dir",
         type=Path,
         default=Path("benchmark/results"),
@@ -229,7 +234,7 @@ def _core_modes(
 
 def _evaluate(
     model: Any, args: argparse.Namespace, run_dir: Path
-) -> tuple[float, str, dict[str, float]]:
+) -> tuple[float, str, dict[str, Any]]:
     """Evaluate one model and normalize task metrics for benchmark artifacts.
 
     Args:
@@ -307,6 +312,7 @@ def _evaluate(
             },
         )
     if args.task == "obb":
+        legacy = getattr(args, "legacy_single_image", False)
         result = eval_dota(
             model,
             args.data_path,
@@ -314,13 +320,28 @@ def _evaluate(
             args.conf_thres,
             args.iou_thres,
             str(run_dir / "dota_task1"),
+            legacy_single_image=legacy,
+        )
+        score_name = (
+            "legacy_single_image_probiou_map50"
+            if legacy
+            else "original_polygon_voc07_map50"
         )
         return (
             float(result.primary_score),
-            "map50",
+            score_name,
             {
-                "map50": float(result.map50),
-                "map50_95": float(result.map5095),
+                score_name: float(result.map50),
+                "diagnostic_probiou_map50_95": float(result.map5095),
+                "eval_protocol": "dotav1-legacy-single-image-probiou.v1"
+                if legacy
+                else model.post_cfg.get(
+                    "eval_protocol", "dota-native-multirate-1024-500.v1"
+                ),
+                "score_protocol": "dotav1-legacy-probiou-interpolated.v1"
+                if legacy
+                else "dotav1-original-polygon-voc07-map50.v1",
+                "official_test_server": False,
             },
         )
     if args.task == "face_detection":

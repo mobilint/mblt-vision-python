@@ -15,13 +15,17 @@ from typing import Any
 import numpy as np
 
 
-def _vertices(values: Sequence[float]) -> np.ndarray:
+def _vertices(values: Sequence[float], *, allow_degenerate: bool = False) -> np.ndarray:
     points = np.asarray(values, dtype=np.float64).reshape(4, 2)
     if not np.isfinite(points).all():
         raise ValueError("DOTA polygon coordinates must be finite")
     edges = np.roll(points, -1, axis=0) - points
     following = np.roll(edges, -1, axis=0)
     crosses = edges[:, 0] * following[:, 1] - edges[:, 1] * following[:, 0]
+    if allow_degenerate and np.all(crosses == 0):
+        # Finite collinear/point predictions can arise from zero-width OBBs or
+        # Task1 rounding. They are false positives, not malformed ground truth.
+        return points
     if not (np.all(crosses > 0) or np.all(crosses < 0)):
         raise ValueError("DOTA polygon must be strictly convex and perimeter ordered")
     return points if crosses[0] > 0 else points[::-1]
@@ -45,9 +49,15 @@ def _area(points: np.ndarray) -> float:
 
 
 def polygon_iou(first: Sequence[float], second: Sequence[float]) -> float:
-    """Continuous float64 convex quadrilateral intersection over union."""
-    subject, clip = _vertices(first), _vertices(second)
-    total = _area(subject) + _area(clip)
+    """Continuous convex IoU; a finite zero-area prediction has overlap zero.
+
+    The second polygon is a ground-truth target and remains strictly validated.
+    """
+    subject, clip = _vertices(first, allow_degenerate=True), _vertices(second)
+    subject_area = _area(subject)
+    if subject_area == 0:
+        return 0.0
+    total = subject_area + _area(clip)
     for start, end in zip(clip, np.roll(clip, -1, axis=0), strict=True):
         if not len(subject):
             return 0.0
@@ -116,7 +126,7 @@ def score_original_polygons(
             raise ValueError("Prediction class is outside DOTA taxonomy")
         if not np.isfinite(prediction["score"]) or not 0 <= prediction["score"] <= 1:
             raise ValueError("Invalid prediction confidence")
-        _vertices(prediction["poly"])
+        _vertices(prediction["poly"], allow_degenerate=True)
     scores = []
     for class_id, name in enumerate(class_names):
         positives = sum(

@@ -56,6 +56,8 @@ def map_batched_inference(
     decode: Callable[[BatchT, OutputT], ResultT],
     prefetch_batches: int = PREFETCH_BATCHES,
     workers: int = WORKERS,
+    *,
+    prepare: Callable[[Any], BatchT] | None = None,
 ) -> Iterator[ResultT]:
     """Yield ``decode(batch, infer(batch))`` for every batch, in input order.
 
@@ -81,6 +83,8 @@ def map_batched_inference(
         decode: Turns one batch and its raw outputs into a result.
         prefetch_batches: Batches each stage may hold.
         workers: Upper bound on the threads in each pool.
+        prepare: Optional pure transformation of each fetched batch, run on the
+            preparation pool. Generic iterators still advance only on the caller.
 
     Yields:
         One decoded result per batch, in input order.
@@ -112,7 +116,10 @@ def map_batched_inference(
 
     try:
         for task in _batch_tasks(batches):
-            pending.append(prepare_pool.submit(task))
+            if prepare is None:
+                pending.append(prepare_pool.submit(task))
+            else:
+                pending.append(prepare_pool.submit(lambda task=task: prepare(task())))
             if len(pending) >= prefetch:
                 infer_oldest()
             if len(decoded) >= prefetch:

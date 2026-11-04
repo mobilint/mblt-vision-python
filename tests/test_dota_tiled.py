@@ -1,4 +1,4 @@
-"""CPU synthetic fixtures for the explicit, opt-in DOTA tiled API.
+"""CPU synthetic fixtures for the default DOTA tiled protocol.
 
 Set MBLT_DOTA_REFERENCE to the pinned source's ultralytics directory to compare
 AST-isolated official functions. No installed Ultralytics, weights or device is
@@ -22,23 +22,25 @@ import cv2
 import numpy as np
 import pytest
 import torch
-from mblt_vision.obb.tiled import (
+from mblt_vision.utils.datasets.dota_tiling import (
     TILED_API_VERSION,
     Tile,
     TiledConfig,
-    UltralyticsTilePredictor,
     get_windows,
     iter_tiles,
-    merge_tile_predictions,
-    predict_tiled,
     prepare_tile,
-    restore_tile_boxes,
-    write_task1,
 )
 from mblt_vision.utils.postprocess.common import (
     batch_probiou,
     rotated_nms,
     xywhr2xyxyxyxy,
+)
+from mblt_vision.utils.postprocess.tiled_obb import (
+    UltralyticsTilePredictor,
+    merge_tile_predictions,
+    predict_tiled,
+    restore_tile_boxes,
+    write_task1,
 )
 from PIL import Image
 
@@ -352,7 +354,10 @@ def test_rotated_geometry_not_axis_aligned_and_threshold_equality() -> None:
         ]
     )
     assert len(rotated_nms(boxes, torch.tensor([0.9, 0.8]), 0.3)) == 2
-    overlap = lambda a, b: torch.full((len(a), len(b)), 0.3)
+
+    def overlap(a, b):
+        return torch.full((len(a), len(b)), 0.3)
+
     assert rotated_nms(boxes, torch.tensor([0.9, 0.8]), 0.3, overlap).tolist() == [0]
 
 
@@ -418,8 +423,12 @@ def test_merge_matches_official_randomized_and_task1(tmp_path) -> None:
     ours = write_task1(
         {"P0001": actual}, tmp_path / "ours", ["plane", "ship", "large vehicle"]
     )
+    frozen = json.loads(
+        (Path(__file__).parent / "fixtures/dota_tiled_da3ef806_task1.json").read_text()
+    )
     for file in (official_dir / "predictions_merged_txt").glob("*.txt"):
-        assert (ours / file.name).read_text() == file.read_text()
+        assert (ours / file.name).read_bytes() == file.read_bytes()
+        assert file.read_bytes() == frozen["task1"][file.name].encode()
     b1 = torch.tensor(rng.normal(size=(9, 5)), dtype=torch.float32)
     b1[:, 2:4].abs_()
     torch.testing.assert_close(
