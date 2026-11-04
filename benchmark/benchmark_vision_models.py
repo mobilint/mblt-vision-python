@@ -35,7 +35,8 @@ CoreMode = Literal["single", "multi", "global4", "global8"]
 CORE_MODES: tuple[CoreMode, ...] = cast(
     tuple[CoreMode, ...], core_modes_for_target_device("aries-rb")
 )
-TASK_CHOICES = VISION_TASKS
+# Utility-only embedding tasks have no benchmark engine/CLI route yet.
+TASK_CHOICES = tuple(task for task in VISION_TASKS if task != "person_reid")
 SUPPORTED_TARGET_DEVICES = frozenset({"aries-rb", "regulus-ra", "regulus-rb"})
 
 

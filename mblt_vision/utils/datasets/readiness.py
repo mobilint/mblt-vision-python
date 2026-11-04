@@ -20,6 +20,7 @@ from scipy.io.matlab import MatReadError
 from ..._tasks import normalize_vision_task
 from ...datasets import get_dataset_category_ids
 from .cityscapes import CITYSCAPES_SOURCE_TO_TRAIN_ID
+from .reid import DukeMTMCReIDDataset, Market1501Dataset, OccludedDukeDataset
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 IMAGENET_CLASS_COUNT = 1000
@@ -1044,6 +1045,29 @@ def dense_dataset_ready(data_path: str | Path, dataset: str) -> bool:
     return False
 
 
+def _reid_ready(root: Path, dataset: str) -> bool:
+    """Require source counts, camera/name metadata and decodable query/gallery crops."""
+    loader = {
+        "market1501": Market1501Dataset,
+        "dukemtmc-reid": DukeMTMCReIDDataset,
+        "occluded-duke": OccludedDukeDataset,
+    }.get(dataset)
+    if loader is None or _path_has_symlink_component(root):
+        return False
+    try:
+        samples = loader(root).samples
+        for sample in samples:
+            if not sample.image.is_file() or _path_has_symlink_component(sample.image):
+                return False
+            with Image.open(sample.image) as image:
+                image.load()
+                if min(image.size) <= 0:
+                    return False
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) -> bool:
     """Return whether an organized dataset matches its task, taxonomy, and full validation split.
 
@@ -1069,6 +1093,8 @@ def dataset_ready(data_path: str | Path, task: str, dataset: str | None = None) 
     }.get(normalized_task)
     normalized_dataset = (dataset or expected_dataset or "").lower()
 
+    if normalized_task == "person_reid":
+        return _reid_ready(root, normalized_dataset or "market1501")
     if normalized_task == "semantic_segmentation":
         return dense_dataset_ready(root, normalized_dataset or "ade20k")
     if expected_dataset is None or normalized_dataset != expected_dataset:

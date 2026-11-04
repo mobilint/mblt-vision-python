@@ -73,6 +73,7 @@ class Results:
         self.task = normalize_vision_task(post_cfg["task"])
         self.conf_thres = kwargs.get("conf_thres", 0.25)
         self.acc: torch.Tensor | np.ndarray | None = None
+        self.embeddings: torch.Tensor | np.ndarray | None = None
         self.box_cls: torch.Tensor | np.ndarray | None = None
         self.mask: torch.Tensor | np.ndarray | None = None
         self.depth: torch.Tensor | np.ndarray | list[TensorLike] | None = None
@@ -142,11 +143,35 @@ class Results:
             NotImplementedError: If the task is not supported.
         """
         self.acc = None
+        self.embeddings = None
         self.box_cls = None
         self.mask = None
         self.depth = None
         self.semantic_mask = None
-        if self.task == "image_classification":
+        if self.task == "person_reid":
+            if not isinstance(output, (np.ndarray, torch.Tensor)):
+                raise TypeError("Person ReID results require an embedding matrix")
+            finite = (
+                torch.isfinite(output).all()
+                if isinstance(output, torch.Tensor)
+                else np.isfinite(output).all()
+            )
+            floating = (
+                output.is_floating_point()
+                if isinstance(output, torch.Tensor)
+                else np.issubdtype(output.dtype, np.floating)
+            )
+            if (
+                output.ndim != 2
+                or min(output.shape) <= 0
+                or not floating
+                or not bool(finite)
+            ):
+                raise ValueError(
+                    "Person ReID results require a finite floating-point (N,D) matrix"
+                )
+            self.embeddings = output
+        elif self.task == "image_classification":
             if not isinstance(output, (np.ndarray, torch.Tensor)):
                 raise TypeError(
                     f"Expected tensor output for task {self.task}, got {type(output).__name__}."

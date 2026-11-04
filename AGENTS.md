@@ -183,6 +183,12 @@ The current ownership boundary is deliberate:
   any future model needing more than one Hub artifact, rather than duplicating Hub-resolution
   logic.
 
+- ReID utilities live in `mblt_vision.person_reid`; concrete published wrappers are separate.
+  Use `EmbeddingPost` for validated dense vectors and `PersonReIDPost` for dataset binding.
+  Retrieval protocols and prepared loaders are pinned to ops source in dataset YAMLs; keep
+  stable distance ties, camera exclusions, junk rules, and preprocessing numeric parity tested.
+  Named Normalize styles retain legacy arithmetic; explicit mean/std uses source float32 arithmetic.
+
 ## Python-First Architecture
 
 - Keep the public layer independent from a particular backend. Define small internal interfaces

@@ -13,6 +13,7 @@ from . import image_classification as image_classification
 from . import instance_segmentation as instance_segmentation
 from . import obb as obb
 from . import object_detection as object_detection
+from . import person_reid as person_reid
 from . import pose_estimation as pose_estimation
 from . import semantic_segmentation as semantic_segmentation
 from ._api import list_models as list_models
@@ -52,6 +53,7 @@ _PUBLIC_EXPORTS = [
     "object_detection",
     "obb",
     "pose_estimation",
+    "person_reid",
     "semantic_segmentation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)
 # Keep legacy compatibility exports synchronized with their task packages.
