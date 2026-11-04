@@ -1,0 +1,27 @@
+{
+  "version": "8.3.228",
+  "commit": "f8e6fddc89ec754b3a62eab87d5221e83058005a",
+  "source_sha256": {
+    "data/split_dota.py": "429f6f181da5cdbe5f40eae936ea4a73c28df6e96a668728f5de2045cc7b2599",
+    "utils/ops.py": "c4bf1b77ff1cd32e8c2ecfc106a0b0060bc39a175f17a240bde281da460793e4",
+    "utils/metrics.py": "31357c807b4c10a5abf172ac9118e4ebfa12ed0c83e66ca1450dfd78cf727cba",
+    "utils/nms.py": "cefd6b3b3305e9653c29d938d55ccd7f51f510cb7fbd91dc6c315b8379a7376a",
+    "models/yolo/obb/val.py": "e17fd5998d8be62d1cf865c00a09d25dc08fca13ee47275069b2f5380d5fd661"
+  },
+  "config": {"crop_size": 1024, "gap": 500, "rates": [0.5, 1.0, 1.5]},
+  "crop_pairs": [[2048, 1000], [1024, 500], [682, 333]],
+  "windows": [
+    {"shape": [1, 1], "expected": [[0, 0, 2048, 2048], [0, 0, 1024, 1024], [0, 0, 682, 682]]},
+    {"shape": [1024, 1024], "expected": [[0, 0, 1024, 1024], [0, 0, 682, 682], [0, 342, 682, 1024], [342, 0, 1024, 682], [342, 342, 1024, 1024]]}
+  ],
+  "offset_restore": {
+    "tile_name": "P0001__682__1048___349",
+    "native_row": [12.34567, 23.45678, 8.76543, 4.12345, 0.12345, 0.987654, 0],
+    "expected_original_row": [1060.346, 372.457, 8.765, 4.123, 0.123, 0.98765, 0]
+  },
+  "task1": {
+    "merged_row": [10, 20, 4, 2, 0, 0.98765, 0],
+    "class": "plane",
+    "line": "P0001 0.988 12.0 21.0 12.0 19.0 8.0 19.0 8.0 21.0\n"
+  }
+}

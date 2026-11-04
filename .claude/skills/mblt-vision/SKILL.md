@@ -102,8 +102,17 @@ description: >-
   together.
 - Rank NYU Depth evaluation by delta1. Expose abs_rel then RMSE (m) as
   secondary metrics, with median-aligned metrics averaged per image.
-- Rank DOTAv1 evaluation by rotated mAP50, with mAP50-95 secondary (Ultralytics' published
-  metric). Load difficult objects as ordinary targets, as Ultralytics' validation does.
+- DOTAv1 OBB CLI prediction and evaluation default to native multi-scale tiling.
+  Primary map50 is original-polygon VOC07 AP with difficult objects ignored;
+  map5095 remains a diagnostic probIoU field. Explicit legacy_single_image retains
+  historical whole-image probIoU evaluation with difficult-as-ordinary targets.
+- Keep the separate `mblt_vision.obb.tiled` API (`TILED_API_VERSION = 1`) explicit:
+  native uint8 BGR tiles; callback Nx7 `[cx,cy,w,h,angle,score,class0]` already
+  inverse-letterboxed to tile pixels. Preserve pinned v8.3.228 windows, default
+  JPEG roundtrip, Python JSON rounding before offset-only restoration, class-offset
+  Fast-NMS probIoU >= 0.3 and stable score ties. Do not divide by nominal rate.
+  See `mblt_vision/obb/TILED.md` and `benchmark/dota_tiled.py`; original-polygon AP,
+  diagnostic probIoU AP and official DOTA test-server AP are distinct results.
 - Run YOLOv7 models at `iou_thres: 0.65`, WongKinYiu/yolov7's own `test.py` default.
 
 ## Runtime and Packaging

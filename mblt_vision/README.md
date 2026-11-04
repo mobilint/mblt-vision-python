@@ -60,6 +60,16 @@ and `list_models()` are the preferred discovery and loading APIs for new code.
 Top-level model imports remain available for compatibility. `obb` is the sole
 oriented-bounding-box task name.
 
+### Explicit DOTA multiscale tiles
+
+`mblt_vision.obb.tiled` provides a separate backend-swappable native-crop API,
+`UltralyticsTilePredictor` optional CPU reference adapter, and merged DOTA Task1
+export. See the [tiled OBB guide](obb/TILED.md) for the pinned source, callback
+Nx7 contract, JPEG parity, geometry and scoring distinctions. DOTA OBB prediction
+and validation now default to native multi-scale tiling; `--legacy-single-image`
+retains the historical path. Raw engine tensor inference is unchanged. The standalone
+`benchmark/dota_tiled.py` development CLI exposes the same backend-swappable seam.
+
 ## Pre-Trained Vision Models
 
 This section lists the publicly pre-trained models supported by the vision framework.
@@ -448,10 +458,13 @@ validation split, following Ultralytics' depth-validation convention.
 <details>
 <summary>OBB (DOTA v1.0)</summary>
 
-- $\underset{\texttt{50}}{\texttt{mAP}_{\texttt{val}}^{\texttt{obb}}}$ is the primary metric
-  for single-model single-scale validation on the
-  [DOTA v1.0](https://docs.ultralytics.com/datasets/obb/dota-v2#) dataset, the metric Ultralytics
-  publishes for its OBB models. Validation also reports rotated mAP50-95 as the secondary metric.
-- Difficult objects count as ordinary targets, as in Ultralytics' validation.
+- Historical table values above are whole-image, single-scale probabilistic-IoU
+  validation results; they have not been remeasured with the new tiled pipeline.
+- Default validation now reports merged original-image **polygon VOC07 mAP50**, with
+  nonzero difficult flags ignored. The compatible `map5095` field is a separately
+  labeled probabilistic diagnostic. Neither is an official DOTA test-server score.
+- `--legacy-single-image` keeps the prior whole-image probabilistic metric and
+  difficult-as-ordinary target policy. Metric-definition changes alone are not
+  evidence of improved model accuracy.
 
 </details>

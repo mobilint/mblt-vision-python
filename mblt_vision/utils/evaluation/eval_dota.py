@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import torch
+from tqdm import tqdm
+
 from mblt_vision.utils.postprocess.common import (
     batch_probiou,
     rotated_nms,
     xywhr2xyxyxyxy,
     xyxyxyxy2xywhr,
 )
-from tqdm import tqdm
 
 from ..._tasks import normalize_vision_task
 from ..datasets import (
@@ -49,14 +50,19 @@ DOTAV1_CLASS_TO_IDX = {
 
 
 class DOTAResult(NamedTuple):
-    """DOTAv1 rotated detection metrics in the legacy tuple order."""
+    """DOTAv1 metrics in compatible tuple order.
+
+    Default eval_dota: map50 is original-polygon VOC07 AP; map5095 is a
+    probabilistic diagnostic. Explicit legacy/evaluate_dota_predictions APIs
+    retain historical probabilistic map50 and map5095 semantics.
+    """
 
     map50: float
     map5095: float
 
     @property
     def primary_score(self) -> float:
-        """Return rotated mAP50, the metric Ultralytics publishes for its DOTAv1 models."""
+        """Return this API's primary AP50; consult its labeled scoring protocol."""
         return self.map50
 
     @property
@@ -837,8 +843,13 @@ def eval_dota(
     conf_thres: float | None = None,
     iou_thres: float | None = None,
     save_dir: str | None = None,
+    *,
+    legacy_single_image: bool = False,
 ) -> DOTAResult:
-    """Evaluate a model on DOTAv1 validation.
+    """Evaluate DOTA with native multi-scale tiles and original-polygon AP50.
+
+    ``legacy_single_image=True`` explicitly retains the prior whole-image,
+    probabilistic-IoU protocol for comparisons with historical records.
 
     Args:
         model: Model engine to evaluate.
@@ -860,6 +871,13 @@ def eval_dota(
         raise ValueError(
             "DOTAv1 evaluation requires model post_cfg.dataset to be 'dotav1', "
             f"got {dataset_name!r}."
+        )
+
+    if not legacy_single_image:
+        from .eval_dota_tiled import eval_dota_tiled
+
+        return eval_dota_tiled(
+            model, data_path, batch_size, conf_thres, iou_thres, save_dir
         )
 
     dataset = CustomDOTAv1(data_path)

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+
 from mblt_vision._tasks import normalize_vision_task
 
 DEFAULT_OUTPUT_DIR = Path("runs") / "vision"
@@ -57,6 +58,11 @@ def add_common_vision_args(parser: argparse.ArgumentParser) -> None:
     """Adds arguments shared by all vision inference commands."""
 
     parser.add_argument("--source", required=True, help="Path to the source image.")
+    parser.add_argument(
+        "--legacy-single-image",
+        action="store_true",
+        help="DOTA OBB only: retain the historical whole-image path instead of multi-scale tiling.",
+    )
     parser.add_argument(
         "--model",
         required=True,
@@ -299,6 +305,22 @@ def run_vision_inference(
             model.set_postprocess_thresholds(
                 conf_thres=args.conf_thres, iou_thres=args.iou_thres
             )
+
+        if (
+            actual_task == "obb"
+            and str(model.post_cfg.get("dataset", "")).lower() == "dotav1"
+            and not getattr(args, "legacy_single_image", False)
+            and getattr(getattr(model, "postprocessor", None), "e2e", True)
+        ):
+            from ..obb.engine import predict_dota_image
+
+            result = predict_dota_image(model, args.source)
+            save_path = resolve_output_path(
+                args.output, command, args.source, args.model
+            )
+            result.plot(source_path=args.source, save_path=save_path, **plot_kwargs)
+            print(f"Saved tiled DOTA result to {os.path.relpath(save_path)}")
+            return result
 
         postprocess_kwargs: dict[str, Any] = {}
         if actual_task == "semantic_segmentation":

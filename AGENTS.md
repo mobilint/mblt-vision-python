@@ -163,11 +163,18 @@ The current ownership boundary is deliberate:
 - For NYU Depth evaluation, rank results by delta1 and retain abs_rel then
   RMSE (m) as secondary metrics. Median-align each image and average every
   metric per image, following Ultralytics' depth-validation convention.
-- For DOTAv1 evaluation, rank results by rotated mAP50 and retain mAP50-95 as the secondary
-  metric, because rotated mAP50 is what Ultralytics publishes for its OBB models. Load difficult
-  objects (flag `1` or `2`) as ordinary targets, as Ultralytics' validation does: its
-  `convert_dota_to_yolo_obb` drops the flag. `evaluate_dota_predictions` still honours ignore
-  regions a caller supplies explicitly (the DOTA devkit protocol), but the loader produces none.
+- DOTAv1 OBB CLI prediction and evaluation default to multi-scale native tiles;
+  primary `map50` is merged original-polygon VOC07 AP with difficult targets ignored.
+  `map5095` is a legacy probabilistic diagnostic only, not an official DOTA score.
+  Explicit `legacy_single_image=True` retains historical whole-image evaluation;
+  its loader treats flags 1/2 as ordinary targets. Keep the two protocols labeled.
+- The explicit `mblt_vision.obb.tiled` API (`TILED_API_VERSION = 1`) takes native uint8
+  BGR crops and callback Nx7 `[cx,cy,w,h,angle,score,class0]` rows already restored
+  to tile pixels. Keep the pinned Ultralytics v8.3.228 window/JSON rounding/offset-only
+  merge semantics, JPEG roundtrip default, Fast-NMS probIoU >= 0.3, and stable tie policy.
+  Do not substitute the legacy Task1 writer as an exact merge oracle. The separate
+  `benchmark/dota_tiled.py` CLI and `mblt_vision/obb/TILED.md` document the methodology;
+  distinguish original-polygon AP, diagnostic probIoU AP and DOTA test-server AP.
 - Run YOLOv7 models (`YOLOv7`, `-x`, `-w6`, `-e6`, `-d6`, `-e6e`) at `iou_thres: 0.65`, the
   value WongKinYiu/yolov7's `test.py --iou-thres` defaults to and its README reproduces every
   published COCO number with. The `iou_thres=0.6` in that script's `test()` signature is always
