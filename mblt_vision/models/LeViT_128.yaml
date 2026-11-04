@@ -1,0 +1,12 @@
+# Approval HF commit: not recorded. Do not substitute upstream source-model commits.
+# Preprocessing: mblt-model-ops models/image_classification/LeViT_128/_source/predict_float.input.json
+DEFAULT:
+  extends: bases/imagenet_classifier.yaml
+  file_cfg:
+    repo_id: mobilint/LeViT_128
+    filename: levit_128.mxq
+    revision: main
+  pre_cfg:
+    Resize:
+      interpolation: bicubic
+      size: 248

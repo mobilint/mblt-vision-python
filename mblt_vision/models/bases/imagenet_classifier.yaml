@@ -1,0 +1,19 @@
+# Shared ordered ImageNet preprocessing; model-specific values follow recorded ops inputs.
+DEFAULT:
+  pre_cfg:
+    Reader:
+      style: pil
+    Resize:
+      size: 224
+      interpolation: bicubic
+    CenterCrop:
+      size:
+      - 224
+      - 224
+    SetOrder:
+      shape: HWC
+    Normalize:
+      style: torch
+  post_cfg:
+    task: image_classification
+    dataset: imagenet
