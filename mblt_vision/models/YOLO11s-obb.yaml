@@ -17,7 +17,7 @@ DEFAULT:
   post_cfg:
     task: obb
     dataset: dotav1
-    eval_protocol: dota-native-multirate-1024-500.v1
+    tiled: true
     nl: 3
     n_extra: 1
     reg_max: 16

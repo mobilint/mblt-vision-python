@@ -20,7 +20,7 @@ from ..datasets.dota_tiling import (
     _iter_tile_windows,
     _materialize_tile,
     _TileWindow,
-    get_eval_protocol,
+    get_dota_settings,
     prepare_tile_image,
     validate_image_source,
 )
@@ -176,7 +176,7 @@ def eval_dota_tiled(
     from .eval_dota import DOTAResult, _load_ground_truths, evaluate_dota_predictions
 
     dataset = CustomDOTAv1(data_path)
-    defaults = get_eval_protocol()["inference"]
+    defaults = get_dota_settings(overrides=model.post_cfg)["inference"]
     model.set_postprocess_thresholds(
         conf_thres=model.post_cfg.get("conf_thres", defaults["conf_thres"])
         if conf_thres is None

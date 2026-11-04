@@ -23,7 +23,7 @@ from ..datasets.dota_tiling import (
     TiledConfig,
     _image_id,
     _validate_merge_max_candidates,
-    get_eval_protocol,
+    get_dota_settings,
     iter_tiles,
     prepare_tile,
     validate_preprocessing,
@@ -67,7 +67,7 @@ def _rows(rows: np.ndarray | torch.Tensor) -> torch.Tensor:
 
 def merge_tile_predictions(
     predictions: Iterable[tuple[Tile, np.ndarray | torch.Tensor]],
-    protocol: Mapping[str, Any] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> torch.Tensor:
     """Restore and merge one original image's tiles, returning owned CPU float32 Nx7.
 
@@ -76,9 +76,9 @@ def merge_tile_predictions(
     no rate division, polygon clipping, additional conf filter or merged max_det.
     Stable score ties follow this package's device-independent selection policy.
     Over-budget candidate streams raise before NMS rather than silently truncating;
-    explicit trusted-input overrides belong to protocol.merge.max_candidates.
+    explicit trusted-input overrides belong to settings.merge.max_candidates.
     """
-    merge = (get_eval_protocol() if protocol is None else protocol)["merge"]
+    merge = (get_dota_settings() if settings is None else settings)["merge"]
     max_candidates = _validate_merge_max_candidates(merge.get("max_candidates"))
     restored = []
     image_id = None
@@ -133,12 +133,12 @@ def predict_tiled(
     predictor: TilePredictor,
     config: TiledConfig = _DEFAULT_CONFIG,
     *,
-    protocol: Mapping[str, Any] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> torch.Tensor:
-    """Stream crops and merge one image, optionally using a trusted protocol override."""
+    """Stream crops and merge one image, optionally using a trusted settings override."""
     return merge_tile_predictions(
         ((tile, predictor(tile)) for tile in iter_tiles(image_bgr, image_id, config)),
-        protocol,
+        settings,
     )
 
 
@@ -282,7 +282,7 @@ def write_task1(
 
 
 class DOTATiledOBBPostMixin:
-    """Add dataset protocol selection and tile orchestration, not another decoder.
+    """Add dataset settings selection and tile orchestration, not another decoder.
 
     ``__call__`` and ``nmsout2eval`` are inherited unchanged. Raw engine inference
     and the single-tile output order therefore keep their established contract.
@@ -292,15 +292,13 @@ class DOTATiledOBBPostMixin:
     def __init__(
         self, pre_cfg: dict[str, Any], post_cfg: dict[str, Any], **kwargs: Any
     ) -> None:
-        self.eval_protocol = get_eval_protocol(
-            post_cfg["dataset"], post_cfg["eval_protocol"]
-        )
-        resolved = dict(self.eval_protocol["inference"])
+        self.tiled_settings = get_dota_settings(post_cfg["dataset"], post_cfg)
+        resolved = dict(self.tiled_settings["inference"])
         resolved.update(post_cfg)
         self.tile_config = TiledConfig(
             **{
-                **self.eval_protocol["tiling"],
-                "rates": tuple(self.eval_protocol["tiling"]["rates"]),
+                **self.tiled_settings["tiling"],
+                "rates": tuple(self.tiled_settings["tiling"]["rates"]),
             }
         )
         self.tile_preprocessing = validate_preprocessing(resolved["preprocessing"])
@@ -318,8 +316,8 @@ class DOTATiledOBBPostMixin:
     def merge_tiles(
         self, predictions: Iterable[tuple[Tile, np.ndarray | torch.Tensor]]
     ) -> torch.Tensor:
-        """Merge existing tile-pixel OBB rows under the selected dataset protocol."""
-        return merge_tile_predictions(predictions, self.eval_protocol)
+        """Merge existing tile-pixel OBB rows under the selected dataset settings."""
+        return merge_tile_predictions(predictions, self.tiled_settings)
 
     def nms(self, x: Any, *args: Any, **kwargs: Any) -> list[torch.Tensor]:
         """Reuse the head's NMS with the dataset's per-tile detection cap."""

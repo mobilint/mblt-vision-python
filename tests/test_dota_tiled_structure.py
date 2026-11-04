@@ -1,4 +1,4 @@
-"""Dataset protocol/inheritance regressions and frozen pre-refactor Task1 bytes."""
+"""Dataset settings/inheritance regressions and frozen pre-refactor Task1 bytes."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 from mblt_vision.datasets import get_dataset_config
-from mblt_vision.utils.datasets.dota_tiling import Tile, TiledConfig, get_eval_protocol
+from mblt_vision.utils.datasets.dota_tiling import Tile, TiledConfig, get_dota_settings
 from mblt_vision.utils.evaluation.dota_polygon import (
     polygon_iou,
     score_original_polygons,
@@ -52,8 +52,6 @@ def frozen_predictions():
 
 def test_frozen_da3ef806_task1_bytes(tmp_path):
     fixture, predictions = frozen_predictions()
-    assert fixture["vision_commit"] == "da3ef806c613eb101d9d53e2c53767df07cb16d6"
-    assert fixture["reference_commit"] == "f8e6fddc89ec754b3a62eab87d5221e83058005a"
     output = write_task1(
         {"P0001": merge_tile_predictions(predictions)}, tmp_path, fixture["classes"]
     )
@@ -62,20 +60,21 @@ def test_frozen_da3ef806_task1_bytes(tmp_path):
     }
 
 
-def test_dataset_protocol_defaults_and_selector_validation():
-    protocol = get_dataset_config("dotav1")["eval_protocol"]
-    assert get_eval_protocol(selector=protocol["id"]) == protocol
+def test_dataset_yaml_settings_defaults_and_owned_mapping():
+    settings = get_dota_settings()
+    dataset = get_dataset_config("dotav1")
+    assert settings == {key: dataset[key] for key in ("tiling", "inference", "merge")}
     assert TiledConfig() == TiledConfig(
-        **{**protocol["tiling"], "rates": tuple(protocol["tiling"]["rates"])}
+        **{**settings["tiling"], "rates": tuple(settings["tiling"]["rates"])}
     )
-    assert protocol["inference"] == {
+    assert settings["inference"] == {
         "preprocessing": "ultralytics-val",
         "conf_thres": 0.01,
         "iou_thres": 0.7,
         "max_det": 300,
     }
-    with pytest.raises(ValueError, match="Unsupported eval_protocol"):
-        get_eval_protocol(selector="not-a-supported-version.v2")
+    settings["merge"]["iou_thres"] = 0.8
+    assert get_dota_settings()["merge"]["iou_thres"] == 0.3
 
 
 @pytest.mark.parametrize(
@@ -87,12 +86,12 @@ def test_dataset_protocol_defaults_and_selector_validation():
     ],
 )
 @pytest.mark.parametrize("variant", ["DEFAULT", "TURBO"])
-def test_existing_update_inherits_protocol_and_reuses_decode(
+def test_existing_update_inherits_settings_and_reuses_decode(
     family, cls, base, variant
 ):
     config = resolve_model_config(family, variant)
     post = config["post_cfg"]
-    assert post["eval_protocol"] == get_eval_protocol()["id"]
+    assert post["tiled"] is True
     assert "conf_thres" not in post and "iou_thres" not in post
     processor = build_postprocess(config["pre_cfg"], post)
     assert isinstance(processor, cls) and isinstance(processor, DOTATiledOBBPostMixin)
@@ -102,7 +101,7 @@ def test_existing_update_inherits_protocol_and_reuses_decode(
     assert processor.conf_thres == 0.01 and processor.iou_thres == 0.7
     assert processor.tile_max_det == 300
     assert processor.tile_preprocessing == "ultralytics-val"
-    legacy_post = {k: v for k, v in post.items() if k != "eval_protocol"}
+    legacy_post = {**post, "tiled": False}
     legacy = build_postprocess(config["pre_cfg"], legacy_post)
     rows = torch.zeros((1, 4 + processor.nc + processor.n_extra))
     rows[0, :5] = torch.tensor([100, 100, 10, 5, 0.9])
@@ -111,11 +110,11 @@ def test_existing_update_inherits_protocol_and_reuses_decode(
     torch.testing.assert_close(processor.nms([rows])[0], legacy.nms([rows])[0])
 
 
-def test_all_obb_model_selectors_and_model_override():
+def test_all_obb_models_enable_tiling_and_model_override():
     models = Path(__file__).parents[1] / "mblt_vision/models"
     for path in models.glob("*-obb.yaml"):
         config = resolve_model_config(path.stem, "TURBO")
-        assert config["post_cfg"]["eval_protocol"] == get_eval_protocol()["id"]
+        assert config["post_cfg"]["tiled"] is True
     config = resolve_model_config("YOLOv8n-obb", "DEFAULT")
     config["post_cfg"].update(conf_thres=0.2, iou_thres=0.4, max_det=1)
     processor = build_postprocess(config["pre_cfg"], config["post_cfg"])
@@ -132,7 +131,77 @@ def test_all_obb_model_selectors_and_model_override():
     assert len(processor.nms([rows])[0]) == 1
 
 
-def test_merge_uses_explicit_protocol_settings():
+@pytest.mark.parametrize("family", ["YOLOv8n-obb", "YOLO26n-obb"])
+def test_plain_yaml_nested_hyperparameters_override_dataset_defaults(tmp_path, family):
+    import yaml
+
+    base = resolve_model_config(family, "DEFAULT")
+    path = tmp_path / "settings-obb.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "DEFAULT": {
+                    **base,
+                    "post_cfg": {
+                        **base["post_cfg"],
+                        "tiling": {
+                            "crop_size": 64,
+                            "gap": 16,
+                            "rates": [1.0],
+                            "max_tiles": 12,
+                        },
+                        "inference": {
+                            "conf_thres": 0.2,
+                            "iou_thres": 0.4,
+                            "max_det": 7,
+                        },
+                        "merge": {"iou_thres": 0.5, "max_candidates": 40},
+                    },
+                },
+                "TURBO": {
+                    "update": "DEFAULT",
+                    "post_cfg": {"inference": {"max_det": 3}},
+                },
+            }
+        )
+    )
+    config = resolve_model_config(str(path), "DEFAULT")
+    processor = build_postprocess(config["pre_cfg"], config["post_cfg"])
+    assert processor.tile_config.crop_pairs == ((64, 16),)
+    assert processor.tile_config.max_tiles == 12
+    assert processor.tile_config.jpeg_roundtrip is True
+    assert (processor.conf_thres, processor.iou_thres, processor.tile_max_det) == (
+        0.2,
+        0.4,
+        7,
+    )
+    assert processor.tiled_settings["merge"]["iou_thres"] == 0.5
+    assert processor.tiled_settings["merge"]["max_candidates"] == 40
+    inherited = resolve_model_config(str(path), "TURBO")
+    child = build_postprocess(inherited["pre_cfg"], inherited["post_cfg"])
+    # Existing loader remains shallow: the child replaces inference's whole map,
+    # then ordinary missing hyperparameters come from the dataset's YAML defaults.
+    assert (child.conf_thres, child.iou_thres, child.tile_max_det) == (0.01, 0.7, 3)
+    assert child.tile_config == processor.tile_config
+    flat = get_dota_settings(
+        overrides={"inference": {"conf_thres": 0.2}, "conf_thres": 0.4}
+    )
+    assert flat["inference"]["conf_thres"] == 0.4
+
+
+def test_dotav1_obb_defaults_to_tiled_without_selector():
+    config = resolve_model_config("YOLOv8n-obb", "DEFAULT")
+    config["post_cfg"].pop("tiled")
+    assert isinstance(
+        build_postprocess(config["pre_cfg"], config["post_cfg"]), DOTATiledOBBPostMixin
+    )
+    config["post_cfg"]["tiled"] = False
+    assert not isinstance(
+        build_postprocess(config["pre_cfg"], config["post_cfg"]), DOTATiledOBBPostMixin
+    )
+
+
+def test_merge_uses_explicit_yaml_settings():
     _, predictions = frozen_predictions()
     tile = predictions[0][0]
     rows = torch.tensor(
@@ -142,11 +211,11 @@ def test_merge_uses_explicit_protocol_settings():
         ]
     )
     assert len(merge_tile_predictions([(tile, rows)])) == 2
-    protocol = get_eval_protocol()
-    protocol["merge"]["classwise"] = False
-    assert len(merge_tile_predictions([(tile, rows)], protocol)) == 1
-    protocol["merge"]["iou_thres"] = 1.0
-    assert len(merge_tile_predictions([(tile, rows)], protocol)) == 2
+    settings = get_dota_settings()
+    settings["merge"]["classwise"] = False
+    assert len(merge_tile_predictions([(tile, rows)], settings)) == 1
+    settings["merge"]["iou_thres"] = 1.0
+    assert len(merge_tile_predictions([(tile, rows)], settings)) == 2
 
 
 @pytest.mark.parametrize(

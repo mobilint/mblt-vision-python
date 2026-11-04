@@ -311,11 +311,11 @@ def run_vision_inference(
             confidence = args.conf_thres
             if confidence is None:
                 if tiled_dota:
-                    from ..utils.datasets.dota_tiling import get_eval_protocol
+                    from ..utils.datasets.dota_tiling import get_dota_settings
 
-                    confidence = model.post_cfg.get(
-                        "conf_thres", get_eval_protocol()["inference"]["conf_thres"]
-                    )
+                    confidence = get_dota_settings(overrides=model.post_cfg)[
+                        "inference"
+                    ]["conf_thres"]
                 else:
                     confidence = 0.25  # Preserve historical non-tiled prediction.
             model.set_postprocess_thresholds(

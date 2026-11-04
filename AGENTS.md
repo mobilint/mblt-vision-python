@@ -172,17 +172,18 @@ The current ownership boundary is deliberate:
   `map5095` is a legacy probabilistic diagnostic only, not an official DOTA score.
   Explicit `legacy_single_image=True` retains historical whole-image evaluation;
   its loader treats flags 1/2 as ordinary targets. Keep the two protocols labeled.
-- DOTA tiled configuration belongs to `datasets/dotav1.yaml`'s versioned `eval_protocol`
-  (`dota-native-multirate-1024-500.v1`); model `post_cfg.eval_protocol` selects it and
-  inherits through existing `update:`. Keep shared loader semantics unchanged.
-  `utils/datasets/dota_tiling.py` owns native windows/crops/preparation and
-  `TILED_API_VERSION = 1`; `utils/postprocess/tiled_obb.py` owns restore/merge/export.
+- DOTA tiled hyperparameters are plain tiling/inference/merge mappings in
+  datasets/dotav1.yaml, with model post_cfg overrides and existing update inheritance.
+  Simplified per maintainer: YAML hyperparameters instead of protocol IDs.
+  get_dota_settings returns owned settings; no API marker or source-hash gate.
+  Keep shared loader semantics unchanged. utils/datasets/dota_tiling.py owns
+  native windows/crops/preparation; utils/postprocess/tiled_obb.py owns restore/merge/export.
   Tiled subclasses extend existing OBB postprocessors through a mixin and build_post;
   reuse decode, per-tile NMS and box conversion. No standalone public OBB engine.
   Keep native uint8 BGR and callback Nx7 `[cx,cy,w,h,angle,score,class0]` tile pixels,
   pinned v8.3.228 JSON rounding before offsets, JPEG default, classwise Fast-NMS
   probIoU >= 0.3, stable ties, conf 0.01, tile IoU 0.7 and max_det 300. Preserve
-  frozen da3ef806 Task1 fixture bytes and immutable upstream source references.
+  frozen da3ef806 Task1 fixture bytes and upstream reproduction references.
   Dataset inference.preprocessing defaults to ultralytics-val: long-side ceil
   resize then scaleup-disabled centered letterbox. Preserve upstream ratio_pad's
   height/width metadata and restore all xywh using its first (height) gain;
@@ -198,8 +199,8 @@ The current ownership boundary is deliberate:
   Official merged Fast-NMS has no cap: merge.max_candidates defaults to null,
   unlike upstream's per-tile max_nms. Services must opt into a positive-integer
   guard (e.g. 30000) plus external concurrency/time/memory limits; fail closed on
-  excess before quadratic NMS, never truncate/top-k. Pass an owned protocol mapping
-  through predict_tiled's optional keyword-only protocol argument; accepted results
+  excess before quadratic NMS, never truncate/top-k. Pass owned settings
+  through predict_tiled's optional keyword-only settings argument; accepted results
   stay numerical-identical. Do not describe the uncapped benchmark as upload-safe.
   Explicitly pass multi_label=True through inherited tiled postprocessing.
   Merge/release candidates per completed image; enumerate lightweight windows on

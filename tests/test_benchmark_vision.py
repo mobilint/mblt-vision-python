@@ -160,8 +160,8 @@ def test_benchmark_accepts_obb_model_task(
     assert metrics == {
         "original_polygon_voc07_map50": 0.7,
         "diagnostic_probiou_map50_95": 0.5,
-        "eval_protocol": "dota-native-multirate-1024-500.v1",
-        "score_protocol": "dotav1-original-polygon-voc07-map50.v1",
+        "evaluation": "native_multirate_tiled",
+        "scoring": "original_polygon_voc07_ap50",
         "official_test_server": False,
     }
     args.legacy_single_image = True
@@ -169,8 +169,8 @@ def test_benchmark_accepts_obb_model_task(
         FakeModel(), args, tmp_path
     )
     assert (score, score_name) == (0.7, "legacy_single_image_probiou_map50")
-    assert metrics["eval_protocol"] == "dotav1-legacy-single-image-probiou.v1"
-    assert metrics["score_protocol"] == "dotav1-legacy-probiou-interpolated.v1"
+    assert metrics["evaluation"] == "legacy_single_image_probiou"
+    assert metrics["scoring"] == "legacy_probiou_interpolated"
     assert "map50" not in metrics and "map50_95" not in metrics
 
 

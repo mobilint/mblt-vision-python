@@ -1,6 +1,6 @@
 """Dataset-owned DOTA native windows/crops and reference input preparation.
 
-The versioned protocol lives in datasets/dotav1.yaml. See the package README's
+Hyperparameters live directly in datasets/dotav1.yaml. See the package README's
 DOTA multiscale native tiles section for immutable source references.
 """
 
@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import itertools
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,37 +23,41 @@ from ...datasets import get_dataset_config
 from ..letterbox import LetterBoxGeometry, RatioPad
 from ..preprocess.letterbox import _apply_letterbox
 
-TILED_API_VERSION = 1
 ULTRALYTICS_VERSION = "8.3.228"
 ULTRALYTICS_COMMIT = "f8e6fddc89ec754b3a62eab87d5221e83058005a"
 
 
-def get_eval_protocol(
-    dataset: str = "dotav1", selector: str | None = None
+def get_dota_settings(
+    dataset: str = "dotav1", overrides: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Resolve the dataset-owned protocol and reject unsupported selectors/methods.
+    """Read owned tiling/inference/merge YAML settings, with optional model overrides.
 
-    Returns an owned mapping; model YAMLs select its versioned id rather than
-    duplicating geometry, inference defaults or merge settings.
+    Each section is a simple mapping. Nested overrides merge by key; established
+    flat inference keys (conf_thres/iou_thres/max_det/preprocessing) win when given.
+    No protocol ID, version marker or source hash is required.
     """
-    protocol = get_dataset_config(dataset).get("eval_protocol")
-    if not isinstance(protocol, dict) or not isinstance(protocol.get("id"), str):
-        raise ValueError(f"Dataset {dataset!r} does not define an eval_protocol")
-    if selector is not None and selector != protocol["id"]:
-        raise ValueError(
-            f"Unsupported eval_protocol {selector!r} for dataset {dataset!r}"
-        )
+    source = get_dataset_config(dataset)
+    settings = {}
     for section in ("tiling", "inference", "merge"):
-        if not isinstance(protocol.get(section), dict):
-            raise ValueError(f"eval_protocol requires a {section} mapping")
+        value = source.get(section)
+        if not isinstance(value, Mapping):
+            raise ValueError(f"DOTA settings require a {section} mapping")
+        settings[section] = deepcopy(dict(value))
+        if overrides is not None and section in overrides:
+            update = overrides[section]
+            if not isinstance(update, Mapping):
+                raise ValueError(f"DOTA {section} overrides must be a mapping")
+            settings[section].update(deepcopy(dict(update)))
+    if overrides is not None:
+        for key in ("conf_thres", "iou_thres", "max_det", "preprocessing"):
+            if key in overrides:
+                settings["inference"][key] = deepcopy(overrides[key])
     for name in ("max_pixels", "max_tiles"):
-        value = protocol["tiling"].get(name)
+        value = settings["tiling"].get(name)
         if type(value) is not int or value <= 0:
             raise ValueError(f"DOTA tiling requires a positive integer {name}")
-    merge = protocol["merge"]
+    merge = settings["merge"]
     _validate_merge_max_candidates(merge.get("max_candidates"))
-    if merge.get("method") != "rotated_probiou_fastnms":
-        raise ValueError("DOTA tiled merge requires rotated_probiou_fastnms")
     if (
         not isinstance(merge.get("classwise"), bool)
         or not 0 < merge.get("iou_thres", 0) <= 1
@@ -60,7 +65,7 @@ def get_eval_protocol(
         raise ValueError(
             "DOTA merge requires boolean classwise and iou_thres in (0, 1]"
         )
-    inference = protocol["inference"]
+    inference = settings["inference"]
     if (
         not 0 <= inference.get("conf_thres", -1) <= 1
         or not 0 < inference.get("iou_thres", 0) <= 1
@@ -71,7 +76,7 @@ def get_eval_protocol(
             "DOTA inference requires valid conf_thres, iou_thres and max_det"
         )
     validate_preprocessing(inference.get("preprocessing"))
-    return protocol
+    return settings
 
 
 def _validate_merge_max_candidates(value: Any) -> int | None:
@@ -90,9 +95,9 @@ def validate_preprocessing(preprocessing: str) -> str:
     return preprocessing
 
 
-_PROTOCOL = get_eval_protocol()
-_TILING = _PROTOCOL["tiling"]
-_DEFAULT_PREPROCESSING = _PROTOCOL["inference"]["preprocessing"]
+_SETTINGS = get_dota_settings()
+_TILING = _SETTINGS["tiling"]
+_DEFAULT_PREPROCESSING = _SETTINGS["inference"]["preprocessing"]
 
 
 @dataclass(frozen=True)

@@ -333,14 +333,12 @@ def _evaluate(
             {
                 score_name: float(result.map50),
                 "diagnostic_probiou_map50_95": float(result.map5095),
-                "eval_protocol": "dotav1-legacy-single-image-probiou.v1"
+                "evaluation": "legacy_single_image_probiou"
                 if legacy
-                else model.post_cfg.get(
-                    "eval_protocol", "dota-native-multirate-1024-500.v1"
-                ),
-                "score_protocol": "dotav1-legacy-probiou-interpolated.v1"
+                else "native_multirate_tiled",
+                "scoring": "legacy_probiou_interpolated"
                 if legacy
-                else "dotav1-original-polygon-voc07-map50.v1",
+                else "original_polygon_voc07_ap50",
                 "official_test_server": False,
             },
         )

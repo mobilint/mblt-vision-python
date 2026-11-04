@@ -156,7 +156,7 @@ def build_postprocess(
             **kwargs,
         )
     if task == "obb":
-        if post_cfg.get("eval_protocol") is not None:
+        if post_cfg.get("tiled", str(post_cfg.get("dataset", "")).lower() == "dotav1"):
             post_cls = (
                 YOLODFLFreeTiledOBBPost
                 if post_cfg.get("dflfree", False)

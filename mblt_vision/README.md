@@ -62,14 +62,13 @@ oriented-bounding-box task name.
 
 ## DOTA multiscale native tiles
 
-The dataset-owned tiled protocol and development CLI
+The dataset-owned tiled hyperparameters and development CLI
 `benchmark/dota_tiled.py` reproduce the native-window and merged-export protocol
 of **Ultralytics v8.3.228**, commit
 `f8e6fddc89ec754b3a62eab87d5221e83058005a`. The DOTA OBB `predict` CLI and `eval_dota` now use this tiled pipeline by default;
 model constructors, preprocessing configuration shapes, and raw `MBLT_Engine.__call__`
 remain compatible. `--legacy-single-image` (or `eval_dota(...,
 legacy_single_image=True)`) retains the historical whole-image path explicitly.
-`TILED_API_VERSION = 1` identifies the backend-neutral callback contract.
 
 This implementation has synthetic, CPU-only differential tests. It is not a
 claim of reproducing published DOTA accuracy or improving measured mAP. Such a
@@ -80,14 +79,38 @@ alone does not establish which version produced a published table.
 
 ### Configuration and inherited postprocessors
 
-`datasets/dotav1.yaml` owns the versioned `eval_protocol` block with id
-`dota-native-multirate-1024-500.v1`. Its `tiling` mapping defines native crop
-geometry and JPEG policy; `inference` defines `conf_thres: 0.01`,
-`iou_thres: 0.7`, `max_det: 300`; `merge` selects classwise
-`rotated_probiou_fastnms` with `iou_thres: 0.3`. Model `post_cfg.eval_protocol`
-selects this id. The existing `TURBO: {update: DEFAULT}` inheritance carries the
-selector; model mappings contain only genuine deviations from dataset defaults.
-The shared model loader and its shallow section-merge behavior are unchanged.
+`datasets/dotav1.yaml` owns plain `tiling`, `inference` and `merge` mappings.
+**Simplified per maintainer: YAML hyperparameters instead of protocol IDs.**
+No identifier, API marker or source hash is required. `tiling` defines crop geometry,
+JPEG policy and input budgets; `inference` defines preprocessing, confidence 0.01,
+per-tile IoU 0.7 and max_det 300; `merge` defines classwise rotated-probIoU Fast-NMS
+at IoU 0.3 and an optional candidate budget. DOTAv1 OBB defaults to tiled dispatch;
+model `post_cfg.tiled: true` makes that choice explicit (`false` selects the base
+postprocessor). The existing `update: DEFAULT` inheritance is unchanged.
+
+Models can override only the hyperparameters that differ:
+
+```yaml
+post_cfg:
+  task: obb
+  dataset: dotav1
+  tiled: true
+  tiling:
+    rates: [1.0]
+  inference:
+    conf_thres: 0.02
+  merge:
+    iou_thres: 0.3
+    max_candidates: null
+```
+
+`get_dota_settings(dataset="dotav1", overrides=None)` returns owned mappings with
+nested model settings over dataset defaults. Established flat `post_cfg.conf_thres`,
+`iou_thres`, `max_det` and `preprocessing` overrides take precedence. The shared
+model loader still performs its existing shallow section merge; a child replacing
+an entire nested mapping inherits missing values from dataset defaults, not a new
+recursive loader rule. Explicit `--legacy-single-image` / `legacy_single_image=True`
+continues to select whole-image prediction/evaluation.
 
 `build_postprocess` selects `YOLOAnchorlessTiledOBBPost` or
 `YOLODFLFreeTiledOBBPost`. Their `DOTATiledOBBPostMixin` extends the existing OBB
@@ -103,7 +126,7 @@ Explicit model thresholds and CLI threshold overrides remain supported. With no
 non-tiled prediction (including `--legacy-single-image`) retains 0.25.
 
 Windows, crops, `TiledConfig`, `Tile`, `prepare_tile`, version constants and
-`get_eval_protocol` live in `utils/datasets/dota_tiling.py`; restore/merge,
+`get_dota_settings` live in `utils/datasets/dota_tiling.py`; restore/merge,
 Task1 export and optional reference adapter live in `utils/postprocess/tiled_obb.py`.
 There is no standalone public OBB engine. Completed images are merged before
 retaining the next image's candidate rows. The consuming thread only enumerates
@@ -215,17 +238,17 @@ Fast-NMS work remains quadratic even though its intermediate matrices are bounde
 Services can opt into a fail-closed positive-integer merge budget, for example:
 
 ```python
-from mblt_vision.utils.datasets.dota_tiling import get_eval_protocol
+from mblt_vision.utils.datasets.dota_tiling import get_dota_settings
 
-service_protocol = get_eval_protocol()  # owned mapping, no shared mutation
-service_protocol["merge"]["max_candidates"] = 30000
-rows = predict_tiled(image, "P0001", predictor, protocol=service_protocol)
+service_settings = get_dota_settings()  # owned mapping, no shared mutation
+service_settings["merge"]["max_candidates"] = 30000
+rows = predict_tiled(image, "P0001", predictor, settings=service_settings)
 ```
 
 The guard counts all candidates across tiles before merge NMS; exceeding it raises
 `ValueError` and aborts, never silently truncates/top-k filters or returns partial
-predictions. Accepted inputs preserve numerical merge behavior. The same mapping
-can be passed to `merge_tile_predictions(..., service_protocol)`. A positive budget
+predictions. Accepted inputs preserve numerical merge behavior. The same settings mapping
+can be passed to `merge_tile_predictions(..., service_settings)`. A positive budget
 is a service policy, not an upstream accuracy cap or a promise of cheap execution;
 choose it with workload measurements and enforce external limits as well.
 These are resource guards, not an upload sandbox: services still need process,
@@ -256,7 +279,7 @@ then apply centered `LetterBox(scaleup=False)`, INTER_LINEAR and pad 114. It ret
 contiguous RGB NCHW float32 `/255` on CPU and `LetterBoxGeometry` metadata.
 `prepare_tile_image` exposes the same prepared square as uint8 HWC BGR so the engine
 can retain its existing normalization/layout pipeline without resizing again.
-Dataset `eval_protocol.inference.preprocessing` selects the default; a genuine
+Dataset `inference.preprocessing` selects the default; a genuine
 model deviation may set `post_cfg.preprocessing`. The engine bridge and optional
 reference adapter use the same methodology. Square model inputs are required.
 
@@ -401,7 +424,7 @@ at least 1. It should not be substituted as the exact pinned merge oracle.
   the byte-preserving config/utils restructure at `22a6ccf`. It changes rectangular
   inputs and restored predictions relative to historical `direct-letterbox`.
   A synthetic 7x31 input at imgsz64 yields validation height15 versus direct
-  height14, with different pixels and ratio metadata. Source-hashed tests in
+  height14, with different pixels and ratio metadata. Optional reference tests in
   `test_dota_validation_preprocess_reference.py` execute pinned loader, transform,
   and OBB `scale_preds` definitions; they require exact prepared tensor/metadata
   parity and matching restored rows through both adapter and engine boundaries,
@@ -428,8 +451,8 @@ at least 1. It should not be substituted as the exact pinned merge oracle.
   clearly rather than reproducing upstream's ambiguous overwrites/parsing.
 - `write_task1` replaces outputs and emits empty classes; upstream appends and
   creates only encountered classes. Detection row content matches apart from
-  the documented tie policy. The optional package version guard does not prove
-  the installed wheel's contents/hash match the pinned Git commit.
+  the documented tie policy. The optional reference adapter checks its known
+  Ultralytics version; general Vision usage does not require source hashes.
 - Ordinary unit tests validate geometry, serialization and synthetic boundaries,
   without checkpoints. A separate bounded CPU comparison at `5287133` used a
   SHA-256-recorded local YOLO11n-obb checkpoint, two original images (P0402/P2085),
@@ -472,7 +495,7 @@ compared byte-for-byte both to this frozen result and to pinned upstream
 `OBBValidator.eval_json`; no accuracy measurement is implied.
 
 Benchmark outputs label the default primary score `original_polygon_voc07_map50`
-and retain `diagnostic_probiou_map50_95`, `eval_protocol`, `score_protocol` and
+and retain `diagnostic_probiou_map50_95`, `evaluation`, `scoring` and
 `official_test_server: false`. `--legacy-single-image` labels its primary score
 `legacy_single_image_probiou_map50`; these scores are not interchangeable.
 Finite zero-width/height or rounded-collinear prediction polygons have IoU zero

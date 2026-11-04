@@ -1,4 +1,4 @@
-"""Native DOTA tiled submission CLI over the default library protocol."""
+"""Native DOTA tiled submission CLI over the default YAML hyperparameters."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from mblt_vision.utils.datasets.dota_tiling import (
     ULTRALYTICS_COMMIT,
     ULTRALYTICS_VERSION,
     TiledConfig,
-    get_eval_protocol,
+    get_dota_settings,
     validate_image_source,
 )
 from mblt_vision.utils.postprocess.tiled_obb import (
@@ -83,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--preprocessing",
         choices=("ultralytics-val", "direct-letterbox"),
-        default=get_eval_protocol()["inference"]["preprocessing"],
+        default=get_dota_settings()["inference"]["preprocessing"],
         help="Ultralytics adapter input methodology; direct-letterbox is historical",
     )
     parser.add_argument("--max-pixels", type=int, default=TiledConfig().max_pixels)
@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             0.01,
             0.7,
             300,
-        ) or args.preprocessing != get_eval_protocol()["inference"]["preprocessing"]:
+        ) or args.preprocessing != get_dota_settings()["inference"]["preprocessing"]:
             parser.error(
                 "Adapter flags apply only to --weights; configure custom callbacks in the factory"
             )

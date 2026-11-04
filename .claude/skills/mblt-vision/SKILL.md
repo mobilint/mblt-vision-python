@@ -109,11 +109,12 @@ description: >-
   Primary map50 is original-polygon VOC07 AP with difficult objects ignored;
   map5095 remains a diagnostic probIoU field. Explicit legacy_single_image retains
   historical whole-image probIoU evaluation with difficult-as-ordinary targets.
-- Dataset `eval_protocol` owns the DOTA tiled methodology, id
-  `dota-native-multirate-1024-500.v1`; model `post_cfg.eval_protocol` selects it
-  through existing `update:` inheritance. Do not alter shared loader merge semantics.
-  Native windows/crops/preparation and `TILED_API_VERSION = 1` live in
-  `utils/datasets/dota_tiling.py`; restore/merge/Task1 export/reference adapter live
+- DOTA uses plain dataset YAML tiling/inference/merge hyperparameters and model
+  post_cfg overrides through existing update inheritance. Simplified per maintainer:
+  YAML hyperparameters instead of protocol IDs. get_dota_settings returns owned
+  mappings; no API marker or source-hash gate. Keep shared loader semantics unchanged.
+  Native windows/crops/preparation live in utils/datasets/dota_tiling.py;
+  restore/merge/Task1 export/reference adapter live
   in `utils/postprocess/tiled_obb.py`. Thin tiled mixin subclasses reuse existing
   OBB decode, per-tile NMS and box conversion via build_post. No standalone engine.
   Preserve BGR native tiles, Nx7 tile-pixel callback rows, pinned JSON rounding
@@ -131,8 +132,8 @@ description: >-
   headers before decoding, and recheck array dimensions. Higher trusted-input
   limits must be explicit; application process/time/memory limits remain necessary.
   Official merging is uncapped: merge.max_candidates defaults to null. Services
-  opt into a positive-integer guard (e.g. 30000) via an owned protocol mapping
-  (predict_tiled accepts keyword-only protocol), rejecting excess before quadratic
+  opt into a positive-integer guard (e.g. 30000) via owned settings
+  (predict_tiled accepts keyword-only settings), rejecting excess before quadratic
   NMS, never truncate/top-k. This is not upstream's per-tile max_nms; uncapped
   benchmarks are not upload-safe and services still need external limits.
   Explicitly pass multi_label=True through inherited tiled postprocessing.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import math
 import os
 from copy import deepcopy
@@ -20,14 +19,6 @@ from mblt_vision.utils.postprocess.tiled_obb import (
     restore_tile_boxes,
 )
 
-HASHES = {
-    "data/base.py": "dac2668755540afc637ddbc401095d2bd3cb56cc3ea43563732a3c8022e56eea",
-    "data/dataset.py": "2f941882273f0757b5cdf7e0440e65a8a0dde4f42e30383a3d955df914d403b1",
-    "data/augment.py": "db2c9e2880014ea8087fbfeca54a8647ce3a91ac38d130e5965dfa098cfc6354",
-    "utils/ops.py": "c4bf1b77ff1cd32e8c2ecfc106a0b0060bc39a175f17a240bde281da460793e4",
-    "models/yolo/obb/val.py": "e17fd5998d8be62d1cf865c00a09d25dc08fca13ee47275069b2f5380d5fd661",
-}
-
 
 def _definition(relative, class_name, method=None, namespace=None):
     root = os.environ.get("MBLT_DOTA_REFERENCE")
@@ -36,7 +27,6 @@ def _definition(relative, class_name, method=None, namespace=None):
     path = Path(root) / relative
     if not path.is_file():
         pytest.skip(f"Optional pinned preprocessing reference absent: {relative}")
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == HASHES[relative]
     source = ast.parse(path.read_text(), filename=str(path))
     node = next(
         n
