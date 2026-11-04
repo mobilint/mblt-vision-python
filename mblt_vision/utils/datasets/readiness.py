@@ -1052,12 +1052,12 @@ def _reid_ready(root: Path, dataset: str) -> bool:
         "dukemtmc-reid": DukeMTMCReIDDataset,
         "occluded-duke": OccludedDukeDataset,
     }.get(dataset)
-    if loader is None:
+    if loader is None or _path_has_symlink_component(root):
         return False
     try:
         samples = loader(root).samples
         for sample in samples:
-            if not sample.image.is_file() or sample.image.is_symlink():
+            if not sample.image.is_file() or _path_has_symlink_component(sample.image):
                 return False
             with Image.open(sample.image) as image:
                 image.load()
