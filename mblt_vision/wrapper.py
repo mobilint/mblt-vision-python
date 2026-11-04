@@ -739,6 +739,11 @@ class MBLT_Engine:
             )
 
         if onnx_filename and framework == "onnx" and not self.file_cfg.get("onnx_path"):
+            if self.file_cfg.get("onnx_local_artifact_only"):
+                raise RuntimeError(
+                    f"'{repo_id}' publishes MXQ artifacts only. ONNX requires a trusted local "
+                    "model_path or onnx_path; automatic ONNX downloads are disabled."
+                )
             self.file_cfg["onnx_path"] = self._download_hub_artifact(
                 repo_id=repo_id,
                 filename=onnx_filename,

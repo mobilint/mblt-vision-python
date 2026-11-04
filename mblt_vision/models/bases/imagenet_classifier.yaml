@@ -1,5 +1,7 @@
 # Shared ordered ImageNet preprocessing; model-specific values follow recorded ops inputs.
 DEFAULT:
+  file_cfg:
+    onnx_local_artifact_only: true
   pre_cfg:
     Reader:
       style: pil

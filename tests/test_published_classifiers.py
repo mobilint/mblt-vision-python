@@ -70,6 +70,7 @@ def test_configs_match_recorded_ops_inputs_and_discover(model: str) -> None:
     assert config["post_cfg"] == {"task": "image_classification", "dataset": "imagenet"}
     assert config["file_cfg"]["repo_id"] == f"mobilint/{model}"
     assert config["file_cfg"]["revision"] == "main"
+    assert config["file_cfg"]["onnx_local_artifact_only"] is True
     assert (
         model in mblt_vision.list_models("image_classification")["image_classification"]
     )

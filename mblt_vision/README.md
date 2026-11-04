@@ -118,6 +118,11 @@ All 24 additions retain the existing `revision: main` convention because their
 historical approved artifact HF commits are not recorded; current Hub tips and
 upstream source-model commits are not substituted as approval pins. This is a
 configuration/CPU processing parity addition, not a new inference accuracy claim.
+All 24 Hub repositories expose MXQ only, with no published ONNX file. Their base
+sets `file_cfg.onnx_local_artifact_only: true`: MXQ Hub loading remains enabled,
+but ONNX requires a trusted local `model_path` or `onnx_path`. Automatic ONNX
+loading fails with a specific message, and metadata verification skips only that
+framework. Existing configurations without this marker retain their behavior.
 
 | Model | Input Size<br>(H,W,C) | Acc<sup>Top1</sup><br>(NPU) | Acc<sup>Top1</sup><br>(GPU) | FLOPs (B) | params (M) | Source | Note |
 | --- | --- | --- | --- | --- | --- | --- | --- |

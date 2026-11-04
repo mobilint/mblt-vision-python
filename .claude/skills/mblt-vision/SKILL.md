@@ -30,7 +30,9 @@ description: >-
 - Every post_cfg declares dataset; resolve output taxonomy from the dataset/task pair.
 - Additional published EfficientViT/LeViT/ViT classifiers use `bases/imagenet_classifier.yaml`.
   Preserve the recorded ops transforms checked by `tests/test_published_classifiers.py`,
-  including the TF-normalized `ViT_Large_Patch14_CLIP_224` exception.
+  including the TF-normalized `ViT_Large_Patch14_CLIP_224` exception. Their MXQ-only
+  repositories use `onnx_local_artifact_only: true`: require trusted local ONNX and
+  retain automatic MXQ loading; metadata validation skips only the marked framework.
 - For Hub linkage changes, run `tests/test_hub_validation.py` as described in `tests/TEST.md`.
   The metadata checker follows runtime board paths without downloading weights; live commits
   are diagnostics, not substitutes for missing historical approval provenance.
