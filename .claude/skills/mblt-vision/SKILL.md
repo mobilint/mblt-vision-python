@@ -130,7 +130,14 @@ description: >-
   budgets. Count pre-filter windows before array/JPEG/inference work, check file
   headers before decoding, and recheck array dimensions. Higher trusted-input
   limits must be explicit; application process/time/memory limits remain necessary.
-  Merge/release candidates per completed image; prepare on its pool.
+  Official merging is uncapped: merge.max_candidates defaults to null. Services
+  opt into a positive-integer guard (e.g. 30000) via an owned protocol mapping
+  (predict_tiled accepts keyword-only protocol), rejecting excess before quadratic
+  NMS, never truncate/top-k. This is not upstream's per-tile max_nms; uncapped
+  benchmarks are not upload-safe and services still need external limits.
+  Explicitly pass multi_label=True through inherited tiled postprocessing.
+  Merge/release candidates per completed image; enumerate lightweight windows on
+  the caller, copy/JPEG crops and prepare models on the bounded preparation pool.
   Keep scoring in evaluation, degenerate predictions as IoU-zero false positives,
   strict ground truth, and protocol-specific benchmark score names. Source refs and
   complete methodology are in the DOTA section of `mblt_vision/README.md`.

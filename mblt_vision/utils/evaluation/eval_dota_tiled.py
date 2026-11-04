@@ -17,8 +17,10 @@ from ..datasets import CustomDOTAv1, get_dotav1_class_num, get_dotav1_label
 from ..datasets.dota_tiling import (
     Tile,
     TiledConfig,
+    _iter_tile_windows,
+    _materialize_tile,
+    _TileWindow,
     get_eval_protocol,
-    iter_tiles,
     prepare_tile_image,
     validate_image_source,
 )
@@ -47,7 +49,9 @@ def predict_engine_tiles(
     Returns original-pixel Nx7 [cx,cy,w,h,radians,score,class0] rows. Engine
     preprocessing accepts RGB arrays; cropping/JPEG match OpenCV split_test.
     Batching and inverse geometry use each tile's own metadata. Only inference
-    enters the backend thread; decoding uses the bounded evaluation pipeline.
+    enters the backend thread; crop copying/JPEG and model preparation use the
+    bounded preparation pool, with decoding on a separate pool. Producers must
+    not mutate yielded source arrays while their preparation is in flight.
     """
     from .eval_dota import format_dota_results
 
@@ -59,30 +63,30 @@ def predict_engine_tiles(
     predictions: dict[str, torch.Tensor] = {}
     current: list[tuple[Tile, torch.Tensor]] = []
 
-    def batches() -> Iterator[tuple[list[Tile], str | None]]:
+    def batches() -> Iterator[tuple[np.ndarray, list[_TileWindow], str | None]]:
         seen = set()
         for image_id, image in images:
             if image_id in seen:
                 raise ValueError("Duplicate original image IDs")
             seen.add(image_id)
-            pending: list[Tile] = []
-            tiles = (
-                processor.iter_tiles(image, image_id, config)
-                if tiled
-                else iter_tiles(image, image_id, config)
-            )
-            for tile in tiles:
+            pending: list[_TileWindow] = []
+            # Advancing the iterator only validates/enumerates small descriptors.
+            # Source references live only as long as the bounded pipeline batches.
+            for window in _iter_tile_windows(image, image_id, config):
                 # Hold one batch until its image boundary is known. Candidate rows
                 # for a completed image can then be merged and discarded immediately.
                 if len(pending) == batch_size:
-                    yield pending, None
+                    yield image, pending, None
                     pending = []
-                pending.append(tile)
+                pending.append(window)
             if pending:
-                yield pending, image_id
+                yield image, pending, image_id
 
-    def prepare(batch: tuple[list[Tile], str | None]) -> Any:
-        tiles, completed = batch
+    def prepare(
+        batch: tuple[np.ndarray, list[_TileWindow], str | None],
+    ) -> Any:
+        source, windows, completed = batch
+        tiles = [_materialize_tile(source, window, config) for window in windows]
         values, shapes, pads = [], [], []
         for tile in tiles:
             image = tile.image
@@ -118,7 +122,7 @@ def predict_engine_tiles(
         batch: Any, raw: Any
     ) -> tuple[list[tuple[Tile, torch.Tensor]], str | None]:
         tiles, values, shapes, pads, completed = batch
-        results = model.postprocess(raw)
+        results = model.postprocess(raw, multi_label=True)
         formatted = format_dota_results(
             results,
             tuple(values.shape[1:-1]),

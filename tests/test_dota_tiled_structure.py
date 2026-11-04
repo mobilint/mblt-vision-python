@@ -188,7 +188,8 @@ def test_engine_prepares_on_pool_and_merges_per_completed_image(monkeypatch):
             inferred.append(current_thread().name)
             return values
 
-        def postprocess(self, raw):
+        def postprocess(self, raw, *, multi_label):
+            assert multi_label is True
             return SimpleNamespace()
 
     def format_rows(results, shape, shapes, pads, ids, processor):
@@ -229,3 +230,142 @@ def test_engine_prepares_on_pool_and_merges_per_completed_image(monkeypatch):
     assert merged == list(result) and counts == [1] * 20
     assert all(name.startswith("mblt-vision-prepare") for name in prepared)
     assert set(inferred) == {current_thread().name}
+
+
+@pytest.mark.parametrize("family", ["YOLOv8n-obb", "YOLO26n-obb"])
+def test_engine_explicit_multilabel_keeps_secondary_class_through_inherited_post(
+    family,
+):
+    from mblt_vision.utils.evaluation.eval_dota_tiled import predict_engine_tiles
+    from mblt_vision.utils.preprocess.build_pre import build_preprocess
+    from mblt_vision.wrapper import MBLT_Engine
+
+    config = resolve_model_config(family, "DEFAULT")
+    config["pre_cfg"]["LetterBox"]["img_size"] = [32, 32]
+    processor = build_postprocess(config["pre_cfg"], config["post_cfg"])
+    preprocessor = build_preprocess(config["pre_cfg"])
+    forwarded = []
+
+    class Engine:
+        pre_cfg = config["pre_cfg"]
+        post_cfg = config["post_cfg"]
+        postprocessor = processor
+
+        def preprocess_with_metadata(self, rgb):
+            return preprocessor.with_metadata(rgb)
+
+        def __call__(self, values):
+            # One converted anchor, not already-final Nx7 rows: both families
+            # run their inherited conversion, candidate filtering and rotated NMS.
+            raw = torch.zeros((len(values), 4 + processor.nc + processor.n_extra, 1))
+            raw[:, :4, 0] = torch.tensor([16.0, 16.0, 8.0, 4.0])
+            raw[:, 4:6, 0] = torch.tensor([0.9, 0.8])
+            raw[:, -1, 0] = 0.2
+            return raw
+
+        def postprocess(self, raw, *, multi_label):
+            forwarded.append(multi_label)
+            assert multi_label is True
+            return MBLT_Engine.postprocess(self, raw, multi_label=multi_label)
+
+    rows = predict_engine_tiles(
+        Engine(),
+        iter([("P", np.zeros((32, 32, 3), np.uint8))]),
+        config=TiledConfig(crop_size=32, gap=0, rates=(1.0,), jpeg_roundtrip=False),
+    )["P"]
+    assert forwarded == [True]
+    assert rows[:, 6].tolist() == [0.0, 1.0]
+    torch.testing.assert_close(rows[:, 5], torch.tensor([0.9, 0.8]))
+    torch.testing.assert_close(rows[:, :5], torch.tensor([[16, 16, 8, 4, 0.2]] * 2))
+
+
+@pytest.mark.parametrize("jpeg_roundtrip", [False, True])
+def test_engine_crop_copy_and_jpeg_run_on_bounded_prepare_pool(
+    monkeypatch, jpeg_roundtrip
+):
+    import importlib
+
+    import cv2
+    from mblt_vision.utils.datasets.dota_tiling import iter_tiles
+    from mblt_vision.utils.evaluation.eval_dota_tiled import predict_engine_tiles
+
+    bridge = importlib.import_module("mblt_vision.utils.evaluation.eval_dota_tiled")
+    legacy = importlib.import_module("mblt_vision.utils.evaluation.eval_dota")
+    config = TiledConfig(
+        crop_size=8, gap=2, rates=(1.0,), jpeg_roundtrip=jpeg_roundtrip
+    )
+    image = np.random.default_rng(0).integers(0, 256, (13, 19, 3), dtype=np.uint8)
+    original = image.copy()
+    expected = list(iter_tiles(image, "P", config))
+    copies, materialized, codecs, inferred, decoded, enumerated = [], [], [], [], [], []
+
+    class TrackedImage(np.ndarray):
+        def copy(self, *args, **kwargs):
+            copies.append(current_thread().name)
+            return super().copy(*args, **kwargs)
+
+    materialize = bridge._materialize_tile
+    enumerate_windows = bridge._iter_tile_windows
+
+    def tracked_windows(*args):
+        for window in enumerate_windows(*args):
+            enumerated.append(current_thread().name)
+            yield window
+
+    def tracked_materialize(source, window, cfg):
+        materialized.append(current_thread().name)
+        tile = materialize(source, window, cfg)
+        reference = next(t for t in expected if t.name == tile.name)
+        assert tile.window == reference.window
+        np.testing.assert_array_equal(tile.image, reference.image)
+        assert tile.image.flags.c_contiguous
+        assert not np.shares_memory(tile.image, source)
+        return tile
+
+    for name in ("imencode", "imdecode"):
+        function = getattr(cv2, name)
+
+        def tracked_codec(*args, _function=function, _name=name, **kwargs):
+            codecs.append((_name, current_thread().name))
+            return _function(*args, **kwargs)
+
+        monkeypatch.setattr(cv2, name, tracked_codec)
+    monkeypatch.setattr(bridge, "_iter_tile_windows", tracked_windows)
+    monkeypatch.setattr(bridge, "_materialize_tile", tracked_materialize)
+
+    class Engine:
+        postprocessor = object()
+
+        def preprocess_with_metadata(self, rgb):
+            return rgb.astype(np.float32), {"ratio_pad": ((1.0, 1.0), (0, 0))}
+
+        def __call__(self, values):
+            inferred.append(current_thread().name)
+            return values
+
+        def postprocess(self, raw, *, multi_label):
+            assert multi_label is True
+            decoded.append(current_thread().name)
+            return SimpleNamespace()
+
+    def formatted(results, shape, shapes, pads, ids, processor):
+        return [
+            {"image_id": key, "rbox": [2, 3, 1, 1, 0], "score": 0.9, "category_id": 0}
+            for key in ids
+        ]
+
+    monkeypatch.setattr(legacy, "format_dota_results", formatted)
+    output = predict_engine_tiles(
+        Engine(), iter([("P", image.view(TrackedImage))]), batch_size=2, config=config
+    )["P"]
+    assert len(copies) == len(materialized) == len(expected)
+    assert all(name.startswith("mblt-vision-prepare") for name in copies + materialized)
+    assert len(codecs) == (2 * len(expected) if jpeg_roundtrip else 0)
+    assert all(name.startswith("mblt-vision-prepare") for _, name in codecs)
+    assert all(name.startswith("mblt-vision-decode") for name in decoded)
+    assert set(inferred) == set(enumerated) == {current_thread().name}
+    np.testing.assert_array_equal(image, original)
+    reference = merge_tile_predictions(
+        [(tile, torch.tensor([[2, 3, 1, 1, 0, 0.9, 0]])) for tile in expected]
+    )
+    torch.testing.assert_close(output, reference)

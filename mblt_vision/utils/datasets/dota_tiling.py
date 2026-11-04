@@ -50,6 +50,7 @@ def get_eval_protocol(
         if type(value) is not int or value <= 0:
             raise ValueError(f"DOTA tiling requires a positive integer {name}")
     merge = protocol["merge"]
+    _validate_merge_max_candidates(merge.get("max_candidates"))
     if merge.get("method") != "rotated_probiou_fastnms":
         raise ValueError("DOTA tiled merge requires rotated_probiou_fastnms")
     if (
@@ -71,6 +72,13 @@ def get_eval_protocol(
         )
     validate_preprocessing(inference.get("preprocessing"))
     return protocol
+
+
+def _validate_merge_max_candidates(value: Any) -> int | None:
+    """Validate an opt-in merge budget; None retains official uncapped merging."""
+    if value is not None and (type(value) is not int or value <= 0):
+        raise ValueError("DOTA merge max_candidates must be null or a positive integer")
+    return value
 
 
 def validate_preprocessing(preprocessing: str) -> str:
@@ -252,15 +260,22 @@ class Tile:
     image: np.ndarray
 
 
-def iter_tiles(
-    image_bgr: np.ndarray, image_id: str, config: TiledConfig = _DEFAULT_CONFIG
-) -> Iterator[Tile]:
-    """Yield native BGR crops, optionally JPEG round-tripped like split_test.
+@dataclass(frozen=True)
+class _TileWindow:
+    """Lightweight native bounds; no source image, crop copy or JPEG work."""
 
-    Input must be non-empty uint8 HWC BGR with three channels. It is never mutated
-    or retained by the yielded owned images. EXIF rotation is the caller's job;
-    dimensions must describe the same decoded raster that is being sliced.
-    """
+    image_id: str
+    name: str
+    rate: float
+    crop_size: int
+    gap: int
+    window: tuple[int, int, int, int]
+
+
+def _iter_tile_windows(
+    image_bgr: np.ndarray, image_id: str, config: TiledConfig = _DEFAULT_CONFIG
+) -> Iterator[_TileWindow]:
+    """Validate input/budgets and enumerate metadata before materializing crops."""
     _image_id(image_id)
     if not isinstance(image_bgr, np.ndarray) or image_bgr.dtype != np.uint8:
         raise TypeError("image_bgr must be a uint8 numpy array")
@@ -274,23 +289,51 @@ def iter_tiles(
         x1, y1, x2, y2 = (int(c) for c in coords)
         size = x2 - x1
         rate, gap = pairs[size]
-        patch = image_bgr[y1:y2, x1:x2].copy(order="C")
-        if config.jpeg_roundtrip:
-            ok, encoded = cv2.imencode(".jpg", patch)
-            if not ok:
-                raise RuntimeError("OpenCV failed to encode native DOTA crop")
-            patch = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-            if patch is None:
-                raise RuntimeError("OpenCV failed to decode native DOTA crop")
-        yield Tile(
+        yield _TileWindow(
             image_id,
             f"{image_id}__{size}__{x1}___{y1}",
             rate,
             size,
             gap,
             (x1, y1, x2, y2),
-            patch,
         )
+
+
+def _materialize_tile(
+    image_bgr: np.ndarray, window: _TileWindow, config: TiledConfig
+) -> Tile:
+    """Copy one validated window and optionally JPEG round-trip its owned pixels."""
+    x1, y1, x2, y2 = window.window
+    patch = image_bgr[y1:y2, x1:x2].copy(order="C")
+    if config.jpeg_roundtrip:
+        ok, encoded = cv2.imencode(".jpg", patch)
+        if not ok:
+            raise RuntimeError("OpenCV failed to encode native DOTA crop")
+        patch = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        if patch is None:
+            raise RuntimeError("OpenCV failed to decode native DOTA crop")
+    return Tile(
+        window.image_id,
+        window.name,
+        window.rate,
+        window.crop_size,
+        window.gap,
+        window.window,
+        patch,
+    )
+
+
+def iter_tiles(
+    image_bgr: np.ndarray, image_id: str, config: TiledConfig = _DEFAULT_CONFIG
+) -> Iterator[Tile]:
+    """Yield native BGR crops, optionally JPEG round-tripped like split_test.
+
+    Input must be non-empty uint8 HWC BGR with three channels. It is never mutated
+    or retained by the yielded owned images. EXIF rotation is the caller's job;
+    dimensions must describe the same decoded raster that is being sliced.
+    """
+    for window in _iter_tile_windows(image_bgr, image_id, config):
+        yield _materialize_tile(image_bgr, window, config)
 
 
 class _ValidationGeometry(LetterBoxGeometry):

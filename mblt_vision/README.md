@@ -96,7 +96,8 @@ conversion. It adds only dataset-native `iter_tiles` and `merge_tiles` orchestra
 and forwards the dataset's per-tile cap to inherited NMS. Normal postprocess calls
 still return the established tile/network-space result contract; raw engine tensor
 inference does not silently become image tiling. Prediction and evaluation bridge
-through `utils/evaluation/eval_dota_tiled.py`, using that same model pre/post.
+through `utils/evaluation/eval_dota_tiled.py`, using that same model pre/post
+with explicit `multi_label=True` so above-threshold secondary classes are retained.
 Explicit model thresholds and CLI threshold overrides remain supported. With no
 `--conf-thres`, tiled DOTA prediction uses the dataset/model default of 0.01;
 non-tiled prediction (including `--legacy-single-image`) retains 0.25.
@@ -105,8 +106,12 @@ Windows, crops, `TiledConfig`, `Tile`, `prepare_tile`, version constants and
 `get_eval_protocol` live in `utils/datasets/dota_tiling.py`; restore/merge,
 Task1 export and optional reference adapter live in `utils/postprocess/tiled_obb.py`.
 There is no standalone public OBB engine. Completed images are merged before
-retaining the next image's candidate rows; bounded preparation and decoding pools
-surround inference on the consuming thread. Scoring stays in `utils/evaluation`.
+retaining the next image's candidate rows. The consuming thread only enumerates
+lightweight windows; owned crop copying, optional JPEG encode/decode and model
+preprocessing run on the bounded preparation pool. A separate bounded decoding pool
+surrounds inference on the consuming thread. Source arrays must remain unmodified
+while their preparation is in flight. Public `iter_tiles` remains a synchronous
+iterator of owned native crops. Scoring stays in `utils/evaluation`.
 
 ### Pinned reference
 
@@ -200,6 +205,29 @@ recheck actual dimensions. `validate_image_budget((height,width), config)` retur
 the candidate count; `validate_image_source(path, config)` checks header budgets
 and EXIF, returning raster `(height,width)` without loading pixels. Trusted larger
 inputs require explicitly higher config values (CLI `--max-pixels`/`--max-tiles`).
+Cross-tile merge defaults to dataset `merge.max_candidates: null`: official
+`models/yolo/obb/val.py` lines 271–280 passes **all merged boxes** directly to
+Fast-NMS. Upstream `max_nms=30000` and `max_det=300` apply to **per-tile NMS**,
+not merged candidates. The accuracy-oriented default therefore has no merge cap;
+Fast-NMS work remains quadratic even though its intermediate matrices are bounded.
+**Do not expose this uncapped benchmark path directly to untrusted uploads.**
+
+Services can opt into a fail-closed positive-integer merge budget, for example:
+
+```python
+from mblt_vision.utils.datasets.dota_tiling import get_eval_protocol
+
+service_protocol = get_eval_protocol()  # owned mapping, no shared mutation
+service_protocol["merge"]["max_candidates"] = 30000
+rows = predict_tiled(image, "P0001", predictor, protocol=service_protocol)
+```
+
+The guard counts all candidates across tiles before merge NMS; exceeding it raises
+`ValueError` and aborts, never silently truncates/top-k filters or returns partial
+predictions. Accepted inputs preserve numerical merge behavior. The same mapping
+can be passed to `merge_tile_predictions(..., service_protocol)`. A positive budget
+is a service policy, not an upstream accuracy cap or a promise of cheap execution;
+choose it with workload measurements and enforce external limits as well.
 These are resource guards, not an upload sandbox: services still need process,
 time, memory and request limits, including limits on concurrent images.
 

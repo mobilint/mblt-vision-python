@@ -22,6 +22,7 @@ from ..datasets.dota_tiling import (
     Tile,
     TiledConfig,
     _image_id,
+    _validate_merge_max_candidates,
     get_eval_protocol,
     iter_tiles,
     prepare_tile,
@@ -74,14 +75,30 @@ def merge_tile_predictions(
     offsets, then eval_json's dynamic class offsets and Fast-NMS at 0.3. There is
     no rate division, polygon clipping, additional conf filter or merged max_det.
     Stable score ties follow this package's device-independent selection policy.
+    Over-budget candidate streams raise before NMS rather than silently truncating;
+    explicit trusted-input overrides belong to protocol.merge.max_candidates.
     """
     merge = (get_eval_protocol() if protocol is None else protocol)["merge"]
+    max_candidates = _validate_merge_max_candidates(merge.get("max_candidates"))
     restored = []
     image_id = None
+    candidate_count = 0
     for tile, rows in predictions:
         if image_id is not None and image_id != tile.image_id:
             raise ValueError("merge_tile_predictions accepts only one original image")
         image_id = tile.image_id
+        # Count before copying/rounding this tile and before quadratic merge work.
+        # Never top-k/drop rows: rejection leaves all accepted numerical semantics intact.
+        if not isinstance(rows, (np.ndarray, torch.Tensor)):
+            raise TypeError("predictor must return a numpy array or torch tensor")
+        if rows.ndim != 2 or rows.shape[1] != 7:
+            raise ValueError("Expected Nx7 [cx,cy,w,h,angle,score,class0] rows")
+        candidate_count += len(rows)
+        if max_candidates is not None and candidate_count > max_candidates:
+            raise ValueError(
+                f"DOTA merge has {candidate_count} candidates, exceeding "
+                f"max_candidates={max_candidates}; raise only for trusted inputs"
+            )
         local = _rows(rows)
         # Python round, not torch.round: JSON serialisation is part of the reference.
         values = [
@@ -115,10 +132,13 @@ def predict_tiled(
     image_id: str,
     predictor: TilePredictor,
     config: TiledConfig = _DEFAULT_CONFIG,
+    *,
+    protocol: Mapping[str, Any] | None = None,
 ) -> torch.Tensor:
-    """Stream native crops through a backend callback, restore and merge one image."""
+    """Stream crops and merge one image, optionally using a trusted protocol override."""
     return merge_tile_predictions(
-        (tile, predictor(tile)) for tile in iter_tiles(image_bgr, image_id, config)
+        ((tile, predictor(tile)) for tile in iter_tiles(image_bgr, image_id, config)),
+        protocol,
     )
 
 

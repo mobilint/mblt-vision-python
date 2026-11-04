@@ -195,7 +195,8 @@ def test_validation_loader_ceil_then_letterbox_not_direct_round(
             )
             return None
 
-        def postprocess(self, _raw):
+        def postprocess(self, _raw, *, multi_label):
+            assert multi_label is True
             return SimpleNamespace(output=[network[:, [0, 1, 2, 3, 5, 6, 4]]])
 
     rows = predict_engine_tiles(

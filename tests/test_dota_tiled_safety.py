@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 from PIL import Image
 
 from mblt_vision.utils.datasets import dota_tiling
@@ -125,3 +126,119 @@ def test_prediction_uses_selected_processor_budget(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="max_pixels=3"):
         tiled.predict_dota_image(model, source)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "30000"])
+def test_merge_budget_strict_in_dataset_and_explicit_override(monkeypatch, value):
+    from mblt_vision.utils.postprocess.tiled_obb import merge_tile_predictions
+
+    protocol = dota_tiling.get_eval_protocol()
+    protocol["merge"]["max_candidates"] = value
+    with pytest.raises(ValueError, match="max_candidates"):
+        merge_tile_predictions([], protocol)
+    monkeypatch.setattr(
+        dota_tiling, "get_dataset_config", lambda _dataset: {"eval_protocol": protocol}
+    )
+    with pytest.raises(ValueError, match="max_candidates"):
+        dota_tiling.get_eval_protocol()
+
+
+def test_opt_in_merge_budget_rejects_maximum_tile_stream_before_nms(monkeypatch):
+    from mblt_vision.utils.datasets.dota_tiling import Tile
+    from mblt_vision.utils.postprocess import tiled_obb
+
+    protocol = dota_tiling.get_eval_protocol()
+    assert protocol["merge"]["max_candidates"] is None
+    protocol["merge"]["max_candidates"] = 30000
+    seen = []
+    # Sparse non-overlapping outputs would avoid suppression and force worst-case
+    # quadratic work at 768 tiles * 300 rows. Allocate only one reusable tile.
+    rows = torch.zeros((300, 7))
+    rows[:, 0] = torch.arange(300) * 100
+    rows[:, 1:4] = torch.tensor([100, 1, 1])
+    rows[:, 5] = 0.9
+    tile = Tile(
+        "P",
+        "P__1024__0___0",
+        1,
+        1024,
+        500,
+        (0, 0, 1024, 1024),
+        np.empty((0, 0, 3), np.uint8),
+    )
+
+    def predictions():
+        for index in range(TiledConfig().max_tiles):
+            seen.append(index)
+            yield tile, rows
+
+    monkeypatch.setattr(
+        tiled_obb, "rotated_nms", lambda *_args: pytest.fail("over-budget NMS ran")
+    )
+    with pytest.raises(ValueError, match="30300 candidates.*max_candidates=30000"):
+        tiled_obb.merge_tile_predictions(predictions(), protocol)
+    assert len(seen) == 101  # Abort the stream at the first over-budget tile.
+
+
+def test_official_default_uncapped_merge_passes_all_rows_to_nms(monkeypatch):
+    from mblt_vision.utils.datasets.dota_tiling import Tile
+    from mblt_vision.utils.postprocess import tiled_obb
+
+    protocol = dota_tiling.get_eval_protocol()
+    assert protocol["merge"]["max_candidates"] is None
+    rows = torch.zeros((30300, 7))
+    rows[:, :4] = torch.tensor([2, 3, 1, 1])
+    rows[:, 5] = 0.9
+    tile = Tile(
+        "P", "P__8__0___0", 1, 8, 0, (0, 0, 8, 8), np.empty((0, 0, 3), np.uint8)
+    )
+    calls = []
+
+    def nms(boxes, scores, iou):
+        # Do not execute quadratic comparisons for this default-policy proof.
+        calls.append(len(boxes))
+        return torch.arange(len(boxes))
+
+    monkeypatch.setattr(tiled_obb, "rotated_nms", nms)
+    torch.testing.assert_close(tiled_obb.merge_tile_predictions([(tile, rows)]), rows)
+    assert calls == [30300]
+
+
+def test_merge_budget_boundary_and_trusted_override_keep_every_row(monkeypatch):
+    from mblt_vision.utils.postprocess import tiled_obb
+
+    image = np.zeros((8, 8, 3), np.uint8)
+    config = TiledConfig(crop_size=8, gap=0, rates=(1.0,), jpeg_roundtrip=False)
+    tile = next(iter_tiles(image, "P", config))
+    rows = torch.tensor([[2, 3, 1, 1, 0, 0.9, 0], [6, 7, 1, 1, 0, 0.8, 1]])
+    protocol = dota_tiling.get_eval_protocol()
+    calls = []
+
+    def nms(boxes, scores, iou):
+        calls.append(len(boxes))
+        return torch.arange(len(boxes))
+
+    monkeypatch.setattr(tiled_obb, "rotated_nms", nms)
+    protocol["merge"]["max_candidates"] = 1
+    with pytest.raises(ValueError, match="max_candidates=1"):
+        tiled_obb.predict_tiled(
+            image, "P", lambda _tile: rows, config, protocol=protocol
+        )
+    assert calls == []
+    protocol["merge"]["max_candidates"] = 2
+    torch.testing.assert_close(
+        tiled_obb.merge_tile_predictions([(tile, rows)], protocol), rows
+    )
+    torch.testing.assert_close(
+        tiled_obb.predict_tiled(
+            image, "P", lambda _tile: rows, config, protocol=protocol
+        ),
+        rows,
+    )
+    # An explicit higher trusted budget admits the complete input; no top-k.
+    protocol["merge"]["max_candidates"] = 3
+    extra = torch.cat((rows, rows[:1]))
+    torch.testing.assert_close(
+        tiled_obb.merge_tile_predictions([(tile, extra)], protocol), extra
+    )
+    assert calls == [2, 2, 3]

@@ -23,6 +23,8 @@ eval_protocol:
     iou_thres: 0.7
     max_det: 300
   merge:
+    # Official validation merges all rows; services may opt into a fail-closed cap.
+    max_candidates: null
     method: rotated_probiou_fastnms
     iou_thres: 0.3
     classwise: true

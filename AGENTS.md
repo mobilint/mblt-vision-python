@@ -195,7 +195,15 @@ The current ownership boundary is deliberate:
   count all pre-filter windows with integer arithmetic before arrays/JPEG/inference,
   and check source headers before OpenCV decode. Explicit higher trusted-input
   budgets are allowed; keep application process/time/memory limits separately.
-  Merge/release candidates per completed image; run model preparation on its pool.
+  Official merged Fast-NMS has no cap: merge.max_candidates defaults to null,
+  unlike upstream's per-tile max_nms. Services must opt into a positive-integer
+  guard (e.g. 30000) plus external concurrency/time/memory limits; fail closed on
+  excess before quadratic NMS, never truncate/top-k. Pass an owned protocol mapping
+  through predict_tiled's optional keyword-only protocol argument; accepted results
+  stay numerical-identical. Do not describe the uncapped benchmark as upload-safe.
+  Explicitly pass multi_label=True through inherited tiled postprocessing.
+  Merge/release candidates per completed image; enumerate lightweight windows on
+  the caller, copy/JPEG crops and prepare models on the bounded preparation pool.
   Scoring stays in evaluation; finite degenerate predictions have IoU zero while
   ground truth remains strict. Label benchmark protocols/primary scores explicitly.
   See the DOTA section of `mblt_vision/README.md` and thin `benchmark/dota_tiled.py`.

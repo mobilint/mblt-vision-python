@@ -80,7 +80,8 @@ def test_engine_tile_color_and_geometry_seam(monkeypatch):
         def __call__(self, values):
             return values
 
-        def postprocess(self, raw):
+        def postprocess(self, raw, *, multi_label):
+            assert multi_label is True
             return object()
 
     def formatted(results, shape, shapes, pads, ids, processor):
