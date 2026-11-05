@@ -1022,3 +1022,46 @@ Offline tests vendor the inspected ops functions at
 distance/CMC/mAP equality; synthetic RGB preprocessing requires byte equality
 (`atol=0`) against the ops adapter for explicit source mean/std profiles. These
 are protocol tests, not measured model accuracy claims.
+
+## Face verification utilities
+
+`mblt_vision.face_recognition` exports `FaceRecognitionPost(EmbeddingPost)`,
+`LFWDataset`, `AgeDB30Dataset`, `CFPFPDataset`, and their `LFWEvaluator`,
+`AgeDB30Evaluator`, `CFPEvaluator` subclasses of `VerificationEvaluator`.
+The processing-only `bases/face_recognition.yaml` profile is 112x112 PIL bilinear,
+explicit float32 0.5 mean/std, 512 dimensions, row-wise L2 normalization. Engine
+postprocessing stores dense vectors in `Results.embeddings` and `output`. Model
+wrappers/artifact YAMLs are a separate stage; CLI/benchmark routing is unchanged.
+
+Pair loaders read prepared `pairs.csv` columns `pair_id,fold_id,is_same,image_a,image_b`,
+retain pair order and official one-based fold labels, and enumerate unique image
+basenames in sorted order. LFW uses `aligned/`; AgeDB-30 and CFP-FP use `images/`.
+They require existing 112x112 crops and never detect or realign faces. Source pair
+counts are checked by default; caller-owned subsets explicitly opt out with
+`validate_counts=False`. Default cache roots end in `<dataset>/eval`.
+`dataset_ready(root, "face_recognition", dataset)` additionally requires all ten
+folds and decodable crops; its default dataset is LFW.
+
+```python
+from mblt_vision.face_recognition import LFWDataset, LFWEvaluator
+
+data = LFWDataset("/path/to/lfw/eval")
+# embeddings: one row per data.samples, from your inference callback.
+# result = LFWEvaluator().evaluate(embeddings, data.samples, data.pairs)
+# print(result.as_dict())
+```
+
+Ops at `ec537764e36ca10da963fcb7afab157ea60ca022` owns the protocol: one
+normalized embedding per crop, **no flip fusion**, float64 cosine scores, threshold
+grid `linspace(-1,1,4001)`, inclusive `score >= threshold`, strictest threshold on
+training ties, leave-one-fold-out threshold fitting, mean accuracy and population
+standard deviation over folds. `extract_embeddings` shares the ordered bounded
+inference helper with retrieval. There is no implicit fusion in scoring.
+
+Offline tests compare exact cosine scores, fold accuracies, thresholds and aggregate
+metrics against a verbatim source snapshot over five synthetic seeds. Three RGB
+fixtures (including no-op resize) require preprocessing byte equality (`atol=0`).
+Dataset YAMLs record exact source paths/revision. CFP-FP specifically refers to
+the prepared cat-claws mirror: ops warns it was not checked against the original
+`cfp_fp.bin` and records a training-log discrepancy. This package preserves that
+provenance and makes no new accuracy claim.

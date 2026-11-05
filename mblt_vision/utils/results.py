@@ -148,7 +148,7 @@ class Results:
         self.mask = None
         self.depth = None
         self.semantic_mask = None
-        if self.task == "person_reid":
+        if self.task in {"person_reid", "face_recognition"}:
             if not isinstance(output, (np.ndarray, torch.Tensor)):
                 raise TypeError("Person ReID results require an embedding matrix")
             finite = (

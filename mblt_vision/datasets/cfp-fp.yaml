@@ -1,0 +1,36 @@
+name: cfp-fp
+path: ~/.mblt_model_zoo/datasets/cfp-fp
+tasks:
+- face_recognition
+val: eval
+image_directory: images
+pairs: 7000
+folds: 10
+aligned_size:
+- 112
+- 112
+source:
+  repository: https://git.mobilint.com/algorithm-team/testing/mblt-model-ops
+  revision: ec537764e36ca10da963fcb7afab157ea60ca022
+  config_path: datasets/cfp_fp/cfp_fp.yaml
+  name: cfp-fp
+  dataloader_path: datasets/cfp_fp/_private/dataloader.py
+  caveat: Prepared cat-claws mirror is not checked against original cfp_fp.bin; ops
+    records lower CFP-FP accuracy than training logs.
+eval_protocol:
+  id: cfp-fp-ten-fold-verification.v1
+evaluation:
+  split: eval/pairs.csv
+  protocol: cfp-fp-ten-fold-verification.v1
+  primary_metric: cfp_fp_accuracy
+  secondary_metrics:
+  - cfp_fp_accuracy_std
+  embedding_fusion: none; one normalized embedding per crop
+  implementation_reference:
+    path: datasets/cfp_fp/_private/evaluator.py
+    shared_paths:
+    - datasets/_shared/face_pairs.py
+    - datasets/_shared/face_verification.py
+    - models/face_recognition/_shared/evaluate.py
+    - models/_shared/embeddings.py
+    revision: ec537764e36ca10da963fcb7afab157ea60ca022

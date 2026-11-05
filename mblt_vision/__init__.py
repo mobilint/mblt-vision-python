@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from . import depth_estimation as depth_estimation
 from . import face_detection as face_detection
+from . import face_recognition as face_recognition
 from . import image_classification as image_classification
 from . import instance_segmentation as instance_segmentation
 from . import obb as obb
@@ -54,6 +55,7 @@ _PUBLIC_EXPORTS = [
     "obb",
     "pose_estimation",
     "person_reid",
+    "face_recognition",
     "semantic_segmentation",
 ] + sorted(_LEGACY_MODEL_EXPORTS)
 # Keep legacy compatibility exports synchronized with their task packages.

@@ -14,6 +14,7 @@ VISION_TASKS: tuple[str, ...] = (
     "pose_estimation",
     "face_detection",
     "person_reid",
+    "face_recognition",
 )
 
 

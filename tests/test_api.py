@@ -22,6 +22,7 @@ def test_public_discovery_exposes_all_supported_tasks() -> None:
         "pose_estimation",
         "face_detection",
         "person_reid",
+        "face_recognition",
     ]
     assert list_models("obb")["obb"]
 
