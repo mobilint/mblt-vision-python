@@ -112,7 +112,9 @@ def test_loader_metadata_and_source(tmp_path, dataset, loader):
     assert cfg["eval_protocol"]["id"] == cfg["evaluation"]["protocol"]
 
 
-@pytest.mark.parametrize("filename", ["bad.jpg", "1_c9_bad.jpg", "-1_c1_junk.jpg", "-2_c1_bad.jpg"])
+@pytest.mark.parametrize(
+    "filename", ["bad.jpg", "1_c9_bad.jpg", "-1_c1_junk.jpg", "-2_c1_bad.jpg"]
+)
 def test_duke_invalid_names(tmp_path, filename):
     (tmp_path / "query").mkdir()
     (tmp_path / "bounding_box_test").mkdir()

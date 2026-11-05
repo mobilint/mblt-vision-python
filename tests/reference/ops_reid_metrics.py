@@ -2,8 +2,11 @@
 ec537764e36ca10da963fcb7afab157ea60ca022 (mblt-model-ops).
 Snapshot permits ordinary offline differential tests without sibling repos.
 """
+
 import numpy as np
+
 MAX_RANK = 50
+
 
 def euclidean_distance(query: np.ndarray, gallery: np.ndarray) -> np.ndarray:
     """Squared euclidean distance, the reference ``euclidean_distance`` without the sqrt.
@@ -15,6 +18,7 @@ def euclidean_distance(query: np.ndarray, gallery: np.ndarray) -> np.ndarray:
     q2 = np.sum(query**2, axis=1, keepdims=True)
     g2 = np.sum(gallery**2, axis=1, keepdims=True).T
     return q2 + g2 - 2.0 * (query @ gallery.T)
+
 
 def evaluate(
     distmat: np.ndarray,

@@ -92,5 +92,7 @@ class FaceRecognitionPost(EmbeddingPost):
         super().__init__(pre_cfg, post_cfg)
         dataset = post_cfg.get("dataset")
         if not isinstance(dataset, str) or not dataset:
-            raise ValueError("Face recognition postprocessing requires post_cfg.dataset")
+            raise ValueError(
+                "Face recognition postprocessing requires post_cfg.dataset"
+            )
         self.dataset = get_dataset_config_for_task("face_recognition", dataset)["name"]

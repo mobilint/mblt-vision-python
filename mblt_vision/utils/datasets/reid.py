@@ -56,7 +56,9 @@ class ReIDDataset:
                     )
                 pid, camera = map(int, match.groups())
                 if pid < -1:
-                    raise ValueError(f"Unsupported negative person identity {pid}: {path}")
+                    raise ValueError(
+                        f"Unsupported negative person identity {pid}: {path}"
+                    )
                 if pid == -1:
                     if self.config["skip_junk"]:
                         continue
