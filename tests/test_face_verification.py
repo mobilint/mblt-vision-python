@@ -130,12 +130,12 @@ def test_readiness(tmp_path, monkeypatch, loader, name, folder):
 
     def tiny(task, dataset):
         cfg = original(task, dataset)
-        cfg["pairs"] = 10
+        cfg["pairs"] = 20
         return cfg
 
     monkeypatch.setattr(face_pairs, "get_dataset_config_for_task", tiny)
     assert not readiness.dataset_ready(tmp_path, "face_recognition", name)
-    rows = [(i, i, 1, "a.png", "b.png") for i in range(1, 11)]
+    rows = [(i, i // 2 + 1, i % 2, "a.png", "b.png") for i in range(20)]
     write_pairs(tmp_path, folder, rows)
     assert readiness.dataset_ready(tmp_path, "face_recognition", name)
     assert not readiness.dataset_ready(tmp_path, "face_recognition", "market1501")
@@ -154,13 +154,15 @@ def test_readiness_rejects_symlink_ancestors(
 
     def tiny(task, dataset):
         cfg = original(task, dataset)
-        cfg["pairs"] = 10
+        cfg["pairs"] = 20
         return cfg
 
     monkeypatch.setattr(face_pairs, "get_dataset_config_for_task", tiny)
     root = tmp_path / "cache"
     root.mkdir()
-    write_pairs(root, folder, [(i, i, 1, "a.png", "b.png") for i in range(1, 11)])
+    write_pairs(
+        root, folder, [(i, i // 2 + 1, i % 2, "a.png", "b.png") for i in range(20)]
+    )
     assert readiness.dataset_ready(root, "face_recognition", name)
     if component == "root":
         alias = tmp_path / "alias"
