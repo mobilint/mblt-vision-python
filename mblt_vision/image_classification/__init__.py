@@ -197,21 +197,35 @@ LeViT_128S = create_model_class("LeViT_128S", __name__)
 LeViT_192 = create_model_class("LeViT_192", __name__)
 LeViT_256 = create_model_class("LeViT_256", __name__)
 LeViT_384 = create_model_class("LeViT_384", __name__)
-ViT_RelPos_Medium_Patch16_RPN_224 = create_model_class("ViT_RelPos_Medium_Patch16_RPN_224", __name__)
-ViT_RelPos_Base_Patch32_Plus_RPN_256 = create_model_class("ViT_RelPos_Base_Patch32_Plus_RPN_256", __name__)
+ViT_RelPos_Medium_Patch16_RPN_224 = create_model_class(
+    "ViT_RelPos_Medium_Patch16_RPN_224", __name__
+)
+ViT_RelPos_Base_Patch32_Plus_RPN_256 = create_model_class(
+    "ViT_RelPos_Base_Patch32_Plus_RPN_256", __name__
+)
 ViT_Base_Patch16_RPN_224 = create_model_class("ViT_Base_Patch16_RPN_224", __name__)
 ViT_Base_Patch16_CLIP_224 = create_model_class("ViT_Base_Patch16_CLIP_224", __name__)
 ViT_Base_Patch32_CLIP_448 = create_model_class("ViT_Base_Patch32_CLIP_448", __name__)
 ViT_Medium_Patch16_GAP_256 = create_model_class("ViT_Medium_Patch16_GAP_256", __name__)
 ViT_Large_Patch14_CLIP_224 = create_model_class("ViT_Large_Patch14_CLIP_224", __name__)
 ViT_Base_Patch32_CLIP_224 = create_model_class("ViT_Base_Patch32_CLIP_224", __name__)
-ViT_RelPos_Small_Patch16_224 = create_model_class("ViT_RelPos_Small_Patch16_224", __name__)
+ViT_RelPos_Small_Patch16_224 = create_model_class(
+    "ViT_RelPos_Small_Patch16_224", __name__
+)
 ViT_Base_Patch32_CLIP_384 = create_model_class("ViT_Base_Patch32_CLIP_384", __name__)
-ViT_SRelPos_Medium_Patch16_224 = create_model_class("ViT_SRelPos_Medium_Patch16_224", __name__)
+ViT_SRelPos_Medium_Patch16_224 = create_model_class(
+    "ViT_SRelPos_Medium_Patch16_224", __name__
+)
 ViT_Huge_Patch14_CLIP_224 = create_model_class("ViT_Huge_Patch14_CLIP_224", __name__)
-ViT_RelPos_Base_Patch16_224 = create_model_class("ViT_RelPos_Base_Patch16_224", __name__)
-ViT_RelPos_Medium_Patch16_224 = create_model_class("ViT_RelPos_Medium_Patch16_224", __name__)
-ViT_SRelPos_Small_Patch16_224 = create_model_class("ViT_SRelPos_Small_Patch16_224", __name__)
+ViT_RelPos_Base_Patch16_224 = create_model_class(
+    "ViT_RelPos_Base_Patch16_224", __name__
+)
+ViT_RelPos_Medium_Patch16_224 = create_model_class(
+    "ViT_RelPos_Medium_Patch16_224", __name__
+)
+ViT_SRelPos_Small_Patch16_224 = create_model_class(
+    "ViT_SRelPos_Small_Patch16_224", __name__
+)
 AlexNet = create_model_class("AlexNet", __name__)
 CAFormer_B36 = create_model_class("CAFormer_B36", __name__)
 CAFormer_M36 = create_model_class("CAFormer_M36", __name__)

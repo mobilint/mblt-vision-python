@@ -1072,7 +1072,11 @@ def _reid_ready(root: Path, dataset: str) -> bool:
 
 def _face_ready(root: Path, dataset: str) -> bool:
     """Validate prepared aligned pairs and image decoding, never realign crops."""
-    loader = {"lfw": LFWDataset, "agedb-30": AgeDB30Dataset, "cfp-fp": CFPFPDataset}.get(dataset)
+    loader = {
+        "lfw": LFWDataset,
+        "agedb-30": AgeDB30Dataset,
+        "cfp-fp": CFPFPDataset,
+    }.get(dataset)
     if (
         loader is None
         or _path_has_symlink_component(root)

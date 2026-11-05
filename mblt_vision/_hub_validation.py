@@ -59,7 +59,9 @@ def check_hub_artifacts(
             "Hub verification requires nonempty repo_id and revision strings."
         )
     board = normalize_target_device(
-        files.get("target_device", "aries-rb") if target_device is None else target_device
+        files.get("target_device", "aries-rb")
+        if target_device is None
+        else target_device
     )
     paths = []
     for framework in dict.fromkeys(frameworks):
