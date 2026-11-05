@@ -24,3 +24,9 @@ OCCLUDED_DUKE:
   extends: person_reid.yaml#DEFAULT
   post_cfg:
     dataset: occluded-duke
+VIT:
+  extends: person_reid.yaml#DEFAULT
+  pre_cfg:
+    Normalize:
+      mean: [0.5, 0.5, 0.5]
+      std: [0.5, 0.5, 0.5]

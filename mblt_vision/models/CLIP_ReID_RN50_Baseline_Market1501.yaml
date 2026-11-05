@@ -1,0 +1,17 @@
+# Approval HF commit: not recorded; main retained by explicit project policy.
+DEFAULT:
+  extends: bases/person_reid.yaml#DEFAULT
+  file_cfg:
+    repo_id: mobilint/CLIP_ReID_RN50_Baseline_Market1501
+    filename: clip_reid_rn50_baseline_market1501.mxq
+    revision: main
+    onnx_local_artifact_only: true
+  post_cfg:
+    dataset: market1501
+    embedding_dim: 3072
+  source:
+    repository: https://git.mobilint.com/algorithm-team/testing/mblt-model-ops
+    revision: ec537764e36ca10da963fcb7afab157ea60ca022
+    distribution_path: models/person_reid/CLIP_ReID_RN50_Baseline_Market1501/distribution.yaml
+    pre_cfg_path: models/person_reid/CLIP_ReID_RN50_Baseline_Market1501/_source/predict_float.input.json
+    approved_hf_revision: not recorded

@@ -1065,3 +1065,26 @@ Dataset YAMLs record exact source paths/revision. CFP-FP specifically refers to
 the prepared cat-claws mirror: ops warns it was not checked against the original
 `cfp_fp.bin` and records a training-log discrepancy. This package preserves that
 provenance and makes no new accuracy claim.
+
+### Published ReID models
+
+The twelve published `CLIP_ReID_*` wrappers are available from
+`mblt_vision.person_reid`, lazy top-level imports, and `list_models("person_reid")`.
+They cover RN50 / ViT-B-16, baseline / fine-tuned, each for Market-1501, DukeMTMC-reID
+and Occluded-Duke. Every YAML inherits `bases/person_reid.yaml` and binds the
+matching retrieval dataset. RN50 uses 3072 dimensions and torch mean/std; ViT uses
+1280 dimensions and 0.5 mean/std. Both take 256x128 PIL bilinear crops and one
+image input, confirmed from ops distribution contracts and recorded preprocessing.
+
+HF metadata confirms one canonical `aries-rb/<model-lowercase>.mxq` per repository,
+with no published ONNX. These configurations retain `revision: main` by project
+policy; the approval HF commit is explicitly **not recorded**, while the ops source
+commit and exact source paths are included under `source`. Live metadata SHAs are
+audit diagnostics, not approval pins. `onnx_local_artifact_only: true` preserves
+automatic MXQ loading and requires trusted local ONNX for runtime.
+`compile_vision_model` does not yet support `person_reid`; this stage does not
+add a ReID compilation/calibration path.
+The guard is inherited from the PR31 dependency, not reimplemented here.
+
+ArcFace/CosFace eight-model publication is pending. Those models remain
+inventory-only: no guessed HF repository identity or downloadable YAML is shipped.

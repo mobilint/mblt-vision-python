@@ -228,7 +228,10 @@ The current ownership boundary is deliberate:
   any future model needing more than one Hub artifact, rather than duplicating Hub-resolution
   logic.
 
-- ReID utilities live in `mblt_vision.person_reid`; concrete published wrappers are separate.
+- ReID utilities and twelve published CLIP-ReID wrappers live in `mblt_vision.person_reid`.
+  Model YAMLs inherit the RN50/ViT processing base and explicitly bind their dataset/dimension.
+  Published ReID artifacts are MXQ-only; preserve the trusted-local ONNX runtime guard.
+  ReID compilation/calibration is not supported by compile_vision_model in this stage.
   Use `EmbeddingPost` for validated dense vectors and `PersonReIDPost` for dataset binding.
   Retrieval protocols and prepared loaders are pinned to ops source in dataset YAMLs; keep
   stable distance ties, camera exclusions, junk rules, and preprocessing numeric parity tested.

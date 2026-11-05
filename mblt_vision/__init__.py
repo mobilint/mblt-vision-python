@@ -31,12 +31,15 @@ _TASK_MODULES = (
     object_detection,
     obb,
     pose_estimation,
+    person_reid,
     semantic_segmentation,
 )
 
 _LEGACY_MODEL_EXPORTS: dict[str, object] = {}
 for _task_module in _TASK_MODULES:
-    for _export_name in getattr(_task_module, "__all__", ()):
+    for _export_name in getattr(
+        _task_module, "MODEL_EXPORTS", getattr(_task_module, "__all__", ())
+    ):
         if _export_name in _LEGACY_MODEL_EXPORTS:
             raise RuntimeError(
                 f"Duplicate vision export detected for '{_export_name}'."
